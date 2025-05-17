@@ -1,0 +1,40 @@
+bot:
+  command_prefix: "!"
+  description: "Multi-platform music bot"
+  activity: "music from everywhere"
+
+platforms:
+  youtube:
+    enabled: true
+    api_key: ${YOUTUBE_API_KEY}
+    max_results: 10
+
+  peertube:
+    enabled: true
+    instances:
+      - https://framatube.org
+      - https://video.ploud.fr
+      - https://peertube.social
+    max_results_per_instance: 5
+
+  odysee:
+    enabled: ${ODYSEE_ENABLED}
+    api_url: https://api.lbry.tv/api/v1/proxy
+    search_url: https://lighthouse.lbry.com/search
+
+  rumble:
+    enabled: ${RUMBLE_ENABLED}
+    base_url: https://rumble.com
+    api_base: https://rumble.com/api/v0
+
+performance:
+  search_timeout: ${SEARCH_TIMEOUT}
+  stream_timeout: ${STREAM_TIMEOUT}
+  max_queue_size: ${MAX_QUEUE_SIZE}
+  cache_ttl: 3600
+
+features:
+  auto_disconnect: true
+  auto_disconnect_timeout: 300
+  save_queue: true
+  announce_songs: true

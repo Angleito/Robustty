@@ -1,0 +1,76 @@
+version: '3.8'
+
+services:
+  # Main Discord bot
+  bot:
+    build:
+      context: .
+      dockerfile: docker/bot/Dockerfile
+    container_name: robustty-bot
+    restart: unless-stopped
+    environment:
+      - DISCORD_TOKEN=${DISCORD_TOKEN}
+      - YOUTUBE_API_KEY=${YOUTUBE_API_KEY}
+      - LOG_LEVEL=${LOG_LEVEL}
+    volumes:
+      - ./config:/app/config:ro
+      - ./logs:/app/logs
+      - ./data:/app/data
+      - cookies:/app/cookies:ro
+    depends_on:
+      - redis
+      - cookie-extractor
+      - stream-service
+    networks:
+      - bot-network
+
+  # Cookie extraction service
+  cookie-extractor:
+    build:
+      context: .
+      dockerfile: docker/cookie-extractor/Dockerfile
+    container_name: robustty-cookies
+    restart: unless-stopped
+    volumes:
+      - cookies:/app/cookies
+      - ${BROWSER_PROFILE_PATH}:/browser/profile:ro
+    environment:
+      - REFRESH_INTERVAL=${COOKIE_REFRESH_INTERVAL}
+      - DISPLAY=:99
+    networks:
+      - bot-network
+
+  # Stream extraction service
+  stream-service:
+    build:
+      context: .
+      dockerfile: docker/stream-service/Dockerfile
+    container_name: robustty-stream
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    volumes:
+      - cookies:/app/cookies:ro
+      - ./data/cache:/app/cache
+    environment:
+      - FLASK_ENV=production
+    networks:
+      - bot-network
+
+  # Redis for caching
+  redis:
+    image: redis:7-alpine
+    container_name: robustty-redis
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+    networks:
+      - bot-network
+
+volumes:
+  cookies:
+  redis-data:
+
+networks:
+  bot-network:
+    driver: bridge

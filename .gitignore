@@ -1,0 +1,223 @@
+# Environment files
+.env
+.env.local
+.env.production
+.env.*.local
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+venv/
+env/
+ENV/
+.venv/
+pip-wheel-metadata/
+share/python-wheels/
+*.pyd
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
+
+# Testing
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.tox/
+
+# Logs
+logs/
+*.log
+*.log.*
+log/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Bot data
+data/
+cookies/
+cache/
+queues/
+*.db
+*.sqlite
+*.sqlite3
+*.pkl
+*.pickle
+
+# Backups
+backups/
+*.backup
+*.bak
+*.swp
+*.swo
+*~
+
+# IDE and editors
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+*.iml
+.project
+.classpath
+.c9/
+*.launch
+.settings/
+*.code-workspace
+.vim/
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# Docker
+.dockerignore
+docker-compose.override.yml
+docker-compose.*.yml
+
+# Temporary files
+*.tmp
+*.temp
+.temp/
+.tmp/
+tmp/
+temp/
+.cache/
+*.pid
+*.seed
+*.pid.lock
+
+# Security
+*.pem
+*.key
+*.cert
+*.crt
+*.pfx
+.env.*
+!.env.example
+secrets/
+credentials/
+
+# Media files (if not needed in repo)
+*.mp3
+*.mp4
+*.wav
+*.flac
+*.ogg
+*.m4a
+*.webm
+
+# Archives
+*.zip
+*.tar
+*.gz
+*.rar
+*.7z
+
+# Documentation build
+docs/_build/
+docs/.doctrees/
+site/
+
+# Virtual environments
+bin/
+include/
+lib/
+lib64/
+share/
+pyvenv.cfg
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb
+
+# pyenv
+.python-version
+
+# pipenv
+Pipfile.lock
+
+# celery beat schedule file
+celerybeat-schedule
+celerybeat.pid
+
+# SageMath parsed files
+*.sage.py
+
+# Spyder project settings
+.spyderproject
+.spyproject
+
+# Rope project settings
+.ropeproject
+
+# mkdocs documentation
+/site
+
+# Flask/Django stuff
+instance/
+.webassets-cache
+local_settings.py
+db.sqlite3
+.scrapy
+
+# Sphinx documentation
+docs/_build/
+target/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# IPython
+profile_default/
+ipython_config.py
+
+# pyenv
+.python-version
+
+# Others
+.env.backup
+nohup.out
+.gitattributes
+yarn.lock
+package-lock.json
+node_modules/
+
+# Redis
+dump.rdb
+
+# Custom project specific
+robustty-data/
+downloads/
+stream-cache/
