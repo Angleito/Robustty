@@ -11,7 +11,11 @@ class AudioPlayer:
     
     def __init__(self, config: Dict):
         self.config = config
-        self.queue = deque(maxlen=config.get('max_queue_size', 100))
+        max_queue_size = config.get('max_queue_size', 100)
+        # Convert to int if it's a string from environment
+        if isinstance(max_queue_size, str):
+            max_queue_size = int(max_queue_size)
+        self.queue = deque(maxlen=max_queue_size)
         self.current: Optional[Dict] = None
         self.voice_client: Optional[discord.VoiceClient] = None
         self._volume = 0.5  # Default 50% volume

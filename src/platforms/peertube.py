@@ -61,8 +61,11 @@ class PeerTubePlatform(VideoPlatform):
             }
             
             async with self.session.get(url, params=params) as response:
-                if response.status != 200:
-                    logger.error(f"PeerTube search failed: {response.status}")
+                if response.status == 403:
+                    logger.warning(f"PeerTube instance {instance_url} returned 403 Forbidden - may require authentication")
+                    return []
+                elif response.status != 200:
+                    logger.error(f"PeerTube search failed for {instance_url}: {response.status}")
                     return []
                 
                 data = await response.json()
