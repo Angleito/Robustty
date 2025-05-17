@@ -40,9 +40,54 @@ ODYSEE_ENABLED=true
 #### Rumble
 ```env
 RUMBLE_ENABLED=true
+RUMBLE_API_TOKEN=your_apify_token_here
 ```
 
 - `RUMBLE_ENABLED`: Enable/disable Rumble platform
+- `RUMBLE_API_TOKEN`: Apify API token for Rumble data extraction
+
+##### Obtaining a Rumble API Token
+
+Rumble support requires an Apify API token for data extraction, as Rumble doesn't provide a public API.
+
+1. **Create an Apify Account**
+   - Visit [Apify](https://apify.com/) and create a free account
+   - Free tier includes 1,000 monthly credits
+
+2. **Get Your API Token**
+   - Login to your Apify console
+   - Navigate to Settings → Integrations
+   - Copy your Personal API token
+
+3. **Find the Rumble Actor**
+   - Search for "Rumble" in the Apify Store
+   - Use the official Rumble Scraper actor by Apify
+   - Note the actor costs ~0.1 credits per search
+
+4. **Configure the Token**
+   - Add the token to your `.env` file:
+   ```env
+   RUMBLE_API_TOKEN=your_token_here
+   ```
+
+##### Rumble Platform Configuration
+
+In `config/config.yaml`:
+
+```yaml
+platforms:
+  rumble:
+    enabled: true
+    api_token: ${RUMBLE_API_TOKEN}
+    max_results: 10
+    actor_id: "apify/rumble-scraper"
+    timeout: 30
+```
+
+Configuration options:
+- `actor_id`: Apify actor to use (default: apify/rumble-scraper)
+- `max_results`: Maximum search results (default: 10)
+- `timeout`: Request timeout in seconds (default: 30)
 
 ### Cookie Extraction
 

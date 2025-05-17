@@ -1,0 +1,19 @@
+FROM python:3.11-slim
+
+# Create app directory
+WORKDIR /app
+
+# Install minimal Python packages
+RUN pip install --no-cache-dir requests pyyaml
+
+# Copy extraction script
+COPY src/extractors/ ./extractors/
+
+# Create cookie directory
+RUN mkdir -p /app/cookies
+
+# Create a manual cookie template
+RUN echo '[]' > /app/cookies/manual_cookies.json
+
+# Run the cookie extraction service
+CMD ["python", "extractors/cookie_extractor.py"]

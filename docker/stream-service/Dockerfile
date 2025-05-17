@@ -16,8 +16,9 @@ RUN pip install --no-cache-dir \
     redis \
     gunicorn
 
-# Copy stream service
+# Copy stream service and extractors
 COPY src/services/stream_service.py ./
+COPY src/extractors ./extractors
 
 # Create cache directory
 RUN mkdir -p /app/cache /app/cookies

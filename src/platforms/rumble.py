@@ -18,6 +18,7 @@ from .errors import (
     from_http_status
 )
 from ..extractors.rumble_extractor import RumbleExtractor
+from ..services.metrics_collector import get_metrics_collector
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +42,9 @@ class RumblePlatform(VideoPlatform):
         
         # Initialize the Rumble extractor
         self.extractor: Optional[RumbleExtractor] = None
+        
+        # Initialize metrics collector
+        self.metrics = get_metrics_collector()
 
     async def initialize(self):
         """Initialize Rumble API client"""
@@ -66,8 +70,10 @@ class RumblePlatform(VideoPlatform):
         try:
             logger.info(f"Searching Rumble for: {query}")
             
-            # Call the extractor's search method
-            search_results = await self.extractor.search_videos(query, max_results)
+            # Use metrics timer context manager
+            with self.metrics.api_call_timer("search"):
+                # Call the extractor's search method
+                search_results = await self.extractor.search_videos(query, max_results)
             
             # Convert the results to our expected format
             results: List[Dict[str, Any]] = []
@@ -89,13 +95,14 @@ class RumblePlatform(VideoPlatform):
         except PlatformError:
             # Re-raise platform errors as-is
             raise
+        except PlatformRateLimitError as e:
+            self.metrics.record_rate_limit()
+            raise
         except Exception as e:
             logger.error(f"Rumble search error: {e}")
             
             # Try to handle specific error types
-            if isinstance(e, PlatformRateLimitError):
-                raise e
-            elif isinstance(e, PlatformAuthenticationError):
+            if isinstance(e, PlatformAuthenticationError):
                 raise e
             else:
                 # Wrap non-platform errors
@@ -120,8 +127,10 @@ class RumblePlatform(VideoPlatform):
             # Construct the video URL from the ID
             video_url = f"https://rumble.com/{video_id}"
             
-            # Call the extractor's metadata method
-            metadata = await self.extractor.get_video_metadata(video_url)
+            # Use metrics timer context manager
+            with self.metrics.api_call_timer("metadata"):
+                # Call the extractor's metadata method
+                metadata = await self.extractor.get_video_metadata(video_url)
             
             # Convert the metadata to our expected format
             return {
@@ -141,13 +150,14 @@ class RumblePlatform(VideoPlatform):
         except PlatformError:
             # Re-raise platform errors as-is
             raise
+        except PlatformRateLimitError as e:
+            self.metrics.record_rate_limit()
+            raise
         except Exception as e:
             logger.error(f"Rumble video details error: {e}")
             
             # Try to handle specific error types
             if isinstance(e, PlatformNotAvailableError):
-                raise e
-            elif isinstance(e, PlatformRateLimitError):
                 raise e
             elif isinstance(e, PlatformAuthenticationError):
                 raise e

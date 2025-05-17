@@ -385,3 +385,309 @@ async def send_webhook(url: str, event: str, data: Dict):
 - `queue_add`: Song added to queue
 - `bot_join`: Bot joins voice channel
 - `bot_leave`: Bot leaves voice channel
+
+## Platform-Specific Examples
+
+### Rumble
+
+Rumble integration uses the Apify API to extract video information and streaming URLs. This example shows how to configure and use Rumble with the bot.
+
+#### Configuration
+
+First, set up your Rumble configuration in `config/config.yaml`:
+
+```yaml
+platforms:
+  rumble:
+    enabled: true
+    api_endpoint: "https://api.apify.com/v2"
+    actor_id: "tO3W1apGqJXZBKvGP"  # Rumble scraper actor
+    debug: false
+```
+
+Add your Apify API token to `.env`:
+
+```bash
+APIFY_API_TOKEN=your_apify_api_token_here
+```
+
+#### Step-by-Step Usage Example
+
+1. **Basic Rumble Video Playback**
+
+```
+User: !play https://rumble.com/v12345-funny-cat-video.html
+Bot: Searching for videos...
+
+Bot: Found on Rumble:
+  🎬 Funny Cat Video
+  👤 Channel: CatLovers
+  ⏱️ Duration: 3:45
+  🔗 https://rumble.com/v12345-funny-cat-video.html
+
+Bot: Added to queue: Funny Cat Video
+Bot: Now playing: Funny Cat Video
+```
+
+2. **Search Query Example**
+
+```
+User: !play rumble funny cats compilation
+Bot: Searching for videos...
+
+Bot: Found 3 results on Rumble:
+  1. Funny Cats Compilation 2024
+  2. Hilarious Cat Fails 
+  3. Cute Kittens Playing
+
+Bot: React with the number to select (1-3) or ❌ to cancel
+
+User: (reacts with 1️⃣)
+Bot: Added to queue: Funny Cats Compilation 2024
+```
+
+3. **Queue Multiple Rumble Videos**
+
+```
+User: !play https://rumble.com/v12345-video1.html
+Bot: Added to queue: Video 1 Title
+
+User: !play https://rumble.com/v12346-video2.html  
+Bot: Added to queue: Video 2 Title
+
+User: !queue
+Bot: 📋 Queue (2 songs):
+  🎵 Now Playing: Video 1 Title
+  1. Video 2 Title
+```
+
+#### Error Handling Examples
+
+1. **Invalid URL**
+```
+User: !play https://rumble.com/invalid-url
+Bot: ❌ Error: Invalid Rumble URL format
+```
+
+2. **API Token Missing**
+```
+User: !play rumble cats
+Bot: ❌ Error: Rumble API token not configured. Please contact an administrator.
+```
+
+3. **Rate Limit Exceeded**
+```
+User: !play rumble dogs
+Bot: ❌ Error: Rate limit exceeded. Please try again in a few minutes.
+```
+
+4. **Network/API Error**
+```
+User: !play rumble music
+Bot: ❌ Error: Failed to connect to Rumble API. Please try again later.
+```
+
+#### Troubleshooting Tips
+
+1. **Video Won't Play**
+   - Check if the Apify API token is valid
+   - Verify the Rumble URL is properly formatted
+   - Look for specific error messages in logs
+
+2. **Search Not Working**
+   - Currently only direct URLs are supported
+   - Search functionality may be limited by API
+
+3. **Common Error Patterns**
+
+   **HTTP 403 Error:**
+   ```
+   Bot: ❌ Error: Unable to access Rumble video (403 Forbidden)
+   ```
+   This usually means the video is restricted or private.
+
+   **Extraction Timeout:**
+   ```
+   Bot: ❌ Error: Video extraction timed out. Please try a different video.
+   ```
+   Some videos may take too long to process.
+
+   **Invalid API Token:**
+   ```
+   Bot: ❌ Error: Invalid API credentials. Please check your configuration.
+   ```
+   The Apify token may be expired or incorrect.
+
+4. **Debug Mode**
+
+   Enable debug mode in config for detailed logs:
+   ```yaml
+   platforms:
+     rumble:
+       debug: true
+   ```
+
+   This will show:
+   - API request details
+   - Response data
+   - Extraction progress
+   - URL parsing information
+
+5. **Performance Tips**
+
+   - Use direct video URLs for faster response
+   - Avoid rapid consecutive requests
+   - Consider implementing caching for frequently played videos
+
+#### Complete Code Example
+
+Here's a minimal bot setup for Rumble playback:
+
+```python
+import discord
+from discord.ext import commands
+from src.bot.bot import Robustty
+
+# Initialize bot
+bot = Robustty(
+    command_prefix='!',
+    intents=discord.Intents.all()
+)
+
+# Example usage in a cog
+class MusicCog(commands.Cog):
+    def __init__(self, bot):
+        self.bot = bot
+
+    @commands.command()
+    async def play(self, ctx, *, query):
+        """Play a Rumble video by URL"""
+        try:
+            # Check if it's a Rumble URL
+            if "rumble.com" in query:
+                # Extract video ID
+                video_id = self.bot.platform_registry.get_platform('rumble').extract_video_id(query)
+                if not video_id:
+                    await ctx.send("❌ Invalid Rumble URL")
+                    return
+                
+                # Get video details
+                video_info = await self.bot.platform_registry.get_platform('rumble').get_video_details(video_id)
+                if not video_info:
+                    await ctx.send("❌ Failed to get video information")
+                    return
+                
+                # Add to queue
+                await self.bot.audio_player.add_to_queue(video_info)
+                await ctx.send(f"✅ Added to queue: {video_info['title']}")
+                
+                # Start playing if not already
+                if not self.bot.audio_player.is_playing():
+                    await self.bot.audio_player.play_next()
+            else:
+                await ctx.send("❌ Please provide a valid Rumble URL")
+                
+        except Exception as e:
+            await ctx.send(f"❌ Error: {str(e)}")
+
+# Run the bot
+if __name__ == "__main__":
+    bot.run(os.getenv('DISCORD_TOKEN'))
+```
+
+#### Testing Rumble Integration
+
+1. **Unit Test Example**
+
+```python
+import pytest
+from src.platforms.rumble import RumblePlatform
+
+@pytest.mark.asyncio
+async def test_extract_video_id():
+    platform = RumblePlatform()
+    
+    # Test standard URL
+    url = "https://rumble.com/v12345-test-video.html"
+    video_id = platform.extract_video_id(url)
+    assert video_id == "v12345"
+    
+    # Test embed URL
+    embed_url = "https://rumble.com/embed/v12345/"
+    video_id = platform.extract_video_id(embed_url)
+    assert video_id == "v12345"
+    
+    # Test invalid URL
+    invalid_url = "https://youtube.com/watch?v=12345"
+    video_id = platform.extract_video_id(invalid_url)
+    assert video_id is None
+```
+
+2. **Integration Test**
+
+```python
+@pytest.mark.asyncio
+async def test_rumble_playback():
+    # Initialize bot
+    bot = Robustty()
+    
+    # Test video URL
+    test_url = "https://rumble.com/v12345-test.html"
+    
+    # Get video info
+    video_info = await bot.platform_registry.get_platform('rumble').get_video_by_url(test_url)
+    
+    # Verify fields
+    assert video_info['title']
+    assert video_info['url'] == test_url
+    assert video_info['platform'] == 'rumble'
+    assert video_info['stream_url']
+```
+
+3. **Mock Testing**
+
+```python
+from unittest.mock import Mock, patch
+
+@patch('src.platforms.rumble.RumblePlatform._make_api_call')
+async def test_rumble_with_mock(mock_api):
+    # Mock API response
+    mock_api.return_value = {
+        'title': 'Test Video',
+        'url': 'https://rumble.com/v12345.html',
+        'stream_url': 'https://stream.rumble.com/video.mp4'
+    }
+    
+    platform = RumblePlatform()
+    result = await platform.get_video_details('v12345')
+    
+    assert result['title'] == 'Test Video'
+    mock_api.assert_called_once()
+```
+
+#### Advanced Configuration
+
+For production use, consider these additional settings:
+
+```yaml
+platforms:
+  rumble:
+    enabled: true
+    api_endpoint: "https://api.apify.com/v2"
+    actor_id: "tO3W1apGqJXZBKvGP"
+    debug: false
+    timeout: 30  # API call timeout in seconds
+    retry_count: 3  # Number of retries on failure
+    cache_ttl: 3600  # Cache duration in seconds
+    rate_limit:
+      requests: 100
+      window: 3600  # Per hour
+```
+
+Environment variables:
+```bash
+APIFY_API_TOKEN=your_token
+RUMBLE_DEBUG=false
+RUMBLE_TIMEOUT=30
+RUMBLE_CACHE_ENABLED=true
+```

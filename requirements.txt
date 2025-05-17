@@ -7,6 +7,7 @@ google-api-python-client==2.100.0
 google-auth==2.23.0
 google-auth-oauthlib==1.1.0
 google-auth-httplib2==0.1.0
+apify-client==1.6.2
 
 # Web Scraping
 aiohttp==3.9.5
@@ -14,7 +15,7 @@ beautifulsoup4==4.12.2
 lxml==4.9.3
 
 # Media Processing
-yt-dlp==2023.10.13
+yt-dlp==2025.4.30
 ffmpeg-python==0.2.0
 
 # Browser Automation (for cookie extraction)
@@ -25,6 +26,9 @@ browser-cookie3==0.19.1
 python-dotenv==1.0.0
 PyYAML==6.0.1
 redis==5.0.1
+psutil>=5.8.0
+prometheus-client==0.22.0
+cryptography==42.0.5
 
 # Async file operations
 aiofiles==23.2.1
@@ -38,11 +42,14 @@ pytest-asyncio==0.21.1
 pytest-cov==4.1.0
 pytest-mock==3.12.0
 
+# Monitoring has been moved to utilities section
+
 # Development
 black==23.11.0
 flake8==6.1.0
 isort==5.12.0
 mypy==1.7.0
+typing-extensions==4.9.0
 
 # Optional performance improvements
 aiodns==3.1.1

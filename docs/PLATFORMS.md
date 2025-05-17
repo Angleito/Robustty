@@ -114,25 +114,61 @@ class YouTubePlatform(VideoPlatform):
         return results
 ```
 
-### PeerTube Platform
+### PeerTube Platform with Type Annotations
+
+PeerTube now includes comprehensive type definitions for better code reliability:
 
 ```python
+# src/platforms/peertube_types.py
+from typing import TypedDict, Optional, List
+
+class ChannelInfo(TypedDict):
+    """PeerTube channel information."""
+    displayName: str
+    name: str
+    description: Optional[str]
+    url: Optional[str]
+
+class VideoDetails(TypedDict):
+    """Standardized video details for internal use."""
+    id: str
+    title: str
+    channel: str
+    thumbnail: str
+    url: str
+    platform: str
+    instance: str
+    description: str
+    duration: Optional[int]
+    views: int
+```
+
+Implementation with proper type hints:
+
+```python
+from src.platforms.peertube_types import VideoDetails, ChannelInfo, VideoInfo
+
 class PeerTubePlatform(VideoPlatform):
-    async def search_videos(self, query: str, max_results: int = 10):
-        results = []
+    def __init__(self, config: Dict[str, Any]) -> None:
+        super().__init__("peertube", config)
+        self.instances: List[str] = config.get("instances", [])
+        
+    async def search_videos(self, query: str, max_results: int = 10) -> List[VideoDetails]:
+        results: List[VideoDetails] = []
+        tasks: List[Coroutine[Any, Any, List[VideoDetails]]] = []
+        
         for instance in self.instances:
-            async with self.session.get(
-                f"{instance}/api/v1/search/videos",
-                params={'search': query, 'count': max_results}
-            ) as response:
-                data = await response.json()
-                for video in data['data']:
-                    results.append({
-                        'id': video['uuid'],
-                        'title': video['name'],
-                        'url': f"{instance}/videos/watch/{video['uuid']}",
-                        'platform': 'peertube'
-                    })
+            task = self._search_instance(instance, query, max_results)
+            tasks.append(task)
+            
+        instance_results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        for i, result in enumerate(instance_results):
+            if isinstance(result, Exception):
+                logger.error(f"Error searching {self.instances[i]}: {result}")
+            elif isinstance(result, list):
+                results.extend(result)
+                
         return results
 ```
 
@@ -165,17 +201,41 @@ async def test_url_parsing():
 
 ## Best Practices
 
-### 1. Error Handling
+### 1. Type Safety
 
-Always handle API failures gracefully:
+Use proper type annotations throughout your code:
 
 ```python
+from typing import List, Optional, Dict, Any, Union
+from src.platforms.base import VideoPlatform
+from src.platforms.my_types import VideoDetails, SearchResult
+
+class MyPlatform(VideoPlatform):
+    async def search_videos(self, query: str, max_results: int = 10) -> List[VideoDetails]:
+        # Type-safe implementation
+        results: List[VideoDetails] = []
+        return results
+```
+
+### 2. Error Handling
+
+Handle API failures with custom exception types:
+
+```python
+class MyPlatformError(Exception):
+    """Base exception for MyPlatform"""
+    pass
+
+class MyPlatformAPIError(MyPlatformError):
+    def __init__(self, message: str, status_code: Optional[int] = None):
+        super().__init__(message)
+        self.status_code = status_code
+
 try:
     response = await self.session.get(url)
     data = await response.json()
-except Exception as e:
-    logger.error(f"API request failed: {e}")
-    return []
+except aiohttp.ClientError as e:
+    raise MyPlatformAPIError(f"API request failed: {e}", response.status)
 ```
 
 ### 2. Rate Limiting

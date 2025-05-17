@@ -1,0 +1,20 @@
+# Cross-platform cookie extraction dependencies
+
+# Core dependencies (already in requirements.txt)
+# aiofiles
+# requests
+
+# Encryption/decryption
+cryptography>=41.0.0
+
+# Platform-specific dependencies (optional)
+# Windows
+pywin32>=306; sys_platform == 'win32'
+
+# macOS
+keyring>=24.0.0; sys_platform == 'darwin'
+
+# Testing
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+pytest-mock>=3.11.0

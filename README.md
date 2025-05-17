@@ -121,8 +121,17 @@ See [docs/PLATFORMS.md](docs/PLATFORMS.md) for detailed instructions.
 ### Running Tests
 
 ```bash
+# Unit tests
 pytest
+
+# Integration tests (requires API keys)
+pytest tests/integration
+
+# All tests with coverage
+pytest --cov=src --cov-report=html
 ```
+
+See [docs/INTEGRATION_TESTING.md](docs/INTEGRATION_TESTING.md) for integration test details.
 
 ## Deployment
 

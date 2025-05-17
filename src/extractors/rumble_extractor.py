@@ -15,7 +15,11 @@ from functools import wraps
 from typing import Optional, Dict, Any, List, Callable, TypeVar
 from urllib.parse import urlparse, parse_qs
 
-from apify_client import ApifyClient
+try:
+    from apify_client import ApifyClient
+except ImportError:
+    # For testing environments where apify_client is not installed
+    ApifyClient = None
 
 from ..platforms.errors import (
     PlatformError,
@@ -25,6 +29,8 @@ from ..platforms.errors import (
     PlatformAuthenticationError,
     from_http_status
 )
+from ..services.cache_manager import CacheManager
+from ..services.metrics_collector import get_metrics_collector
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -225,11 +231,15 @@ def _is_retryable_error(error: Exception) -> bool:
         return True
     
     # 5xx Server Errors
-    if any(f"{code}" in error_message for code in range(500, 600)):
+    if any(str(code) in error_message for code in range(500, 600)):
         return True
     
-    # Connection errors
+    # Connection errors - check types too
     if any(term in error_message for term in ["connection", "timeout", "network"]):
+        return True
+    
+    # Check error types directly
+    if isinstance(error, (ConnectionError, TimeoutError)):
         return True
     
     # Check if it's an Apify-specific retryable error
@@ -250,10 +260,13 @@ class RumbleExtractor:
     actor_timeout: int
     max_retries: int
     logger: StructuredLogger
+    cache_manager: Optional[CacheManager]
+    metrics: Any  # MetricsCollector
     
     def __init__(self, apify_api_token: Optional[str] = None, 
                  max_retries: int = 3,
-                 actor_timeout: int = 60_000) -> None:
+                 actor_timeout: int = 60_000,
+                 cache_manager: Optional[CacheManager] = None) -> None:
         """
         Initialize the Rumble extractor.
         
@@ -261,21 +274,33 @@ class RumbleExtractor:
             apify_api_token: Apify API token for actor calls
             max_retries: Maximum number of retries for Apify API calls (default: 3)
             actor_timeout: Timeout in milliseconds for actor calls (default: 60,000ms = 60s)
+            cache_manager: Optional cache manager for reducing API calls
         """
         self.api_token = apify_api_token or os.getenv('APIFY_API_TOKEN')
         self.max_retries = max_retries
         self.actor_timeout = actor_timeout
+        self.cache_manager = cache_manager
         
         # Initialize Apify client
-        self.client = ApifyClient(self.api_token) if self.api_token else None
+        if self.api_token and ApifyClient:
+            self.client = ApifyClient(self.api_token)
+        elif self.api_token and not ApifyClient:
+            logger.warning("apify_client package not installed - Rumble extraction will not work")
+            self.client = None
+        else:
+            self.client = None
         
         # Initialize structured logger with base context
         self.logger = StructuredLogger(logger, {
             'extractor': 'rumble',
             'has_api_token': bool(self.api_token),
             'max_retries': self.max_retries,
-            'actor_timeout': self.actor_timeout
+            'actor_timeout': self.actor_timeout,
+            'cache_enabled': self.cache_manager is not None
         })
+        
+        # Initialize metrics collector
+        self.metrics = get_metrics_collector()
         
         if not self.api_token:
             self.logger.warning("APIFY_API_TOKEN not found. Rumble extraction may fail.")
@@ -307,9 +332,10 @@ class RumbleExtractor:
         log = self.logger.with_context(video_url=url)
         
         # Start operation tracking
+        video_id = self._extract_video_id(url) or 'unknown'
         context = log.log_operation_start(
             'metadata',
-            video_id=self._extract_video_id(url) or 'unknown'
+            video_id=video_id
         )
         
         try:
@@ -321,6 +347,17 @@ class RumbleExtractor:
             
             if not self._validate_rumble_url(url):
                 raise ValueError(f"Invalid Rumble URL: {url}")
+            
+            # Check cache first if available
+            if self.cache_manager and video_id != 'unknown':
+                cached_metadata = await self.cache_manager.get_video_metadata("rumble", video_id)
+                if cached_metadata:
+                    self.metrics.record_cache_hit("metadata")
+                    log.info("Retrieved metadata from cache", extra={'video_id': video_id})
+                    log.log_operation_complete('metadata', context, has_metadata=True, from_cache=True)
+                    return cached_metadata
+                else:
+                    self.metrics.record_cache_miss("metadata")
             
             # Use the Rumble video extractor actor
             # Actor: junglee/rumble-video-extractor
@@ -350,7 +387,12 @@ class RumbleExtractor:
                     "available_qualities": item.get("videoQualities", ["auto"])
                 }
                 
-                log.log_operation_complete('metadata', context, has_metadata=True)
+                # Cache the metadata if cache manager is available
+                if self.cache_manager and video_id != 'unknown':
+                    await self.cache_manager.set_video_metadata("rumble", video_id, metadata)
+                    log.info("Cached metadata", extra={'video_id': video_id})
+                
+                log.log_operation_complete('metadata', context, has_metadata=True, from_cache=False)
                 return metadata
             else:
                 raise PlatformNotAvailableError(
@@ -380,9 +422,10 @@ class RumbleExtractor:
         log = self.logger.with_context(video_url=url, quality=quality)
         
         # Start operation tracking
+        video_id = self._extract_video_id(url) or 'unknown'
         context = log.log_operation_start(
             'download',
-            video_id=self._extract_video_id(url) or 'unknown',
+            video_id=video_id,
             quality=quality
         )
         
@@ -395,6 +438,17 @@ class RumbleExtractor:
             
             if not self._validate_rumble_url(url):
                 raise ValueError(f"Invalid Rumble URL: {url}")
+            
+            # Check cache first for stream URL
+            if self.cache_manager and video_id != 'unknown':
+                cached_stream_url = await self.cache_manager.get_stream_url("rumble", video_id, quality)
+                if cached_stream_url:
+                    self.metrics.record_cache_hit("stream")
+                    log.info("Retrieved stream URL from cache", extra={'video_id': video_id, 'quality': quality})
+                    log.log_operation_complete('download', context, has_stream=True, from_cache=True)
+                    return cached_stream_url
+                else:
+                    self.metrics.record_cache_miss("stream")
             
             # First get metadata to get available video streams
             metadata = await self.get_video_metadata(url)
@@ -437,7 +491,12 @@ class RumbleExtractor:
                     )
                 
                 if stream_url:
-                    log.log_operation_complete('download', context, has_stream=True)
+                    # Cache the stream URL if cache manager is available
+                    if self.cache_manager and video_id != 'unknown':
+                        await self.cache_manager.set_stream_url("rumble", video_id, stream_url, quality)
+                        log.info("Cached stream URL", extra={'video_id': video_id, 'quality': quality})
+                    
+                    log.log_operation_complete('download', context, has_stream=True, from_cache=False)
                     return stream_url
                 else:
                     raise PlatformNotAvailableError(
@@ -481,6 +540,14 @@ class RumbleExtractor:
                     platform="Rumble"
                 )
             
+            # Check cache first for search results
+            if self.cache_manager:
+                cached_results = await self.cache_manager.get_search_results("rumble", query)
+                if cached_results and len(cached_results) >= max_results:
+                    log.info("Retrieved search results from cache", extra={'query': query})
+                    log.log_operation_complete('search', context, result_count=len(cached_results[:max_results]), from_cache=True)
+                    return cached_results[:max_results]
+            
             # Use the Rumble scraper actor for search
             # Actor: apify/rumble-scraper
             actor_input = {
@@ -510,7 +577,12 @@ class RumbleExtractor:
                         "url": item.get("url", "")
                     })
             
-            log.log_operation_complete('search', context, result_count=len(videos))
+            # Cache the search results if cache manager is available
+            if self.cache_manager and videos:
+                await self.cache_manager.set_search_results("rumble", query, videos)
+                log.info("Cached search results", extra={'query': query, 'count': len(videos)})
+            
+            log.log_operation_complete('search', context, result_count=len(videos), from_cache=False)
             return videos
             
         except Exception as e:
@@ -527,9 +599,46 @@ class RumbleExtractor:
         Returns:
             True if valid Rumble URL, False otherwise
         """
+        if not url or not isinstance(url, str):
+            return False
+            
         try:
+            # Basic validation - must be a string with content
+            url = url.strip()
+            if not url:
+                return False
+                
+            # Check for malformed patterns
+            if "\n" in url or "//" in url.replace("://", ""):
+                return False
+                
+            # URL encode check
+            if "%20" in url or " " in url:
+                return False
+            
             parsed = urlparse(url)
-            return parsed.netloc in ['rumble.com', 'www.rumble.com'] and '/v' in parsed.path
+            
+            # Check protocol
+            if parsed.scheme and parsed.scheme not in ['http', 'https']:
+                return False
+            
+            # Check if it's a proper URL structure
+            if not parsed.netloc and not parsed.path:
+                return False
+            
+            # Allow both with and without protocol
+            if parsed.netloc:
+                if parsed.netloc not in ['rumble.com', 'www.rumble.com']:
+                    return False
+            elif parsed.path:
+                # Handle case where URL is without protocol
+                path_parts = parsed.path.split('/')
+                if path_parts[0] not in ['rumble.com', 'www.rumble.com']:
+                    return False
+            
+            # Check for video pattern
+            full_path = parsed.path if parsed.netloc else '/' + '/'.join(parsed.path.split('/')[1:])
+            return '/v' in full_path and full_path.startswith('/v')
         except Exception:
             return False
     
@@ -544,11 +653,27 @@ class RumbleExtractor:
             Video ID if found, None otherwise
         """
         try:
+            if not self.validate_url(url):
+                return None
+                
             parsed = urlparse(url)
+            
+            # Handle both with and without protocol
+            if parsed.netloc:
+                path = parsed.path
+            else:
+                # URL without protocol
+                path_parts = parsed.path.split('/')
+                path = '/' + '/'.join(path_parts[1:])
+            
+            # Extract video ID from path
             # Rumble URLs typically look like: https://rumble.com/vXXXXX-title.html
-            path_parts = parsed.path.strip('/').split('-')
-            if path_parts[0].startswith('v'):
-                return path_parts[0]
+            path = path.strip('/')
+            if path.startswith('v'):
+                # Extract ID up to first dash or dot
+                video_id = path.split('-')[0].split('.')[0]
+                return video_id
+            
             return None
         except Exception:
             return None
@@ -711,11 +836,31 @@ class RumbleExtractor:
         except Exception as e:
             # Re-raise the exception to be handled by _make_actor_call
             raise
+    
+    async def get_cache_metrics(self) -> Dict[str, Any]:
+        """
+        Get cache metrics if cache manager is available.
+        
+        Returns:
+            Dictionary containing cache metrics or empty dict if no cache
+        """
+        if self.cache_manager:
+            return await self.cache_manager.get_metrics()
+        return {}
+    
+    async def close(self):
+        """
+        Clean up resources including cache connections.
+        """
+        if self.cache_manager:
+            await self.cache_manager.close()
+        # Close any other resources if needed
+        self.logger.info("Closed RumbleExtractor resources")
 
 
 # Future enhancements:
 # - Add quality selection for search results
 # - Implement format conversion utilities
-# - Add response caching layer
+# - Response caching layer implemented
 # - Implement batch processing for multiple URLs
 # - Add support for playlist extraction

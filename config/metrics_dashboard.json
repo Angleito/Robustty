@@ -1,0 +1,174 @@
+{
+  "dashboard": {
+    "title": "Robustty Rumble Platform Metrics",
+    "description": "Monitor Apify API usage and platform health",
+    "refresh": "30s",
+    "timezone": "browser",
+    "panels": [
+      {
+        "title": "API Call Rate",
+        "type": "graph",
+        "datasource": "prometheus",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+        "targets": [
+          {
+            "expr": "rate(rumble_api_calls_total[5m])",
+            "legendFormat": "{{endpoint}} - {{status}}",
+            "refId": "A"
+          }
+        ],
+        "yaxis": {"format": "reqps", "label": "Requests/s"}
+      },
+      {
+        "title": "API Response Times",
+        "type": "graph",
+        "datasource": "prometheus",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, rate(rumble_api_response_time_seconds_bucket[5m]))",
+            "legendFormat": "{{endpoint}} - p95",
+            "refId": "A"
+          },
+          {
+            "expr": "histogram_quantile(0.50, rate(rumble_api_response_time_seconds_bucket[5m]))",
+            "legendFormat": "{{endpoint}} - p50",
+            "refId": "B"
+          }
+        ],
+        "yaxis": {"format": "s", "label": "Response Time"}
+      },
+      {
+        "title": "Cache Hit Ratio",
+        "type": "graph",
+        "datasource": "prometheus",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+        "targets": [
+          {
+            "expr": "rate(rumble_cache_hits_total[5m]) / (rate(rumble_cache_hits_total[5m]) + rate(rumble_cache_misses_total[5m]))",
+            "legendFormat": "{{cache_type}} cache hit ratio",
+            "refId": "A"
+          }
+        ],
+        "yaxis": {"format": "percentunit", "label": "Hit Ratio", "max": 1}
+      },
+      {
+        "title": "Error Rate",
+        "type": "graph",
+        "datasource": "prometheus",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+        "targets": [
+          {
+            "expr": "rate(rumble_errors_total[5m])",
+            "legendFormat": "{{error_type}}",
+            "refId": "A"
+          }
+        ],
+        "yaxis": {"format": "short", "label": "Errors/s"}
+      },
+      {
+        "title": "Rate Limit Encounters",
+        "type": "singlestat",
+        "datasource": "prometheus",
+        "gridPos": {"h": 4, "w": 6, "x": 0, "y": 16},
+        "targets": [
+          {
+            "expr": "rate(rumble_rate_limits_total[1h]) * 3600",
+            "refId": "A"
+          }
+        ],
+        "format": "short",
+        "postfix": " /hour",
+        "thresholds": "1,5",
+        "colors": ["green", "yellow", "red"]
+      },
+      {
+        "title": "API Call Success Rate",
+        "type": "singlestat",
+        "datasource": "prometheus",
+        "gridPos": {"h": 4, "w": 6, "x": 6, "y": 16},
+        "targets": [
+          {
+            "expr": "rate(rumble_api_calls_total{status=\"success\"}[5m]) / rate(rumble_api_calls_total[5m])",
+            "refId": "A"
+          }
+        ],
+        "format": "percentunit",
+        "thresholds": "0.90,0.95",
+        "colors": ["red", "yellow", "green"]
+      },
+      {
+        "title": "Current Queue Size",
+        "type": "singlestat",
+        "datasource": "prometheus",
+        "gridPos": {"h": 4, "w": 6, "x": 12, "y": 16},
+        "targets": [
+          {
+            "expr": "rumble_queue_size",
+            "refId": "A"
+          }
+        ],
+        "format": "short",
+        "postfix": " tracks",
+        "sparkline": {"show": true, "lineColor": "rgb(31, 120, 193)"}
+      },
+      {
+        "title": "Active Connections",
+        "type": "singlestat",
+        "datasource": "prometheus",
+        "gridPos": {"h": 4, "w": 6, "x": 18, "y": 16},
+        "targets": [
+          {
+            "expr": "rumble_active_connections",
+            "refId": "A"
+          }
+        ],
+        "format": "short",
+        "postfix": " connections",
+        "sparkline": {"show": true, "lineColor": "rgb(31, 120, 193)"}
+      }
+    ]
+  },
+  "alerts": [
+    {
+      "name": "High API Error Rate",
+      "condition": "rate(rumble_errors_total[5m]) > 0.1",
+      "duration": "5m",
+      "severity": "warning",
+      "annotations": {
+        "summary": "High error rate detected for Rumble API",
+        "description": "Error rate is {{ $value }} errors/s (threshold: 0.1)"
+      }
+    },
+    {
+      "name": "Rate Limit Critical",
+      "condition": "rate(rumble_rate_limits_total[1h]) * 3600 > 10",
+      "duration": "5m",
+      "severity": "critical",
+      "annotations": {
+        "summary": "Excessive rate limiting detected",
+        "description": "Rate limit encounters: {{ $value }}/hour (threshold: 10)"
+      }
+    },
+    {
+      "name": "Slow API Response",
+      "condition": "histogram_quantile(0.95, rate(rumble_api_response_time_seconds_bucket[5m])) > 5",
+      "duration": "10m",
+      "severity": "warning",
+      "annotations": {
+        "summary": "Slow API response times detected",
+        "description": "95th percentile response time: {{ $value }}s (threshold: 5s)"
+      }
+    },
+    {
+      "name": "Low Cache Hit Rate",
+      "condition": "rate(rumble_cache_hits_total[5m]) / (rate(rumble_cache_hits_total[5m]) + rate(rumble_cache_misses_total[5m])) < 0.5",
+      "duration": "15m",
+      "severity": "info",
+      "annotations": {
+        "summary": "Low cache hit rate detected",
+        "description": "Cache hit rate: {{ $value }} (threshold: 0.5)"
+      }
+    }
+  ]
+}

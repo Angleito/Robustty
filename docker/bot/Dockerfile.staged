@@ -1,0 +1,49 @@
+FROM python:3.11-slim as builder
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y \
+    gcc \
+    g++ \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Upgrade pip
+RUN pip install --upgrade pip setuptools wheel
+
+# Install base requirements first
+WORKDIR /app
+COPY requirements-base.txt .
+RUN pip install --no-cache-dir --user -r requirements-base.txt
+
+# Install optional requirements separately
+COPY requirements-optional.txt .
+RUN pip install --no-cache-dir --user --timeout=600 -r requirements-optional.txt || echo "Some optional packages failed to install"
+
+# Final stage
+FROM python:3.11-slim
+
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y \
+    ffmpeg \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy pip packages from builder
+COPY --from=builder /root/.local /root/.local
+
+# Create app directory
+WORKDIR /app
+
+# Copy application code
+COPY src/ ./src/
+COPY config/ ./config/
+
+# Create necessary directories
+RUN mkdir -p logs data cookies
+
+# Update PATH
+ENV PATH=/root/.local/bin:$PATH
+ENV PYTHONPATH=/app/src
+
+# Run the bot
+CMD ["python", "-m", "src.main"]

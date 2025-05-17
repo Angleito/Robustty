@@ -4,12 +4,20 @@ services:
     build:
       context: .
       dockerfile: docker/bot/Dockerfile
+      args:
+        - BUILDKIT_PROGRESS=plain
+        - DOCKER_BUILDKIT=1
     container_name: robustty-bot
     restart: unless-stopped
     environment:
       - DISCORD_TOKEN=${DISCORD_TOKEN}
       - YOUTUBE_API_KEY=${YOUTUBE_API_KEY}
-      - LOG_LEVEL=${LOG_LEVEL}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - SEARCH_TIMEOUT=${SEARCH_TIMEOUT:-30}
+      - STREAM_TIMEOUT=${STREAM_TIMEOUT:-300}
+      - MAX_QUEUE_SIZE=${MAX_QUEUE_SIZE:-100}
+      - ODYSEE_ENABLED=${ODYSEE_ENABLED:-false}
+      - RUMBLE_ENABLED=${RUMBLE_ENABLED:-false}
     volumes:
       - ./config:/app/config:ro
       - ./logs:/app/logs
@@ -46,12 +54,14 @@ services:
     container_name: robustty-stream
     restart: unless-stopped
     ports:
-      - "5001:5000"
+      - "${STREAM_PORT:-5001}:5000"
     volumes:
       - cookies:/app/cookies:ro
       - ./data/cache:/app/cache
     environment:
       - FLASK_ENV=production
+      - USE_RUMBLE_EXTRACTOR=${USE_RUMBLE_EXTRACTOR:-false}
+      - APIFY_API_TOKEN=${APIFY_API_TOKEN}
     networks:
       - bot-network
 

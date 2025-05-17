@@ -6,7 +6,7 @@ bot:
 platforms:
   youtube:
     enabled: true
-    api_key: ${YOUTUBE_API_KEY}
+    api_key: ${YOUTUBE_API_KEY:}
     max_results: 10
 
   peertube:
@@ -18,19 +18,21 @@ platforms:
     max_results_per_instance: 5
 
   odysee:
-    enabled: ${ODYSEE_ENABLED}
+    enabled: ${ODYSEE_ENABLED:false}
     api_url: https://api.lbry.tv/api/v1/proxy
     search_url: https://lighthouse.lbry.com/search
 
   rumble:
-    enabled: ${RUMBLE_ENABLED}
+    enabled: ${RUMBLE_ENABLED:false}
+    api_token: ${RUMBLE_API_TOKEN:}
     base_url: https://rumble.com
     api_base: https://rumble.com/api/v0
+    max_results: 10
 
 performance:
-  search_timeout: ${SEARCH_TIMEOUT}
-  stream_timeout: ${STREAM_TIMEOUT}
-  max_queue_size: ${MAX_QUEUE_SIZE}
+  search_timeout: ${SEARCH_TIMEOUT:30}
+  stream_timeout: ${STREAM_TIMEOUT:300}
+  max_queue_size: ${MAX_QUEUE_SIZE:100}
   cache_ttl: 3600
 
 features:
@@ -38,3 +40,18 @@ features:
   auto_disconnect_timeout: 300
   save_queue: true
   announce_songs: true
+
+cache:
+  redis:
+    enabled: ${REDIS_ENABLED:false}
+    host: ${REDIS_HOST:localhost}
+    port: ${REDIS_PORT:6379}
+    db: ${REDIS_DB:0}
+    password: ${REDIS_PASSWORD:}
+  
+  ttl:
+    metadata: 3600    # 1 hour for video metadata
+    stream: 1800      # 30 minutes for stream URLs
+    search: 1800      # 30 minutes for search results
+  
+  max_memory_size: 1000  # Maximum number of items in memory cache

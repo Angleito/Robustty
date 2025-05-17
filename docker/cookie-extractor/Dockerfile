@@ -29,4 +29,4 @@ ENV DISPLAY=:99
 RUN mkdir -p /app/cookies
 
 # Run the cookie extraction service
-CMD ["python", "-m", "extractors.cookie_extractor"]
+CMD ["python", "extractors/cookie_extractor.py"]

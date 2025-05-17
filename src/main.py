@@ -3,72 +3,79 @@ import logging
 import os
 import sys
 from pathlib import Path
+from typing import Any, Dict, Optional
 
 # Add src to Python path
 sys.path.insert(0, str(Path(__file__).parent))
 
-from bot.bot import RobusttyBot
-import yaml
-from dotenv import load_dotenv
+
+import yaml  # noqa: E402
+from dotenv import load_dotenv  # noqa: E402
+
+from src.bot.bot import RobusttyBot  # noqa: E402
+from src.utils.config_loader import load_config, ConfigurationError  # noqa: E402
+from src.services.metrics_server import MetricsServer  # noqa: E402
 
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler('logs/robustty.log')
-    ]
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[logging.StreamHandler(), logging.FileHandler("logs/robustty.log")],
 )
 
 logger = logging.getLogger(__name__)
 
-def load_config():
-    """Load configuration from file and environment"""
-    load_dotenv()
-    
-    with open('config/config.yaml', 'r') as f:
-        config = yaml.safe_load(f)
-    
-    # Replace environment variables in config
-    def replace_env_vars(obj):
-        if isinstance(obj, dict):
-            return {k: replace_env_vars(v) for k, v in obj.items()}
-        elif isinstance(obj, list):
-            return [replace_env_vars(item) for item in obj]
-        elif isinstance(obj, str) and obj.startswith('${') and obj.endswith('}'):
-            env_var = obj[2:-1]
-            value = os.getenv(env_var, obj)
-            # Convert string booleans to actual booleans
-            if value.lower() in ['true', 'false']:
-                return value.lower() == 'true'
-            return value
-        return obj
-    
-    return replace_env_vars(config)
 
-async def main():
+# Removed the old load_config function - now using the one from config_loader
+
+
+async def main() -> None:
     """Main entry point"""
+    bot: Optional[RobusttyBot] = None
+    metrics_server: Optional[MetricsServer] = None
     try:
-        # Load configuration
-        config = load_config()
+        # Load .env file
+        load_dotenv()
         
+        # Load configuration
+        config = load_config("config/config.yaml")
+
         # Get Discord token
-        token = os.getenv('DISCORD_TOKEN')
+        token = os.getenv("DISCORD_TOKEN")
         if not token:
             logger.error("DISCORD_TOKEN not found in environment")
-            return
-        
+            sys.exit(1)
+
+        # Start metrics server
+        metrics_port = int(os.getenv("METRICS_PORT", "8080"))
+        metrics_server = MetricsServer(port=metrics_port)
+        await metrics_server.start()
+        logger.info(f"Metrics server started on port {metrics_port}")
+
         # Create and run bot
         bot = RobusttyBot(config)
-        
+
         logger.info("Starting Robustty Music Bot...")
         await bot.start(token)
-        
+
+    except ConfigurationError as e:
+        logger.error(f"Configuration Error: {e}")
+        sys.exit(1)
+    except FileNotFoundError as e:
+        logger.error(f"Configuration file not found: {e}")
+        sys.exit(1)
+    except yaml.YAMLError as e:
+        logger.error(f"Invalid YAML in configuration file: {e}")
+        sys.exit(1)
     except Exception as e:
         logger.error(f"Failed to start bot: {e}", exc_info=True)
+        sys.exit(1)
     finally:
-        await bot.close()
+        if bot is not None:
+            await bot.close()
+        if metrics_server is not None:
+            await metrics_server.stop()
+
 
 if __name__ == "__main__":
     asyncio.run(main())

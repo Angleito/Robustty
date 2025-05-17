@@ -1,0 +1,46 @@
+# Discord
+discord.py==2.3.2
+PyNaCl==1.5.0
+
+# API Clients
+google-api-python-client==2.100.0
+google-auth==2.23.0
+google-auth-oauthlib==1.1.0
+google-auth-httplib2==0.1.0
+
+# Web Scraping
+aiohttp==3.9.5
+beautifulsoup4==4.12.2
+lxml==4.9.3
+
+# Media Processing
+yt-dlp==2023.10.13
+ffmpeg-python==0.2.0
+
+# Utilities
+python-dotenv==1.0.0
+PyYAML==6.0.1
+redis==5.0.1
+psutil>=5.8.0
+
+# Async file operations
+aiofiles==23.2.1
+
+# Logging
+colorlog==6.7.0
+
+# Development
+black==23.11.0
+flake8==6.1.0
+isort==5.12.0
+mypy==1.7.0
+typing-extensions==4.9.0
+
+# Optional performance improvements
+aiodns==3.1.1
+charset-normalizer==3.4.2
+brotli==1.1.0
+
+# Flask for stream service
+flask==3.0.0
+gunicorn==21.2.0

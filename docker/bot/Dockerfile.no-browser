@@ -1,0 +1,39 @@
+FROM python:3.11-slim
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    ffmpeg \
+    git \
+    gcc \
+    g++ \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Upgrade pip
+RUN pip install --upgrade pip setuptools wheel
+
+# Copy requirements without browser packages
+COPY requirements-no-browser.txt requirements.txt
+
+# Install dependencies with better error handling
+RUN pip install --no-cache-dir -r requirements.txt || \
+    (echo "Some packages failed to install, continuing..." && \
+     pip install --no-cache-dir --ignore-installed -r requirements.txt)
+
+# Copy application code
+COPY src/ ./src/
+COPY config/ ./config/
+
+# Create necessary directories
+RUN mkdir -p logs data cookies
+
+# Create an empty manual cookies file
+RUN echo '[]' > cookies/manual_cookies.json
+
+# Set Python path
+ENV PYTHONPATH=/app/src
+
+# Run the bot
+CMD ["python", "-m", "src.main"]

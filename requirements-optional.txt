@@ -1,0 +1,33 @@
+# API Clients
+google-api-python-client==2.100.0
+google-auth==2.23.0
+google-auth-oauthlib==1.1.0
+google-auth-httplib2==0.1.0
+
+# Additional web scraping
+lxml==4.9.3
+
+# Browser automation (heavy - often causes timeouts)
+selenium==4.15.2
+browser-cookie3==0.19.1
+
+# Testing
+pytest==7.4.3
+pytest-asyncio==0.21.1
+pytest-cov==4.1.0
+pytest-mock==3.12.0
+
+# Development
+black==23.11.0
+flake8==6.1.0
+isort==5.12.0
+mypy==1.7.0
+
+# Optional performance improvements
+aiodns==3.1.1
+charset-normalizer==3.4.2
+brotli==1.1.0
+
+# Flask for stream service
+flask==3.0.0
+gunicorn==21.2.0
