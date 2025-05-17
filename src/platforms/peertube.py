@@ -1,6 +1,6 @@
 import asyncio
 from typing import List, Dict, Optional
-from .base import VideoPlatform
+from platforms.base import VideoPlatform
 import re
 import logging
 

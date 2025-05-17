@@ -38,7 +38,7 @@ class Admin(commands.Cog):
             
             for ext in ['music', 'admin', 'info']:
                 try:
-                    await self.bot.reload_extension(f"src.bot.cogs.{ext}")
+                    await self.bot.reload_extension(f"bot.cogs.{ext}")
                     reloaded.append(ext)
                 except Exception as e:
                     failed.append((ext, str(e)))

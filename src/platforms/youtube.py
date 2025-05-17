@@ -1,6 +1,6 @@
 import re
 from typing import List, Dict, Optional
-from .base import VideoPlatform
+from platforms.base import VideoPlatform
 from googleapiclient.discovery import build
 import logging
 
@@ -111,4 +111,4 @@ class YouTubePlatform(VideoPlatform):
     async def get_stream_url(self, video_id: str) -> Optional[str]:
         """Get stream URL (delegated to stream service)"""
         # This will be handled by the yt-dlp stream service
-        return f"http://stream-service:5000/stream/youtube/{video_id}"
+        return f"http://robustty-stream:5000/stream/youtube/{video_id}"

@@ -81,7 +81,7 @@ class AudioPlayer:
         # This would call the stream extraction service
         platform = song_info['platform']
         video_id = song_info['id']
-        return f"http://stream-service:5000/stream/{platform}/{video_id}"
+        return f"http://robustty-stream:5000/stream/{platform}/{video_id}"
     
     async def _playback_finished(self, error):
         """Called when playback finishes"""

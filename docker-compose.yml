@@ -17,7 +17,6 @@ services:
       - cookies:/app/cookies:ro
     depends_on:
       - redis
-      - cookie-extractor
       - stream-service
     networks:
       - bot-network
@@ -31,7 +30,8 @@ services:
     restart: unless-stopped
     volumes:
       - cookies:/app/cookies
-      - ${BROWSER_PROFILE_PATH}:/browser/profile:ro
+      # Browser profile path is optional - comment out if not using
+      # - ${BROWSER_PROFILE_PATH}:/browser/profile:ro
     environment:
       - REFRESH_INTERVAL=${COOKIE_REFRESH_INTERVAL}
       - DISPLAY=:99
@@ -46,7 +46,7 @@ services:
     container_name: robustty-stream
     restart: unless-stopped
     ports:
-      - "5000:5000"
+      - "5001:5000"
     volumes:
       - cookies:/app/cookies:ro
       - ./data/cache:/app/cache

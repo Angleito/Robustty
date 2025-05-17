@@ -1,7 +1,7 @@
 import asyncio
 import logging
 from typing import Dict, List, Optional
-from ..platforms.registry import PlatformRegistry
+from platforms.registry import PlatformRegistry
 
 logger = logging.getLogger(__name__)
 

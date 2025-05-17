@@ -1,5 +1,5 @@
 from typing import Dict, Type, Optional
-from .base import VideoPlatform
+from platforms.base import VideoPlatform
 import logging
 
 logger = logging.getLogger(__name__)

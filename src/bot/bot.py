@@ -2,10 +2,10 @@ import discord
 from discord.ext import commands
 import logging
 from typing import Optional, Dict
-from ..services.searcher import MultiPlatformSearcher
-from ..services.cookie_manager import CookieManager
-from ..services.audio_player import AudioPlayer
-from ..platforms.registry import PlatformRegistry
+from services.searcher import MultiPlatformSearcher
+from services.cookie_manager import CookieManager
+from services.audio_player import AudioPlayer
+from platforms.registry import PlatformRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +18,8 @@ class RobusttyBot(commands.Bot):
         super().__init__(
             command_prefix=config['bot']['command_prefix'],
             intents=intents,
-            description=config['bot']['description']
+            description=config['bot']['description'],
+            help_command=None  # Disable default help command
         )
         
         self.config = config
@@ -32,14 +33,14 @@ class RobusttyBot(commands.Bot):
         # Load platforms dynamically
         try:
             # Import platform modules
-            from ..platforms.youtube import YouTubePlatform
+            from platforms.youtube import YouTubePlatform
+            from platforms.peertube import PeerTubePlatform
             self.platform_registry.register_platform('youtube', YouTubePlatform)
+            self.platform_registry.register_platform('peertube', PeerTubePlatform)
             
             # Import other platforms as they're implemented
-            # from ..platforms.peertube import PeerTubePlatform
-            # from ..platforms.odysee import OdyseePlatform
-            # from ..platforms.rumble import RumblePlatform
-            # self.platform_registry.register_platform('peertube', PeerTubePlatform)
+            # from platforms.odysee import OdyseePlatform
+            # from platforms.rumble import RumblePlatform
             # self.platform_registry.register_platform('odysee', OdyseePlatform)
             # self.platform_registry.register_platform('rumble', RumblePlatform)
             
@@ -54,9 +55,9 @@ class RobusttyBot(commands.Bot):
         self.cookie_manager = CookieManager(self.config.get('cookies', {}))
         
         # Load cogs
-        await self.load_extension('src.bot.cogs.music')
-        await self.load_extension('src.bot.cogs.admin')
-        await self.load_extension('src.bot.cogs.info')
+        await self.load_extension('bot.cogs.music')
+        await self.load_extension('bot.cogs.admin')
+        await self.load_extension('bot.cogs.info')
         
         logger.info("Bot setup completed")
     
