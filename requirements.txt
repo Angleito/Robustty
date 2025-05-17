@@ -45,7 +45,8 @@ mypy==1.7.0
 
 # Optional performance improvements
 aiodns==3.1.1
-cchardet==2.1.7
+# cchardet==2.1.7  # Removed due to Python 3.11 compatibility issues
+charset-normalizer==3.4.2  # Alternative to cchardet
 brotli==1.1.0
 
 # Flask for stream service
