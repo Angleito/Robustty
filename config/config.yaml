@@ -20,7 +20,8 @@ platforms:
   odysee:
     enabled: ${ODYSEE_ENABLED:false}
     api_url: https://api.lbry.tv/api/v1/proxy
-    search_url: https://lighthouse.lbry.com/search
+    stream_url: https://api.lbry.tv
+    max_results: 10
 
   rumble:
     enabled: ${RUMBLE_ENABLED:false}

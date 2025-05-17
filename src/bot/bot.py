@@ -42,14 +42,12 @@ class RobusttyBot(commands.Bot):
             from src.platforms.peertube import PeerTubePlatform
             from src.platforms.youtube import YouTubePlatform
             from src.platforms.rumble import RumblePlatform
+            from src.platforms.odysee import OdyseePlatform
 
             self.platform_registry.register_platform("youtube", YouTubePlatform)
             self.platform_registry.register_platform("peertube", PeerTubePlatform)
             self.platform_registry.register_platform("rumble", RumblePlatform)
-
-            # Import other platforms as they're implemented
-            # from platforms.odysee import OdyseePlatform
-            # self.platform_registry.register_platform('odysee', OdyseePlatform)
+            self.platform_registry.register_platform("odysee", OdyseePlatform)
 
         except ImportError as e:
             logger.warning(f"Failed to import platform: {e}")
