@@ -245,3 +245,58 @@ def load_all_cookies() -> requests.cookies.RequestsCookieJar:
     """Load all cookies from all browsers"""
     extractor = CrossPlatformCookieExtractor()
     return extractor.load_all_cookies()
+
+
+async def extract_and_save_cookies():
+    """Async function for scheduled cookie extraction"""
+    import asyncio
+    import json
+    from pathlib import Path
+    
+    try:
+        logger.info("Starting scheduled cookie extraction from Brave browser...")
+        
+        # Focus on Brave browser for Docker setup
+        extractor = CrossPlatformCookieExtractor(browsers=['brave'])
+        
+        # Extract cookies for all supported platforms
+        platforms = ['youtube', 'rumble', 'odysee', 'peertube']
+        cookie_dir = Path('/app/cookies')
+        cookie_dir.mkdir(exist_ok=True)
+        
+        for platform in platforms:
+            try:
+                cookies = extractor.find_platform_cookies(platform)
+                
+                # Save cookies in yt-dlp compatible format
+                cookie_data = []
+                for cookie in cookies:
+                    cookie_data.append({
+                        'name': cookie.name,
+                        'value': cookie.value,
+                        'domain': cookie.domain,
+                        'path': cookie.path,
+                        'secure': cookie.secure,
+                        'httpOnly': getattr(cookie, 'httponly', False),
+                        'expires': getattr(cookie, 'expires', None)
+                    })
+                
+                output_file = cookie_dir / f'{platform}_cookies.json'
+                with open(output_file, 'w') as f:
+                    json.dump(cookie_data, f, indent=2)
+                    
+                logger.info(f"Saved {len(cookie_data)} {platform} cookies to {output_file}")
+                
+            except Exception as e:
+                logger.error(f"Failed to extract {platform} cookies: {e}")
+        
+        logger.info("Completed scheduled cookie extraction")
+        
+    except Exception as e:
+        logger.error(f"Scheduled cookie extraction failed: {e}")
+
+
+def main():
+    """Main function for running cookie extraction as standalone script"""
+    import asyncio
+    asyncio.run(extract_and_save_cookies())

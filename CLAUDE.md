@@ -1,255 +1,196 @@
-# CLAUDE.md - Robustty Project Context
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Project Overview
 
-Robustty is a modular Discord music bot designed to search and play audio from multiple video platforms. It uses a microservices architecture with Docker for easy deployment and extensibility.
+Robustty is a modular Discord music bot for searching and playing audio from multiple video platforms (YouTube, Rumble, Odysee, PeerTube). Uses microservices architecture with Docker and Redis caching.
 
-## Architecture
+## Key Commands
 
-### Core Components
-
-1. **Discord Bot** (`src/bot/`)
-   - Main bot class handling Discord interactions
-   - Cogs for modular command organization
-   - Utility functions for embeds and permission checks
-
-2. **Platform System** (`src/platforms/`)
-   - Abstract base class for video platforms
-   - Platform registry for dynamic loading
-   - Individual platform implementations
-
-3. **Services** (`src/services/`)
-   - Multi-platform searcher
-   - Audio player with queue management
-   - Cookie manager for authentication
-   - Queue persistence
-
-4. **Docker Services**
-   - Main bot container
-   - Cookie extraction service
-   - Stream extraction service
-   - Redis for caching
-
-## Key Design Decisions
-
-### Modular Platform Architecture
-- Each platform inherits from `VideoPlatform` base class
-- Platforms are dynamically registered and loaded
-- Easy to add new platforms without modifying core code
-
-### Service Separation
-- Cookie extraction runs as separate service for security
-- Stream extraction isolated to handle platform-specific quirks
-- Redis used for cross-service caching
-
-### Error Handling
-- Graceful degradation when platforms fail
-- Comprehensive logging throughout
-- User-friendly error messages
-
-## Development Guidelines
-
-### Adding New Features
-
-1. **New Platform**
-   - Create class in `src/platforms/`
-   - Implement all abstract methods
-   - Register in bot's `setup_hook`
-   - Add configuration options
-
-2. **New Command**
-   - Add to appropriate cog in `src/bot/cogs/`
-   - Use utility functions for consistent embeds
-   - Implement proper permission checks
-
-3. **New Service**
-   - Create in `src/services/`
-   - Consider Docker service if needed
-   - Update bot initialization
-
-### Code Standards
-
-- Use type hints throughout
-- Async/await for all I/O operations
-- Comprehensive error handling
-- Logging for debugging
-- Docstrings for public methods
-
-### Testing
-
-- Unit tests for all platforms
-- Integration tests for services
-- Mock Discord interactions
-- Test error conditions
-
-## Common Tasks
-
-### Running Locally
-
+### Development
 ```bash
-# Setup environment
+# Run bot locally
+python -m src.main
+
+# Run tests
+pytest                                    # All tests
+pytest tests/integration -v              # Integration tests only  
+pytest tests/test_platforms/ -k rumble   # Specific platform tests
+./scripts/run-integration-tests.sh       # Full integration test suite
+
+# Type checking
+mypy src/                                 # Full type check
+mypy src/platforms/                       # Platform-specific
+
+# Code quality
+black src/                                # Format code
+flake8 src/                              # Lint code
+isort src/                               # Sort imports
+```
+
+### Docker (OrbStack Optimized)
+```bash
+# Setup environment first
 cp .env.example .env
 # Edit .env with your credentials
 
-# Install dependencies
-pip install -r requirements.txt
+# Start services (optimized for OrbStack with host networking)
+docker-compose up -d                      # Start bot + Redis
+docker-compose logs -f robustty           # View bot logs  
+docker-compose logs -f                    # View all logs
+docker-compose down && docker-compose up -d --build  # Rebuild and restart
 
-# Run bot
-python -m src.main
+# Cookie extraction logs
+docker-compose exec robustty tail -f /var/log/cron.log
+
+# Redis operations (using host network)
+redis-cli FLUSHALL                        # Clear cache (direct host access)
+docker-compose exec redis redis-cli info # Redis info via container
 ```
 
-### Docker Development
+## Architecture
 
-```bash
-# Build images
-docker-compose build
+### Platform System (`src/platforms/`)
+- **Base Class**: `VideoPlatform` defines required methods (`search_videos`, `get_stream_url`, `extract_video_id`)
+- **Registry**: `PlatformRegistry` manages dynamic platform loading
+- **Current Platforms**: YouTube (API), Rumble (Apify), Odysee, PeerTube
+- **Platform Registration**: Each platform auto-registers via `setup_hook` in bot initialization
 
-# Run services
-docker-compose up -d
+### Cookie Management (`src/extractors/`, `src/services/`)
+- **Brave Browser Focus**: Optimized for Brave browser cookie extraction from host system
+- **Scheduled Extraction**: Cron job extracts cookies every 2 hours automatically
+- **Host Mount**: Direct access to `~/Library/Application Support/BraveSoftware/Brave-Browser`
+- **Platform-Specific**: Saves cookies per platform (YouTube, Rumble, Odysee, PeerTube) in yt-dlp format
+- **Docker Integration**: Built-in cookie extraction using `scripts/extract-brave-cookies.py`
 
-# View logs
-docker-compose logs -f bot
+### Service Layer (`src/services/`)
+- **Searcher**: Multi-platform search aggregation with fallback handling
+- **Audio Player**: Queue management with Redis persistence
+- **Cache Manager**: Redis-backed caching for search results and metadata
+- **Metrics**: Prometheus metrics collection for monitoring
 
-# Rebuild specific service
-docker-compose build bot
-docker-compose up -d bot
-```
+## Adding New Platform
 
-### Adding Platform
-
-1. Create platform file:
+1. **Create Platform Class**:
 ```python
 # src/platforms/newplatform.py
 from .base import VideoPlatform
 
 class NewPlatform(VideoPlatform):
-    # Implement required methods
+    async def search_videos(self, query: str, max_results: int = 10):
+        # Implementation here
+        
+    async def get_stream_url(self, video_id: str):
+        # Implementation here
+        
+    def extract_video_id(self, url: str):
+        # Implementation here
+        
+    def is_platform_url(self, url: str):
+        # Implementation here
 ```
 
-2. Register in bot:
+2. **Register Platform** in `src/bot/bot.py` `setup_hook`:
 ```python
-# src/bot/bot.py
 from ..platforms.newplatform import NewPlatform
 self.platform_registry.register_platform('newplatform', NewPlatform)
 ```
 
-3. Add config:
+3. **Add Configuration** to `config/config.yaml`:
 ```yaml
-# config/config.yaml
 platforms:
   newplatform:
     enabled: true
+    # platform-specific config
+```
+
+## Testing Strategy
+
+- **Unit Tests**: `pytest tests/test_platforms/test_newplatform.py` 
+- **Integration Tests**: `pytest tests/integration/` (requires external APIs)
+- **Platform-specific**: Use `pytest -k platform_name` to test specific platforms
+- **Markers**: `@pytest.mark.integration` for external API tests, `@pytest.mark.unit` for isolated tests
+
+## Environment Setup
+
+### Required Environment Variables
+```bash
+# Discord
+DISCORD_TOKEN=your_discord_bot_token
+
+# Platform APIs  
+YOUTUBE_API_KEY=your_youtube_api_key
+APIFY_API_KEY=your_apify_key_for_rumble
+
+# Configuration
+LOG_LEVEL=INFO
+MAX_QUEUE_SIZE=100
+REDIS_URL=redis://localhost:6379
+```
+
+### Local Development Setup
+```bash
+# Install dependencies
+pip install -r requirements.txt
+
+# Copy environment template
+cp .env.example .env
+# Edit .env with your credentials
+
+# Run locally (requires Redis running)
+redis-server &                            # Start Redis in background
+python -m src.main                        # Start bot
+
+# Or use Docker (recommended)
+docker-compose up -d
+```
+
+## Recent Fixes (2025-01-25)
+
+### YouTube Streaming & Cookie Integration
+- **Standardized Cookie Paths**: All components now use `/app/cookies/` as primary path with fallbacks to `data/cookies/` and `./cookies/`
+- **Enhanced Cookie Conversion**: Improved JSON to Netscape format conversion with better error handling and validation
+- **Better Stream URL Extraction**: Fixed yt-dlp configuration conflicts and added proper format selection for audio streams
+- **Async URL Validation**: Added async validation for stream URLs using aiohttp with fallback to sync validation
+- **Error Handling**: Enhanced error handling throughout the YouTube platform implementation
+- **Multiple Cookie Path Support**: Cookie managers now automatically detect and use the best available cookie directory
+
+### Testing
+```bash
+# Test YouTube streaming fixes
+python test_youtube_streaming_fix.py
+
+# Test cookie extraction
+python scripts/extract-brave-cookies.py
 ```
 
 ## Debugging
 
-### Common Issues
+### Platform Issues
+- **Platform Not Loading**: Check registration in `src/bot/bot.py` and config in `config/config.yaml`
+- **API Failures**: Verify API keys in environment variables
+- **Cookie Issues**: Run `python scripts/extract-brave-cookies.py` manually or check cron logs
 
-1. **Import Errors**
-   - Check PYTHONPATH includes src/
-   - Verify __init__.py files exist
+### Audio Issues
+- **No Audio**: Verify FFmpeg installed and voice channel permissions
+- **Stream Failures**: Test stream URLs directly with `yt-dlp`
 
-2. **Platform Not Loading**
-   - Check platform is registered
-   - Verify config enabled
-   - Review logs for errors
+### Cookie Extraction Issues
+- **No Cookies Found**: Ensure Brave browser data is mounted correctly at `/host-brave`
+- **Permission Errors**: Check that Docker has access to `~/Library/Application Support/BraveSoftware/Brave-Browser`
+- **Cron Not Running**: Check cron logs with `docker-compose exec robustty tail -f /var/log/cron.log`
+- **Cookie Path Issues**: Check that `/app/cookies/` directory exists and is writable
+- **Cookie Conversion Failures**: Run test script to verify JSON to Netscape conversion works
 
-3. **No Audio**
-   - Verify FFmpeg installed
-   - Check voice permissions
-   - Test stream URL directly
+### Log Analysis
+- Bot logs: `docker-compose logs -f robustty`
+- Cookie extraction: `docker-compose exec robustty tail -f /var/log/cron.log`
+- Redis: `docker-compose logs -f redis`
 
-### Log Locations
+## Configuration Files
 
-- Bot logs: `logs/robustty.log`
-- Error logs: `logs/errors.log`
-- Docker logs: `docker-compose logs <service>`
-
-## Project Structure
-
-```
-robustty/
-├── src/
-│   ├── bot/           # Discord bot core
-│   ├── platforms/     # Platform implementations  
-│   ├── services/      # Business logic
-│   └── models/        # Data structures
-├── docker/            # Dockerfiles
-├── config/            # Configuration files
-├── tests/             # Test suites
-├── scripts/           # Deployment scripts
-└── docs/              # Documentation
-```
-
-## Environment Variables
-
-Critical variables:
-- `DISCORD_TOKEN`: Bot authentication
-- `YOUTUBE_API_KEY`: YouTube search
-- `LOG_LEVEL`: Debugging verbosity
-- `MAX_QUEUE_SIZE`: Performance tuning
-
-## Performance Considerations
-
-- Use caching for repeated searches
-- Implement rate limiting per platform
-- Batch operations where possible
-- Monitor memory usage with large queues
-
-## Security Notes
-
-- Never commit .env file
-- Rotate tokens regularly
-- Use environment variables for secrets
-- Validate user input
-- Sanitize error messages
-
-## Future Enhancements
-
-- Playlist support
-- Web dashboard
-- User preferences
-- Advanced queue management
-- Spotify integration
-- Webhook notifications
-
-## Testing Checklist
-
-Before commits:
-- [ ] Run pytest
-- [ ] Test new platforms manually
-- [ ] Verify Docker builds
-- [ ] Check for lint errors
-- [ ] Update documentation
-
-## Useful Commands
-
-```bash
-# Run tests
-pytest
-
-# Format code
-black src/
-
-# Check types
-mypy src/
-
-# Lint code
-flake8 src/
-
-# Build specific service
-docker-compose build stream-service
-
-# Enter container shell
-docker-compose exec bot bash
-
-# Clear Redis cache
-docker-compose exec redis redis-cli FLUSHALL
-```
-
-## Contact
-
-For questions or issues:
-- Create GitHub issue
-- Check existing documentation
-- Review test cases for examples
+- **`config/config.yaml`**: Platform settings, feature toggles
+- **`config/logging.yaml`**: Logging configuration
+- **`mypy.ini`**: Type checking configuration with platform-specific settings
+- **`pytest.ini`**: Test configuration with markers for integration/unit tests

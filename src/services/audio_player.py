@@ -79,10 +79,10 @@ class AudioPlayer:
             )
             logger.info(f"Got stream URL: {stream_url[:100]}...")
 
-            # Create FFmpeg source
+            # Create FFmpeg source with enhanced Discord compatibility
             ffmpeg_options = {
-                "before_options": "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5",
-                "options": "-vn",
+                "before_options": "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -loglevel info",
+                "options": "-vn -ar 48000 -ac 2 -b:a 128k",
             }
 
             source = discord.FFmpegPCMAudio(stream_url, **ffmpeg_options)  # type: ignore[arg-type]
@@ -112,33 +112,31 @@ class AudioPlayer:
             await self.play_next()
 
     async def _get_stream_url(self, song_info: Dict) -> str:
-        """Get stream URL from stream service"""
-        platform = song_info["platform"]
+        """Get stream URL directly from platform"""
+        platform_name = song_info["platform"]
         video_id = song_info["id"]
         logger.info(f"Song info: {song_info}")
-        logger.info(f"Getting stream URL for {platform}/{video_id}")
-        
-        # Use environment variable for stream service URL if available
-        import os
-        import aiohttp
-        stream_service_url = os.getenv("STREAM_SERVICE_URL", "http://stream-service:5000")
-        url = f"{stream_service_url}/stream/{platform}/{video_id}"
-        logger.info(f"Calling stream service: {url}")
+        logger.info(f"Getting stream URL for {platform_name}/{video_id}")
         
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        stream_url = data.get("url")  # Changed from 'stream_url' to 'url'
-                        logger.info(f"Got stream URL from service: {stream_url[:100]}...")
-                        return stream_url
-                    else:
-                        error_text = await response.text()
-                        logger.error(f"Stream service error ({response.status}): {error_text}")
-                        raise Exception(f"Failed to get stream URL: {error_text}")
+            # Get the platform from the bot's registry
+            if not self.bot or not hasattr(self.bot, 'platform_registry'):
+                raise Exception("Bot or platform registry not available")
+            
+            platform = self.bot.platform_registry.get_platform(platform_name)
+            if not platform:
+                raise Exception(f"Platform {platform_name} not found")
+            
+            # Get stream URL from platform
+            stream_url = await platform.get_stream_url(video_id)
+            if not stream_url:
+                raise Exception(f"No stream URL returned from {platform_name}")
+            
+            logger.info(f"Got stream URL from {platform_name}: {stream_url[:100]}...")
+            return stream_url
+            
         except Exception as e:
-            logger.error(f"Error getting stream URL: {e}")
+            logger.error(f"Error getting stream URL from platform: {e}")
             raise
 
     async def _playback_finished(self, error):

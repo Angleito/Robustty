@@ -55,10 +55,15 @@ YDL_OPTS = {
     "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
 }
 
-# Add cookiefile if it exists
-COOKIE_FILE = "/app/cookies/youtube_cookies.json"
-if os.path.exists(COOKIE_FILE):
-    YDL_OPTS["cookiefile"] = COOKIE_FILE
+# Add cookiefile if it exists (prefer Netscape format for yt-dlp)
+NETSCAPE_COOKIE_FILE = "/app/cookies/youtube_cookies.txt"
+JSON_COOKIE_FILE = "/app/cookies/youtube_cookies.json"
+
+if os.path.exists(NETSCAPE_COOKIE_FILE):
+    YDL_OPTS["cookiefile"] = NETSCAPE_COOKIE_FILE
+    logger.info("Using Netscape format YouTube cookies")
+elif os.path.exists(JSON_COOKIE_FILE):
+    logger.warning("JSON cookies found but Netscape format preferred - YouTube platform will handle conversion")
 
 
 def get_cache_key(platform: str, video_id: str) -> str:

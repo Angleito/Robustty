@@ -1,9 +1,20 @@
 # Environment files
 .env
+.env.*
+!.env.example
+.env.backup
 .env.local
 .env.production
-.env.*.local
-!.env.example
+.env.development
+.env.test
+.env.staging
+
+# Local configuration overrides
+config.local.yaml
+config.*.yaml
+!config.yaml
+settings.local.*
+local_settings.*
 
 # Python
 __pycache__/
@@ -49,25 +60,57 @@ coverage.xml
 .hypothesis/
 .tox/
 
-# Logs
+# Logs & Debug files
 logs/
+log/
 *.log
 *.log.*
-log/
+debug.log*
+error.log*
+access.log*
+audit.log*
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+debug/
+trace/
+crash/
+core.*
 
-# Bot data
+# Bot data & Browser data
 data/
 cookies/
+*cookies*
 cache/
 queues/
 *.db
-*.sqlite
-*.sqlite3
+*.sqlite*
+*.sql
+*.dump
 *.pkl
 *.pickle
+database/
+db/
+browser-data/
+session*
+*session*
+.browser/
+Local Storage/
+IndexedDB/
+WebKit/
+BraveSoftware/
+
+# Redis persistence
+dump.rdb
+appendonly.aof
+
+# Docker volume mounts (if accidentally created locally)
+robustty-cookies/
+robustty-redis-data/
+robustty-data/
+*-data/
+_data/
+volumes/
 
 # Backups
 backups/
@@ -106,7 +149,7 @@ desktop.ini
 docker-compose.override.yml
 docker-compose.*.yml
 
-# Temporary files
+# Cache & Temporary files
 *.tmp
 *.temp
 .temp/
@@ -114,20 +157,38 @@ docker-compose.*.yml
 tmp/
 temp/
 .cache/
+*cache*
+stream-cache/
+download-cache/
 *.pid
 *.seed
 *.pid.lock
+*.lock
+nohup.out
 
-# Security
-*.pem
+# Authentication & Security
 *.key
+*.pem
 *.cert
 *.crt
+*.p12
 *.pfx
-.env.*
-!.env.example
+*.jks
+api_key*
+*token*
+*secret*
+*credential*
+*password*
+*auth*
 secrets/
 credentials/
+
+# SSH and security
+id_rsa*
+id_ed25519*
+known_hosts
+authorized_keys
+.ssh/
 
 # Media files (if not needed in repo)
 *.mp3

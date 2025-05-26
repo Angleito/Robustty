@@ -1,84 +1,45 @@
 services:
-  # Main Discord bot
-  bot:
+  # Main Discord bot with integrated cookie extraction
+  robustty:
     build:
       context: .
-      dockerfile: docker/bot/Dockerfile
-      args:
-        - BUILDKIT_PROGRESS=plain
-        - DOCKER_BUILDKIT=1
+      dockerfile: Dockerfile
     container_name: robustty-bot
     restart: unless-stopped
+    network_mode: host  # OrbStack optimization - use host networking
     environment:
       - DISCORD_TOKEN=${DISCORD_TOKEN}
       - YOUTUBE_API_KEY=${YOUTUBE_API_KEY}
+      - APIFY_API_KEY=${APIFY_API_KEY}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - SEARCH_TIMEOUT=${SEARCH_TIMEOUT:-30}
       - STREAM_TIMEOUT=${STREAM_TIMEOUT:-300}
       - MAX_QUEUE_SIZE=${MAX_QUEUE_SIZE:-100}
-      - ODYSEE_ENABLED=${ODYSEE_ENABLED:-false}
-      - RUMBLE_ENABLED=${RUMBLE_ENABLED:-false}
+      - REDIS_URL=redis://localhost:6379
+      - COOKIE_REFRESH_INTERVAL=7200  # 2 hours in seconds
     volumes:
+      # Mount host Brave browser data for cookie extraction
+      - "${HOME}/Library/Application Support/BraveSoftware/Brave-Browser:/host-brave:ro"
+      # App data persistence
       - ./config:/app/config:ro
       - ./logs:/app/logs
       - ./data:/app/data
-      - cookies:/app/cookies:ro
+      - robustty-cookies:/app/cookies
     depends_on:
       - redis
-      - stream-service
-    networks:
-      - bot-network
 
-  # Cookie extraction service
-  cookie-extractor:
-    build:
-      context: .
-      dockerfile: docker/cookie-extractor/Dockerfile
-    container_name: robustty-cookies
-    restart: unless-stopped
-    volumes:
-      - cookies:/app/cookies
-      # Browser profile path is optional - comment out if not using
-      # - ${BROWSER_PROFILE_PATH}:/browser/profile:ro
-    environment:
-      - REFRESH_INTERVAL=${COOKIE_REFRESH_INTERVAL}
-      - DISPLAY=:99
-    networks:
-      - bot-network
-
-  # Stream extraction service
-  stream-service:
-    build:
-      context: .
-      dockerfile: docker/stream-service/Dockerfile
-    container_name: robustty-stream
-    restart: unless-stopped
-    ports:
-      - "${STREAM_PORT:-5001}:5000"
-    volumes:
-      - cookies:/app/cookies:ro
-      - ./data/cache:/app/cache
-    environment:
-      - FLASK_ENV=production
-      - USE_RUMBLE_EXTRACTOR=${USE_RUMBLE_EXTRACTOR:-false}
-      - APIFY_API_TOKEN=${APIFY_API_TOKEN}
-    networks:
-      - bot-network
-
-  # Redis for caching
+  # Redis for caching (OrbStack optimized)
   redis:
     image: redis:7-alpine
     container_name: robustty-redis
     restart: unless-stopped
+    network_mode: host  # OrbStack optimization
     volumes:
-      - redis-data:/data
-    networks:
-      - bot-network
+      - robustty-redis-data:/data
+    command: redis-server --appendonly yes --port 6379
 
 volumes:
-  cookies:
-  redis-data:
-
-networks:
-  bot-network:
-    driver: bridge
+  robustty-cookies:
+    driver: local
+  robustty-redis-data:
+    driver: local

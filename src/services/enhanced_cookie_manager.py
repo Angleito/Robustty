@@ -16,8 +16,32 @@ class EnhancedCookieManager:
     
     def __init__(self, config: Dict):
         self.config = config
-        self.cookie_dir = Path("data/cookies")
-        self.cookie_dir.mkdir(parents=True, exist_ok=True)
+        # Use standardized cookie path with fallback for compatibility
+        cookie_paths = [
+            Path("/app/cookies"),
+            Path("data/cookies"),
+            Path("./cookies")
+        ]
+        
+        self.cookie_dir = None
+        for path in cookie_paths:
+            try:
+                path.mkdir(parents=True, exist_ok=True)
+                # Test write access
+                test_file = path / ".test_write"
+                test_file.touch()
+                test_file.unlink()
+                self.cookie_dir = path
+                break
+            except (PermissionError, OSError):
+                continue
+        
+        if self.cookie_dir is None:
+            # Last resort fallback
+            self.cookie_dir = Path("./cookies")
+            self.cookie_dir.mkdir(parents=True, exist_ok=True)
+        
+        logger.info(f"Using cookie directory: {self.cookie_dir}")
         self.cookies: Dict[str, List[Dict]] = {}
         self.extractor = CrossPlatformCookieExtractor()
         self._extraction_lock = asyncio.Lock()

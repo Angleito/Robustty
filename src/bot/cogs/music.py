@@ -24,6 +24,7 @@ class Music(commands.Cog):
 
         # Expose command callbacks for direct invocation in tests
         for cmd_name in [
+            "join",
             "play",
             "skip",
             "stop",
@@ -32,11 +33,128 @@ class Music(commands.Cog):
             "pause",
             "resume",
             "volume",
+            "test",
         ]:
             cmd_obj = getattr(type(self), cmd_name)
             if hasattr(cmd_obj, "callback"):
                 func = cmd_obj.callback.__get__(self, type(self))
                 setattr(self, cmd_name, func)
+
+    @commands.command(name="join", aliases=["j", "connect"])
+    @is_in_voice_channel()
+    async def join(self, ctx: commands.Context[commands.Bot]) -> None:
+        """Join the voice channel"""
+        # Get voice channel
+        if (
+            isinstance(ctx.author, discord.User)
+            or not hasattr(ctx.author, "voice")
+            or not ctx.author.voice
+            or not ctx.author.voice.channel
+        ):
+            embed = create_error_embed("Error", "You must be in a voice channel to use this command!")
+            await ctx.send(embed=embed)
+            return
+        
+        voice_channel = ctx.author.voice.channel
+        
+        # Connect to voice if not already connected
+        try:
+            if not ctx.voice_client:
+                await voice_channel.connect()
+                embed = create_embed("Connected", f"Joined {voice_channel.name}")
+                await ctx.send(embed=embed)
+            elif (
+                hasattr(ctx.voice_client, "channel")
+                and ctx.voice_client.channel != voice_channel
+            ):
+                if hasattr(ctx.voice_client, "move_to"):
+                    voice_client: Any = ctx.voice_client
+                    await voice_client.move_to(voice_channel)
+                    embed = create_embed("Moved", f"Moved to {voice_channel.name}")
+                    await ctx.send(embed=embed)
+                else:
+                    await ctx.voice_client.disconnect(force=True)
+                    await voice_channel.connect()
+                    embed = create_embed("Connected", f"Joined {voice_channel.name}")
+                    await ctx.send(embed=embed)
+            else:
+                embed = create_embed("Already connected", f"Already in {voice_channel.name}")
+                await ctx.send(embed=embed)
+        except Exception as e:
+            embed = create_error_embed("Connection failed", f"Could not connect to voice channel: {e}")
+            await ctx.send(embed=embed)
+
+    @commands.command(name="test")
+    @is_in_voice_channel()
+    async def test(self, ctx: commands.Context[commands.Bot]) -> None:
+        """Test audio playback with a known working video"""
+        # Get voice channel
+        if (
+            isinstance(ctx.author, discord.User)
+            or not hasattr(ctx.author, "voice")
+            or not ctx.author.voice
+            or not ctx.author.voice.channel
+        ):
+            embed = create_error_embed("Error", "You must be in a voice channel!")
+            await ctx.send(embed=embed)
+            return
+        
+        voice_channel = ctx.author.voice.channel
+        
+        # Connect to voice if not already connected
+        try:
+            if not ctx.voice_client:
+                await voice_channel.connect()
+            elif (
+                hasattr(ctx.voice_client, "channel")
+                and ctx.voice_client.channel != voice_channel
+            ):
+                if hasattr(ctx.voice_client, "move_to"):
+                    voice_client: Any = ctx.voice_client
+                    await voice_client.move_to(voice_channel)
+        except Exception as e:
+            embed = create_error_embed("Connection failed", f"Could not connect: {e}")
+            await ctx.send(embed=embed)
+            return
+        
+        # Test with "Never Gonna Give You Up" - a well-known working video
+        test_video = {
+            'id': 'dQw4w9WgXcQ',
+            'title': 'Rick Astley - Never Gonna Give You Up (Audio Test)',
+            'channel': 'RickAstleyVEVO',
+            'thumbnail': 'https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg',
+            'url': 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+            'platform': 'youtube',
+            'description': 'Audio test video'
+        }
+        
+        # Get audio player and set high volume
+        if not ctx.guild:
+            return
+        player = self.bot.get_audio_player(ctx.guild.id)
+        if isinstance(ctx.voice_client, discord.VoiceClient):
+            player.voice_client = ctx.voice_client
+        
+        # Set volume to 100% for test
+        player.set_volume(100)
+        
+        # Add to queue and play
+        await player.add_to_queue(test_video)
+        
+        embed = create_embed(
+            "🧪 Audio Test Started",
+            f"Playing audio test video at 100% volume\n"
+            f"**Video**: {test_video['title']}\n"
+            f"**Channel**: {voice_channel.name}\n"
+            f"**Volume**: 100%\n\n"
+            f"If you can't hear this, check:\n"
+            f"• Discord audio settings\n"
+            f"• Bot permissions in voice channel\n"
+            f"• Your device audio output"
+        )
+        await ctx.send(embed=embed)
+        
+        await player.play_next()
 
     @commands.command(name="play", aliases=["p"])
     @is_in_voice_channel()
