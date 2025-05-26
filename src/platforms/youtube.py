@@ -331,7 +331,7 @@ class YouTubePlatform(VideoPlatform):
                             logger.error("yt-dlp returned no information")
                             return None
                         
-                        # Extract URL from different possible structures
+                        # Extract URL from different possible structures, preferring direct URLs over HLS
                         stream_url = None
                         
                         if 'url' in info:
@@ -342,15 +342,37 @@ class YouTubePlatform(VideoPlatform):
                             
                             # Prefer audio-only formats
                             audio_formats = [f for f in formats if f.get('vcodec') == 'none' and f.get('url')]
+                            
                             if audio_formats:
-                                # Sort by audio quality
-                                audio_formats.sort(key=lambda f: f.get('abr', 0) or f.get('tbr', 0), reverse=True)
-                                stream_url = audio_formats[0]['url']
+                                # Separate direct URLs from HLS/DASH
+                                direct_formats = [f for f in audio_formats if not any(x in f.get('url', '') for x in ['m3u8', 'mpd', 'manifest'])]
+                                hls_formats = [f for f in audio_formats if any(x in f.get('url', '') for x in ['m3u8', 'manifest'])]
+                                
+                                # Prefer direct formats for better stability
+                                preferred_formats = direct_formats if direct_formats else hls_formats
+                                
+                                if preferred_formats:
+                                    # Sort by audio quality
+                                    preferred_formats.sort(key=lambda f: f.get('abr', 0) or f.get('tbr', 0), reverse=True)
+                                    stream_url = preferred_formats[0]['url']
+                                    format_type = "direct" if direct_formats else "HLS"
+                                    logger.info(f"Selected {format_type} audio format with bitrate {preferred_formats[0].get('abr', 'unknown')}")
+                                else:
+                                    # Sort all audio formats by quality
+                                    audio_formats.sort(key=lambda f: f.get('abr', 0) or f.get('tbr', 0), reverse=True)
+                                    stream_url = audio_formats[0]['url']
                             else:
                                 # Fallback to best available format
                                 valid_formats = [f for f in formats if f.get('url')]
                                 if valid_formats:
-                                    stream_url = valid_formats[-1]['url']
+                                    # Prefer non-HLS formats
+                                    direct_formats = [f for f in valid_formats if not any(x in f.get('url', '') for x in ['m3u8', 'mpd', 'manifest'])]
+                                    if direct_formats:
+                                        stream_url = direct_formats[-1]['url']
+                                        logger.info("Using direct video format as audio fallback")
+                                    else:
+                                        stream_url = valid_formats[-1]['url']
+                                        logger.info("Using HLS video format as audio fallback")
                         elif 'entries' in info and info['entries']:
                             # Handle playlist case (should not happen with noplaylist=True)
                             first_entry = info['entries'][0]
