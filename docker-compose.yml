@@ -6,7 +6,7 @@ services:
       dockerfile: Dockerfile
     container_name: robustty-bot
     restart: unless-stopped
-    network_mode: host  # OrbStack optimization - use host networking
+    network_mode: host  # OrbStack optimization - use host networking for better Discord voice connectivity
     environment:
       - DISCORD_TOKEN=${DISCORD_TOKEN}
       - YOUTUBE_API_KEY=${YOUTUBE_API_KEY}
@@ -17,6 +17,9 @@ services:
       - MAX_QUEUE_SIZE=${MAX_QUEUE_SIZE:-100}
       - REDIS_URL=redis://localhost:6379
       - COOKIE_REFRESH_INTERVAL=7200  # 2 hours in seconds
+      # Discord voice connection optimizations
+      - DISCORD_VOICE_TIMEOUT=30
+      - DISCORD_RECONNECT_TIMEOUT=60
     volumes:
       # Mount host Brave browser data for cookie extraction
       - "${HOME}/Library/Application Support/BraveSoftware/Brave-Browser:/host-brave:ro"
@@ -27,6 +30,12 @@ services:
       - robustty-cookies:/app/cookies
     depends_on:
       - redis
+    # Ensure container has access to network interfaces for voice connections
+    cap_add:
+      - NET_ADMIN
+    # Security context for better network access
+    security_opt:
+      - no-new-privileges:true
 
   # Redis for caching (OrbStack optimized)
   redis:

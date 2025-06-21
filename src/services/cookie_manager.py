@@ -16,12 +16,8 @@ class CookieManager:
     def __init__(self, config: Dict):
         self.config = config
         # Use standardized cookie path with fallback for compatibility
-        cookie_paths = [
-            Path("/app/cookies"),
-            Path("data/cookies"),
-            Path("./cookies")
-        ]
-        
+        cookie_paths = [Path("/app/cookies"), Path("data/cookies"), Path("./cookies")]
+
         self.cookie_dir = None
         for path in cookie_paths:
             try:
@@ -34,12 +30,12 @@ class CookieManager:
                 break
             except (PermissionError, OSError):
                 continue
-        
+
         if self.cookie_dir is None:
             # Last resort fallback
             self.cookie_dir = Path("./cookies")
             self.cookie_dir.mkdir(parents=True, exist_ok=True)
-        
+
         logger.info(f"Using cookie directory: {self.cookie_dir}")
         self.cookies: Dict[str, List[Dict]] = {}
         self.extractor = CrossPlatformCookieExtractor()
@@ -78,41 +74,43 @@ class CookieManager:
         async with self._extraction_lock:
             try:
                 logger.info(f"Extracting browser cookies for {platform}")
-                
+
                 # Run extraction in thread pool to avoid blocking
                 loop = asyncio.get_event_loop()
                 cookies = await loop.run_in_executor(
-                    None, 
-                    self._extract_platform_cookies, 
-                    platform
+                    None, self._extract_platform_cookies, platform
                 )
-                
+
                 if cookies:
                     await self.save_cookies(platform, cookies)
-                    logger.info(f"Extracted and saved {len(cookies)} cookies for {platform}")
+                    logger.info(
+                        f"Extracted and saved {len(cookies)} cookies for {platform}"
+                    )
                 else:
                     logger.warning(f"No cookies found for {platform}")
-                    
+
             except Exception as e:
                 logger.error(f"Failed to extract cookies for {platform}: {e}")
-    
+
     def _extract_platform_cookies(self, platform: str) -> List[Dict]:
         """Extract cookies for a specific platform (sync method for executor)"""
         jar = self.extractor.find_platform_cookies(platform)
-        
+
         # Convert CookieJar to list of dicts
         cookies = []
         for cookie in jar:
-            cookies.append({
-                'name': cookie.name,
-                'value': cookie.value,
-                'domain': cookie.domain,
-                'path': cookie.path,
-                'secure': cookie.secure,
-                'httpOnly': False,  # Default since RequestsCookieJar doesn't track this
-                'sameSite': 'None'
-            })
-        
+            cookies.append(
+                {
+                    "name": cookie.name,
+                    "value": cookie.value,
+                    "domain": cookie.domain,
+                    "path": cookie.path,
+                    "secure": cookie.secure,
+                    "httpOnly": False,  # Default since RequestsCookieJar doesn't track this
+                    "sameSite": "None",
+                }
+            )
+
         return cookies
 
     async def refresh_cookies(self):
@@ -124,22 +122,22 @@ class CookieManager:
         """Cleanup resources"""
         # Save any pending cookies
         pass
-    
+
     def get_cookie_jar(self, platform: str):
         """Get a requests CookieJar for a platform"""
         import requests
-        
+
         jar = requests.cookies.RequestsCookieJar()
         cookies = self.get_cookies(platform)
-        
+
         if cookies:
             for cookie in cookies:
                 jar.set(
-                    name=cookie['name'],
-                    value=cookie['value'],
-                    domain=cookie.get('domain', ''),
-                    path=cookie.get('path', '/'),
-                    secure=cookie.get('secure', False)
+                    name=cookie["name"],
+                    value=cookie["value"],
+                    domain=cookie.get("domain", ""),
+                    path=cookie.get("path", "/"),
+                    secure=cookie.get("secure", False),
                 )
-        
+
         return jar

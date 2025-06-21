@@ -1,5 +1,5 @@
 # Discord
-discord.py==2.3.2
+git+https://github.com/Rapptz/discord.py.git@refs/pull/10210/head
 PyNaCl==1.5.0
 
 # API Clients

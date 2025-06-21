@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from typing import Dict, Optional
 
@@ -79,7 +80,7 @@ class RobusttyBot(commands.Bot):
             type=discord.ActivityType.listening, name=self.config["bot"]["activity"]
         )
         await self.change_presence(activity=activity)
-        
+
         # Update metrics with active connections
         self._update_connection_metrics()
 
@@ -95,7 +96,7 @@ class RobusttyBot(commands.Bot):
         if guild.id in self.audio_players:
             await self.audio_players[guild.id].cleanup()
             del self.audio_players[guild.id]
-        
+
         # Update metrics
         self._update_connection_metrics()
 
@@ -108,37 +109,70 @@ class RobusttyBot(commands.Bot):
         return self.audio_players[guild_id]
 
     async def close(self) -> None:
-        """Cleanup on bot shutdown"""
+        """Cleanup on bot shutdown with proper async resource management"""
         logger.info("Shutting down bot...")
 
-        # Cleanup audio players
-        for player in self.audio_players.values():
-            await player.cleanup()
+        try:
+            # Cleanup audio players with proper error handling
+            cleanup_tasks = []
+            for guild_id, player in self.audio_players.items():
+                try:
+                    cleanup_tasks.append(player.cleanup())
+                except Exception as e:
+                    logger.warning(
+                        f"Error initiating cleanup for guild {guild_id}: {e}"
+                    )
 
-        # Cleanup platforms
-        await self.platform_registry.cleanup_all()
+            if cleanup_tasks:
+                await asyncio.gather(*cleanup_tasks, return_exceptions=True)
 
-        # Cleanup cookie manager
-        if self.cookie_manager:
-            await self.cookie_manager.cleanup()
+            # Cleanup platforms
+            try:
+                await self.platform_registry.cleanup_all()
+            except Exception as e:
+                logger.warning(f"Error cleaning up platforms: {e}")
 
-        await super().close()
-    
+            # Cleanup cookie manager
+            if self.cookie_manager:
+                try:
+                    await self.cookie_manager.cleanup()
+                except Exception as e:
+                    logger.warning(f"Error cleaning up cookie manager: {e}")
+
+            # Ensure all voice clients are properly disconnected
+            for guild in self.guilds:
+                if hasattr(guild, "voice_client") and guild.voice_client:
+                    try:
+                        await guild.voice_client.disconnect(force=True)
+                    except Exception as e:
+                        logger.debug(
+                            f"Error disconnecting voice client for guild {guild.id}: {e}"
+                        )
+
+            # Brief pause to allow cleanup to complete
+            await asyncio.sleep(0.5)
+
+        except Exception as e:
+            logger.error(f"Error during bot shutdown: {e}")
+        finally:
+            await super().close()
+
     async def on_voice_state_update(
-        self, 
-        member: discord.Member, 
-        before: discord.VoiceState, 
-        after: discord.VoiceState
+        self,
+        member: discord.Member,
+        before: discord.VoiceState,
+        after: discord.VoiceState,
     ) -> None:
         """Track voice connection changes for metrics"""
         # Only track bot's own voice state
         if member.id == self.user.id if self.user else None:
             self._update_connection_metrics()
-    
+
     def _update_connection_metrics(self) -> None:
         """Update active voice connections metric"""
         active_connections = sum(
-            1 for player in self.audio_players.values() 
+            1
+            for player in self.audio_players.values()
             if player.voice_client and player.voice_client.is_connected()
         )
         self.metrics.set_active_connections(active_connections)

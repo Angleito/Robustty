@@ -6,6 +6,7 @@ from typing import List, Optional, TypedDict, Union
 # Channel types
 class ChannelInfo(TypedDict):
     """PeerTube channel information."""
+
     displayName: str
     name: str
     description: Optional[str]
@@ -15,6 +16,7 @@ class ChannelInfo(TypedDict):
 # Resolution types
 class Resolution(TypedDict):
     """Video resolution information."""
+
     id: int
     label: str
 
@@ -22,6 +24,7 @@ class Resolution(TypedDict):
 # File types
 class VideoFile(TypedDict):
     """PeerTube video file information."""
+
     fileUrl: str
     resolution: Resolution
     size: int
@@ -32,6 +35,7 @@ class VideoFile(TypedDict):
 # Video types
 class VideoInfo(TypedDict):
     """PeerTube video information from API."""
+
     uuid: str
     name: str
     description: Optional[str]
@@ -49,6 +53,7 @@ class VideoInfo(TypedDict):
 # Search response types
 class SearchData(TypedDict):
     """PeerTube search response data."""
+
     data: List[VideoInfo]
     total: int
 
@@ -56,6 +61,7 @@ class SearchData(TypedDict):
 # Internal types
 class VideoSummary(TypedDict):
     """Video summary for search results."""
+
     id: str
     title: str
     channel: str
@@ -70,6 +76,7 @@ class VideoSummary(TypedDict):
 
 class VideoDetails(VideoSummary):
     """Full video details with additional fields."""
+
     likes: Optional[int]
     dislikes: Optional[int]
     publishedAt: Optional[str]
@@ -78,6 +85,7 @@ class VideoDetails(VideoSummary):
 # Configuration types
 class PeerTubeConfig(TypedDict):
     """PeerTube platform configuration."""
+
     instances: List[str]
     max_results_per_instance: int
     enabled: bool
@@ -86,12 +94,19 @@ class PeerTubeConfig(TypedDict):
 # Error types
 class PeerTubeError(Exception):
     """Base exception for PeerTube-related errors."""
+
     pass
 
 
 class PeerTubeAPIError(PeerTubeError):
     """Exception for PeerTube API errors."""
-    def __init__(self, message: str, status_code: Optional[int] = None, instance: Optional[str] = None):
+
+    def __init__(
+        self,
+        message: str,
+        status_code: Optional[int] = None,
+        instance: Optional[str] = None,
+    ):
         super().__init__(message)
         self.status_code = status_code
         self.instance = instance
@@ -99,6 +114,7 @@ class PeerTubeAPIError(PeerTubeError):
 
 class PeerTubeSearchError(PeerTubeError):
     """Exception for search-related errors."""
+
     pass
 
 

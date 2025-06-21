@@ -15,11 +15,13 @@ logger = logging.getLogger(__name__)
 
 class PlatformRegistry(Protocol):
     """Type stub for platform registry"""
+
     def get_all_platforms(self) -> Dict[str, Any]: ...
 
 
 class RobottyBot(Bot):
     """Type stub for our custom bot class"""
+
     platform_registry: PlatformRegistry
 
 
@@ -31,7 +33,9 @@ class Admin(Cog):
 
     @commands.command(name="reload")
     @is_admin()
-    async def reload(self, ctx: Context[RobottyBot], extension: Optional[str] = None) -> None:
+    async def reload(
+        self, ctx: Context[RobottyBot], extension: Optional[str] = None
+    ) -> None:
         """Reload a cog or all cogs"""
         if extension:
             try:

@@ -2,6 +2,12 @@
 """Test cookie manager integration"""
 import asyncio
 import logging
+import os
+import sys
+
+# Add src to path
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
+
 from src.services.cookie_manager import CookieManager
 
 logging.basicConfig(level=logging.INFO)

@@ -7,7 +7,7 @@ import aiohttp
 from unittest.mock import Mock, AsyncMock
 
 # Add src to path
-sys.path.insert(0, '/Users/angel/Documents/Projects/robustty/robustty')
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
 from src.platforms.youtube import YouTubePlatform
 from src.services.audio_player import AudioPlayer

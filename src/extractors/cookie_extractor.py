@@ -1,4 +1,5 @@
 """Browser cookie extraction for YouTube authentication"""
+
 import json
 import logging
 import os
@@ -10,11 +11,14 @@ logger = logging.getLogger(__name__)
 # Try to import browser_cookie3, but make it optional
 try:
     import browser_cookie3
+
     BROWSER_COOKIE3_AVAILABLE = True
 except ImportError:
     browser_cookie3 = None
     BROWSER_COOKIE3_AVAILABLE = False
-    logger.warning("browser_cookie3 is not installed. Cookie extraction will be disabled.")
+    logger.warning(
+        "browser_cookie3 is not installed. Cookie extraction will be disabled."
+    )
 
 SUPPORTED_DOMAINS = ["youtube.com", ".youtube.com"]
 
@@ -24,7 +28,7 @@ def extract_cookies_browser() -> Dict[str, List[Dict]]:
     if not BROWSER_COOKIE3_AVAILABLE:
         logger.warning("browser_cookie3 is not available. Cannot extract cookies.")
         return {}
-    
+
     cookies = {}
 
     # Browser functions to try
@@ -71,7 +75,7 @@ def extract_manual_cookies(cookie_file: str) -> Optional[List[Dict]]:
     """Extract cookies from a manually provided JSON file"""
     try:
         if os.path.exists(cookie_file):
-            with open(cookie_file, 'r') as f:
+            with open(cookie_file, "r") as f:
                 cookies = json.load(f)
                 logger.info(f"Loaded {len(cookies)} cookies from {cookie_file}")
                 return cookies

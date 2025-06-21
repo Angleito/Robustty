@@ -11,9 +11,9 @@ import sys
 import os
 
 # Add src to path
-sys.path.insert(0, str(Path(__file__).parent / 'src'))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from platforms.youtube import YouTubePlatform
+from src.platforms.youtube import YouTubePlatform
 
 # Configure logging
 logging.basicConfig(

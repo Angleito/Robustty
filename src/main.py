@@ -36,7 +36,7 @@ async def main() -> None:
     try:
         # Load .env file
         load_dotenv()
-        
+
         # Load configuration
         config = load_config("config/config.yaml")
 

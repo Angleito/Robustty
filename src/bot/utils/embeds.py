@@ -22,21 +22,27 @@ def create_embed(
     return embed
 
 
-def create_error_embed(title: str = "Error", description: Optional[str] = None) -> Embed:
+def create_error_embed(
+    title: str = "Error", description: Optional[str] = None
+) -> Embed:
     """Create an error embed"""
     return create_embed(
         title=f"❌ {title}", description=description, color=discord.Color.red()
     )
 
 
-def create_success_embed(title: str = "Success", description: Optional[str] = None) -> Embed:
+def create_success_embed(
+    title: str = "Success", description: Optional[str] = None
+) -> Embed:
     """Create a success embed"""
     return create_embed(
         title=f"✅ {title}", description=description, color=discord.Color.green()
     )
 
 
-def create_warning_embed(title: str = "Warning", description: Optional[str] = None) -> Embed:
+def create_warning_embed(
+    title: str = "Warning", description: Optional[str] = None
+) -> Embed:
     """Create a warning embed"""
     return create_embed(
         title=f"⚠️ {title}", description=description, color=discord.Color.yellow()

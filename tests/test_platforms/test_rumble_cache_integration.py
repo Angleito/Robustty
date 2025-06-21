@@ -6,7 +6,7 @@ import asyncio
 import pytest
 from unittest.mock import AsyncMock, Mock, patch
 
-from src.platforms.rumble_platform import RumblePlatform
+from src.platforms.rumble import RumblePlatform
 from src.services.cache_manager import CacheManager
 from src.utils.config_loader import ConfigLoader
 

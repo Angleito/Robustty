@@ -47,6 +47,11 @@ docker-compose exec robustty tail -f /var/log/cron.log
 # Redis operations (using host network)
 redis-cli FLUSHALL                        # Clear cache (direct host access)
 docker-compose exec redis redis-cli info # Redis info via container
+
+# Discord 4006 Error Diagnostics
+./scripts/run-4006-diagnostics.sh         # Run comprehensive 4006 error diagnostics
+./scripts/run-4006-diagnostics.sh --status # Check diagnostic readiness
+./scripts/run-4006-diagnostics.sh --local  # Run diagnostics locally
 ```
 
 ## Architecture
@@ -175,6 +180,14 @@ python scripts/extract-brave-cookies.py
 ### Audio Issues
 - **No Audio**: Verify FFmpeg installed and voice channel permissions
 - **Stream Failures**: Test stream URLs directly with `yt-dlp`
+
+### Discord 4006 Voice Connection Issues
+- **Error 4006 "Session Timed Out"**: Run comprehensive diagnostics with `./scripts/run-4006-diagnostics.sh`
+- **Persistent 4006 Errors**: Check Discord status at status.discord.com, implement regional failover
+- **Intermittent Voice Failures**: Run diagnostics to check voice server health and network stability
+- **Post-Deployment 4006 Issues**: Verify Docker networking mode and port accessibility
+- **Rate Limiting**: Implement exponential backoff with proper cooling-off periods
+- **Voice Permission Problems**: Use diagnostics to verify bot permissions across all voice channels
 
 ### Cookie Extraction Issues
 - **No Cookies Found**: Ensure Brave browser data is mounted correctly at `/host-brave`

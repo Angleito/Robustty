@@ -116,3 +116,7 @@ class MultiPlatformSearcher:
                     results[name] = []
 
         return results
+
+
+# Legacy alias for backwards compatibility
+Searcher = MultiPlatformSearcher

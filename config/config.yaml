@@ -14,7 +14,7 @@ platforms:
     instances:
       - https://framatube.org
       - https://video.ploud.fr
-      - https://peertube.social
+      # https://peertube.social - DISABLED: Domain expired, returns HTML parking page
     max_results_per_instance: 5
 
   odysee:

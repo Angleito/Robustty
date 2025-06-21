@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 """Quick test for cookie extraction"""
 import logging
+import os
+import sys
+
+# Add src to path
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
+
 from src.extractors.cross_platform_cookies import CrossPlatformCookieExtractor
 
 # Enable debug logging

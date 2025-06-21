@@ -39,7 +39,9 @@ class PeerTubePlatform(VideoPlatform):
             return []
 
         all_results: List[Dict[str, Any]] = []
-        tasks: List[Coroutine[Any, Any, Union[List[Dict[str, Any]], PeerTubeError]]] = []
+        tasks: List[Coroutine[Any, Any, Union[List[Dict[str, Any]], PeerTubeError]]] = (
+            []
+        )
 
         # Calculate results per instance
         results_per_instance: int = min(
@@ -52,9 +54,7 @@ class PeerTubePlatform(VideoPlatform):
             tasks.append(task)
 
         # Gather results from all instances
-        instance_results = await asyncio.gather(
-            *tasks, return_exceptions=True
-        )
+        instance_results = await asyncio.gather(*tasks, return_exceptions=True)
 
         for i, results in enumerate(instance_results):
             if isinstance(results, Exception):
@@ -95,7 +95,25 @@ class PeerTubePlatform(VideoPlatform):
                     )
                     return []
 
-                data: SearchData = await response.json()
+                # Check content type before attempting JSON decode
+                content_type = response.content_type.lower()
+                if not content_type.startswith("application/json"):
+                    logger.warning(
+                        f"PeerTube instance {instance_url} returned unexpected "
+                        f"content type: {response.content_type}. Expected JSON, "
+                        f"got {content_type}. This may indicate the instance is "
+                        f"down or has changed its API."
+                    )
+                    return []
+
+                try:
+                    data: SearchData = await response.json()
+                except Exception as json_error:
+                    logger.error(
+                        f"Failed to decode JSON response from {instance_url}: "
+                        f"{json_error}. Content-Type: {response.content_type}"
+                    )
+                    return []
                 results: List[Dict[str, Any]] = []
 
                 for video in data.get("data", []):
@@ -134,7 +152,24 @@ class PeerTubePlatform(VideoPlatform):
                     continue
                 async with self.session.get(url) as response:
                     if response.status == 200:
-                        video: VideoInfo = await response.json()
+                        # Check content type before attempting JSON decode
+                        if not response.content_type.lower().startswith(
+                            "application/json"
+                        ):
+                            logger.warning(
+                                f"PeerTube instance {instance} returned unexpected "
+                                f"content type for video details: {response.content_type}"
+                            )
+                            continue
+
+                        try:
+                            video: VideoInfo = await response.json()
+                        except Exception as json_error:
+                            logger.error(
+                                f"Failed to decode JSON response from {instance} "
+                                f"for video {video_id}: {json_error}"
+                            )
+                            continue
 
                         channel_name: str = "Unknown"
                         channel = video.get("channel")
@@ -193,7 +228,22 @@ class PeerTubePlatform(VideoPlatform):
                 if response.status != 200:
                     return None
 
-                video: VideoInfo = await response.json()
+                # Check content type before attempting JSON decode
+                if not response.content_type.lower().startswith("application/json"):
+                    logger.warning(
+                        f"PeerTube instance {instance} returned unexpected "
+                        f"content type for stream URL: {response.content_type}"
+                    )
+                    return None
+
+                try:
+                    video: VideoInfo = await response.json()
+                except Exception as json_error:
+                    logger.error(
+                        f"Failed to decode JSON response from {instance} "
+                        f"for stream URL of video {video_id}: {json_error}"
+                    )
+                    return None
 
                 # Get best quality file
                 files: List[VideoFile] = video.get("files", [])

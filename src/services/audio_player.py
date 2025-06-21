@@ -37,13 +37,17 @@ class AudioPlayer:
             raise ValueError("Queue is full")
         self.queue.append(song_info)
         logger.info(f"Added to queue: {song_info['title']}")
-        logger.info(f"Queue song info: ID={song_info.get('id')}, Platform={song_info.get('platform')}, URL={song_info.get('url')}")
+        logger.info(
+            f"Queue song info: ID={song_info.get('id')}, Platform={song_info.get('platform')}, URL={song_info.get('url')}"
+        )
         self._update_queue_metrics()
 
     async def play_next(self):
         """Play the next song in queue"""
-        logger.info(f"play_next called. Is playing: {self._is_playing}, Queue size: {len(self.queue)}")
-        
+        logger.info(
+            f"play_next called. Is playing: {self._is_playing}, Queue size: {len(self.queue)}"
+        )
+
         if self._is_playing:
             logger.info("Already playing, returning")
             return
@@ -76,10 +80,14 @@ class AudioPlayer:
 
         for attempt in range(max_retries):
             try:
-                logger.info(f"Playing song: {song_info.get('title')} (ID: {song_info.get('id')}) - Attempt {attempt + 1}")
+                logger.info(
+                    f"Playing song: {song_info.get('title')} (ID: {song_info.get('id')}) - Attempt {attempt + 1}"
+                )
 
                 # Get stream URL from the platform
-                stream_url = song_info.get("stream_url") or await self._get_stream_url(song_info)
+                stream_url = song_info.get("stream_url") or await self._get_stream_url(
+                    song_info
+                )
                 logger.info(f"Got stream URL: {stream_url[:100]}...")
 
                 # Check if this URL has been marked as unhealthy
@@ -93,16 +101,20 @@ class AudioPlayer:
 
                 # Validate stream URL before attempting playback
                 if not await self._validate_stream_url(stream_url):
-                    logger.warning(f"Stream URL validation failed on attempt {attempt + 1}")
+                    logger.warning(
+                        f"Stream URL validation failed on attempt {attempt + 1}"
+                    )
                     self.stream_monitor.mark_url_failed(stream_url)
                     if attempt < max_retries - 1:
-                        await asyncio.sleep(retry_delay * (2 ** attempt))
+                        await asyncio.sleep(retry_delay * (2**attempt))
                         # Force getting a new URL on retry
                         if "stream_url" in song_info:
                             del song_info["stream_url"]
                         continue
                     else:
-                        raise Exception("Stream URL validation failed after all retries")
+                        raise Exception(
+                            "Stream URL validation failed after all retries"
+                        )
 
                 # Create FFmpeg source with enhanced stability for HLS streams
                 ffmpeg_options = {
@@ -149,14 +161,16 @@ class AudioPlayer:
 
             except Exception as e:
                 logger.error(f"Error playing song (attempt {attempt + 1}): {e}")
-                
+
                 # Mark URL as failed if we have one
-                if 'stream_url' in locals():
+                if "stream_url" in locals():
                     self.stream_monitor.mark_url_failed(stream_url)
-                
+
                 if attempt < max_retries - 1:
-                    logger.info(f"Retrying in {retry_delay * (2 ** attempt)} seconds...")
-                    await asyncio.sleep(retry_delay * (2 ** attempt))
+                    logger.info(
+                        f"Retrying in {retry_delay * (2 ** attempt)} seconds..."
+                    )
+                    await asyncio.sleep(retry_delay * (2**attempt))
                     # Try to get a fresh stream URL on retry
                     if "stream_url" in song_info:
                         del song_info["stream_url"]
@@ -171,48 +185,54 @@ class AudioPlayer:
         video_id = song_info["id"]
         logger.info(f"Song info: {song_info}")
         logger.info(f"Getting stream URL for {platform_name}/{video_id}")
-        
+
         try:
             # Get the platform from the bot's registry
-            if not self.bot or not hasattr(self.bot, 'platform_registry'):
+            if not self.bot or not hasattr(self.bot, "platform_registry"):
                 raise Exception("Bot or platform registry not available")
-            
+
             platform = self.bot.platform_registry.get_platform(platform_name)
             if not platform:
                 raise Exception(f"Platform {platform_name} not found")
-            
+
             # Get stream URL from platform
             stream_url = await platform.get_stream_url(video_id)
             if not stream_url:
                 raise Exception(f"No stream URL returned from {platform_name}")
-            
+
             logger.info(f"Got stream URL from {platform_name}: {stream_url[:100]}...")
             return stream_url
-            
+
         except Exception as e:
             logger.error(f"Error getting stream URL from platform: {e}")
             raise
 
     async def _validate_stream_url(self, url: str) -> bool:
-        """Validate that the stream URL is accessible"""
+        """Validate that the stream URL is accessible with proper connection cleanup"""
         try:
             import aiohttp
             import asyncio
-            
+
             timeout = aiohttp.ClientTimeout(total=10)
+            # Always use proper async context manager for temporary session
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 try:
                     async with session.head(url, allow_redirects=True) as response:
                         is_valid = response.status < 400
-                        
+
                         if not is_valid:
-                            logger.warning(f"Stream URL validation failed with status {response.status}")
-                        
+                            logger.warning(
+                                f"Stream URL validation failed with status {response.status}"
+                            )
+
                         return is_valid
                 except asyncio.TimeoutError:
                     logger.warning("Stream URL validation timed out")
                     return True  # Assume valid on timeout to avoid blocking valid URLs
-                    
+                except Exception as req_error:
+                    logger.warning(f"Stream URL request error: {req_error}")
+                    return True  # Assume valid on request error
+
         except ImportError:
             # Fallback to sync validation if aiohttp not available
             return self._validate_stream_url_sync(url)
@@ -225,41 +245,62 @@ class AudioPlayer:
         """Sync fallback for stream URL validation"""
         try:
             import requests
-            
+
             response = requests.head(url, timeout=5, allow_redirects=True)
             is_valid = response.status_code < 400
-            
+
             if not is_valid:
-                logger.warning(f"Stream URL validation failed with status {response.status_code}")
-            
+                logger.warning(
+                    f"Stream URL validation failed with status {response.status_code}"
+                )
+
             return is_valid
-            
+
         except Exception as e:
             logger.warning(f"Stream URL validation error: {e}")
             return True  # Assume valid on error
 
     async def _playback_finished(self, error):
-        """Called when playback finishes"""
+        """Called when playback finishes with proper error handling and cleanup"""
         logger.info(f"Playback finished callback triggered. Error: {error}")
-        
-        if error:
-            logger.error(f"Playback error: {error}")
-            logger.error(f"Error type: {type(error)}")
-            logger.error(f"Current song: {self.current.get('title') if self.current else 'None'}")
-            import traceback
-            logger.error(f"Traceback: {traceback.format_exc()}")
 
-        self._is_playing = False
-        
-        # Always reset skip flag
-        skip_was_requested = self._skip_flag
-        self._skip_flag = False
-        
-        logger.info(f"Skip flag was: {skip_was_requested}, Queue length: {len(self.queue)}")
+        try:
+            if error:
+                logger.error(f"Playback error: {error}")
+                logger.error(f"Error type: {type(error)}")
+                logger.error(
+                    f"Current song: {self.current.get('title') if self.current else 'None'}"
+                )
 
-        # Always advance to next song when playback finishes (whether by skip or natural end)
-        logger.info("Attempting to play next song...")
-        await self.play_next()
+                # Mark stream URL as failed if it was a stream-related error
+                if self.current and "stream_url" in self.current:
+                    self.stream_monitor.mark_url_failed(self.current["stream_url"])
+
+            self._is_playing = False
+
+            # Always reset skip flag
+            skip_was_requested = self._skip_flag
+            self._skip_flag = False
+
+            logger.info(
+                f"Skip flag was: {skip_was_requested}, Queue length: {len(self.queue)}"
+            )
+
+            # Ensure voice client is still connected before attempting next song
+            if not self.voice_client or not self.voice_client.is_connected():
+                logger.warning(
+                    "Voice client disconnected during playback, cannot continue"
+                )
+                return
+
+            # Always advance to next song when playback finishes (whether by skip or natural end)
+            logger.info("Attempting to play next song...")
+            await self.play_next()
+
+        except Exception as callback_error:
+            logger.error(f"Error in playback finished callback: {callback_error}")
+            self._is_playing = False
+            self._skip_flag = False
 
     def skip(self):
         """Skip the current song"""
@@ -312,12 +353,37 @@ class AudioPlayer:
         return list(self.queue)
 
     async def cleanup(self):
-        """Cleanup resources"""
-        self.stop()
-        self.queue.clear()
-        self.current = None
-        self._update_queue_metrics()
-    
+        """Cleanup resources with proper async handling"""
+        try:
+            # Stop playback
+            self.stop()
+
+            # Disconnect voice client with proper cleanup
+            if self.voice_client:
+                try:
+                    if self.voice_client.is_connected():
+                        await self.voice_client.disconnect(force=True)
+                    # Brief pause to allow cleanup
+                    await asyncio.sleep(0.3)
+                except Exception as e:
+                    logger.debug(
+                        f"Error disconnecting voice client during cleanup: {e}"
+                    )
+                finally:
+                    self.voice_client = None
+
+            # Clear queue and current song
+            self.queue.clear()
+            self.current = None
+            self._is_playing = False
+            self._skip_flag = False
+
+            # Update metrics
+            self._update_queue_metrics()
+
+        except Exception as e:
+            logger.error(f"Error during audio player cleanup: {e}")
+
     def _update_queue_metrics(self):
         """Update queue size metric"""
         # Count current + queue size
