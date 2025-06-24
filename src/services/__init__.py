@@ -11,7 +11,6 @@ from .metrics_collector import MetricsCollector, get_metrics_collector
 from .metrics_server import MetricsServer
 from .queue_manager import QueueManager
 from .searcher import MultiPlatformSearcher
-from .stream_service import StreamService
 
 __all__ = [
     'AudioPlayer',
@@ -24,5 +23,4 @@ __all__ = [
     'MetricsServer',
     'QueueManager',
     'MultiPlatformSearcher',
-    'StreamService',
 ]
