@@ -1,0 +1,294 @@
+# VPS Deployment Configuration for Robustty Bot
+# Optimized for robust cookie synchronization and fallback handling
+
+# Discord Bot Configuration
+bot:
+  command_prefix: "!"
+  description: "Robustty Music Bot - VPS Deployment"
+  activity: "Monitoring cookie health"
+
+# Platform Configuration with Fallback Support
+platforms:
+  youtube:
+    enabled: true
+    api_key: "${YOUTUBE_API_KEY}"
+    enable_fallbacks: true
+    fallback_strategies:
+      - mode: "api_only"
+        priority: 1
+      - mode: "limited_search" 
+        priority: 2
+      - mode: "disabled"
+        priority: 3
+
+  rumble:
+    enabled: true
+    api_token: "${APIFY_API_KEY}"
+    enable_fallbacks: true
+    fallback_strategies:
+      - mode: "public_only"
+        priority: 1
+      - mode: "limited_search"
+        priority: 2
+      - mode: "disabled"
+        priority: 3
+
+  odysee:
+    enabled: true
+    enable_fallbacks: true
+    fallback_strategies:
+      - mode: "public_only"
+        priority: 1
+      - mode: "disabled"
+        priority: 2
+
+  peertube:
+    enabled: true
+    enable_fallbacks: true
+    fallback_strategies:
+      - mode: "public_only"
+        priority: 1
+      - mode: "disabled"
+        priority: 2
+
+# Enhanced Cookie Management
+cookies:
+  # Cookie health monitoring
+  enable_health_monitoring: true
+  health_check_interval: 300  # 5 minutes
+  cookie_max_age_hours: 12
+  cookie_refresh_threshold_hours: 8
+  validation_timeout: 10
+
+  # Error handling and recovery
+  max_retry_attempts: 3
+  retry_delay: 1.0
+  enable_fallback_mode: true
+
+  # Cookie directory paths (in order of preference)
+  cookie_directories:
+    - "/app/cookies"
+    - "data/cookies"
+    - "./cookies"
+
+# Platform Fallback Management
+fallbacks:
+  enable_fallbacks: true
+  max_fallback_duration_hours: 24
+  retry_interval_minutes: 30
+  
+  # Fallback escalation strategy
+  escalation_strategy:
+    - "try_alternative_cookies"
+    - "api_only_mode"
+    - "limited_functionality"
+    - "notify_administrators"
+
+# Cookie Synchronization Recovery
+cookie_sync:
+  # Sync monitoring
+  sync_check_interval_minutes: 15
+  max_sync_failures: 3
+  recovery_timeout_hours: 2
+  enable_auto_recovery: true
+
+  # External sync sources (for recovery)
+  sync_sources:
+    - type: "http"
+      url: "${COOKIE_SYNC_URL}"
+      authentication: "bearer"
+      token: "${SYNC_TOKEN}"
+    - type: "file_share"
+      path: "/shared/cookies"
+      
+  fallback_sources:
+    - type: "backup_server"
+      url: "${BACKUP_COOKIE_URL}"
+      priority: 1
+    - type: "manual_intervention"
+      priority: 2
+
+# Health Monitoring Endpoints
+health_endpoints:
+  enabled: true
+  host: "0.0.0.0"
+  port: 8080
+  
+  # CORS settings for external monitoring
+  cors_enabled: true
+  cors_origins: ["*"]
+  
+  endpoints:
+    basic_health: "/health"
+    cookie_health: "/health/cookies"
+    platform_health: "/health/platforms" 
+    fallback_status: "/health/fallbacks"
+    detailed_report: "/health/detailed"
+    force_refresh: "/health/refresh/{platform}"
+    force_validation: "/health/validate"
+
+# Logging Configuration
+logging:
+  version: 1
+  disable_existing_loggers: false
+  
+  formatters:
+    detailed:
+      format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    simple:
+      format: "%(levelname)s - %(message)s"
+  
+  handlers:
+    console:
+      class: logging.StreamHandler
+      level: INFO
+      formatter: simple
+      stream: ext://sys.stdout
+    
+    file:
+      class: logging.handlers.RotatingFileHandler
+      level: DEBUG
+      formatter: detailed
+      filename: "/var/log/robustty/bot.log"
+      maxBytes: 10485760  # 10MB
+      backupCount: 5
+    
+    cookie_health:
+      class: logging.handlers.RotatingFileHandler
+      level: INFO
+      formatter: detailed
+      filename: "/var/log/robustty/cookie_health.log"
+      maxBytes: 5242880  # 5MB
+      backupCount: 3
+    
+    fallback:
+      class: logging.handlers.RotatingFileHandler
+      level: WARNING
+      formatter: detailed
+      filename: "/var/log/robustty/fallbacks.log"
+      maxBytes: 5242880  # 5MB
+      backupCount: 3
+  
+  loggers:
+    src.services.cookie_health_monitor:
+      level: DEBUG
+      handlers: [cookie_health]
+      propagate: false
+    
+    src.services.platform_fallback_manager:
+      level: INFO
+      handlers: [fallback]
+      propagate: false
+    
+    src.services.cookie_sync_recovery:
+      level: INFO
+      handlers: [fallback]
+      propagate: false
+  
+  root:
+    level: INFO
+    handlers: [console, file]
+
+# Performance Configuration
+performance:
+  max_queue_size: 100
+  command_timeout: 300
+  stream_timeout: 60
+  cache_ttl: 3600  # 1 hour
+
+# Redis Configuration (for caching and state)
+redis:
+  url: "${REDIS_URL}"
+  connection_pool_size: 10
+  socket_timeout: 5
+  socket_connect_timeout: 5
+  retry_on_timeout: true
+
+# Health Monitor Configuration
+health_monitor:
+  enabled: true
+  check_interval: 60
+  failure_threshold: 3
+  recovery_threshold: 2
+  
+  checks:
+    - name: "discord_connection"
+      enabled: true
+    - name: "platform_availability"
+      enabled: true
+    - name: "cookie_health"
+      enabled: true
+    - name: "fallback_status"
+      enabled: true
+
+# Network Resilience
+network:
+  enable_resilience: true
+  connection_timeout: 30
+  read_timeout: 60
+  max_retries: 3
+  retry_delay: 1.0
+  
+  circuit_breaker:
+    failure_threshold: 5
+    recovery_timeout: 60
+    expected_exception_ratio: 0.5
+
+# Monitoring and Alerting
+monitoring:
+  prometheus:
+    enabled: true
+    port: 9090
+    metrics_path: "/metrics"
+  
+  alerts:
+    webhook_url: "${ALERT_WEBHOOK_URL}"
+    critical_issues: true
+    cookie_failures: true
+    platform_fallbacks: true
+    sync_failures: true
+  
+  healthchecks:
+    ping_url: "${HEALTHCHECK_PING_URL}"
+    ping_interval: 300  # 5 minutes
+
+# VPS-Specific Settings
+vps:
+  # Resource limits
+  max_memory_mb: 1024
+  max_cpu_percent: 80
+  
+  # Cookie validation
+  validation_interval: 3600  # 1 hour
+  validation_script: "/app/scripts/vps_cookie_validation.py"
+  
+  # Deployment validation
+  startup_validation: true
+  validation_timeout: 120
+  
+  # Emergency contacts
+  admin_contacts:
+    - type: "webhook"
+      url: "${ADMIN_WEBHOOK_URL}"
+    - type: "email"
+      address: "${ADMIN_EMAIL}"
+  
+  # Auto-restart settings
+  auto_restart_on_critical: true
+  max_restart_attempts: 3
+  restart_cooldown_minutes: 15
+
+# Environment-specific overrides
+environment: "vps"
+
+# Security settings
+security:
+  # Rate limiting
+  rate_limit:
+    enabled: true
+    requests_per_minute: 60
+    burst_size: 10
+  
+  # Input validation
+  strict_validation: true
+  sanitize_inputs: true

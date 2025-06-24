@@ -12,7 +12,7 @@ from .errors import (
     PlatformAPIError,
     PlatformRateLimitError,
     PlatformAuthenticationError,
-    from_http_status
+    from_http_status,
 )
 from ..utils.network_resilience import (
     with_retry,
@@ -22,7 +22,7 @@ from ..utils.network_resilience import (
     NetworkResilienceError,
     CircuitBreakerOpenError,
     NetworkTimeoutError,
-    MaxRetriesExceededError
+    MaxRetriesExceededError,
 )
 
 logger = logging.getLogger(__name__)
@@ -36,6 +36,11 @@ class YouTubePlatform(VideoPlatform):
         self.api_key: Optional[str] = config.get("api_key")
         self.youtube: Optional[Any] = None
 
+        # Fallback configuration
+        self.fallback_manager = None  # Will be set by bot initialization
+        self.cookie_health_monitor = None  # Will be set by bot initialization
+        self.enable_fallbacks = config.get("enable_fallbacks", True)
+
         # URL patterns for YouTube
         self.url_patterns = [
             re.compile(
@@ -48,19 +53,32 @@ class YouTubePlatform(VideoPlatform):
         ]
 
     async def initialize(self):
-        """Initialize YouTube API client"""
+        """Initialize YouTube API client with fallback awareness"""
         await super().initialize()
         if self.api_key:
             self.youtube = build("youtube", "v3", developerKey=self.api_key)
+            logger.info("YouTube API client initialized successfully")
         else:
-            logger.warning("YouTube API key not provided")
+            logger.warning("YouTube API key not provided - will rely on fallback modes")
+            if self.fallback_manager and self.enable_fallbacks:
+                self.fallback_manager.activate_fallback(
+                    "youtube", "No API key provided"
+                )
+
+    def set_fallback_manager(self, fallback_manager):
+        """Set the fallback manager for this platform"""
+        self.fallback_manager = fallback_manager
+
+    def set_cookie_health_monitor(self, cookie_health_monitor):
+        """Set the cookie health monitor for this platform"""
+        self.cookie_health_monitor = cookie_health_monitor
 
     @with_retry(
         retry_config=PLATFORM_RETRY_CONFIG,
         circuit_breaker_config=PLATFORM_CIRCUIT_BREAKER_CONFIG,
         service_name="youtube_search",
         exceptions=(HttpError, PlatformAPIError, PlatformRateLimitError),
-        exclude_exceptions=(PlatformAuthenticationError, CircuitBreakerOpenError)
+        exclude_exceptions=(PlatformAuthenticationError, CircuitBreakerOpenError),
     )
     async def search_videos(
         self, query: str, max_results: int = 10
@@ -69,7 +87,7 @@ class YouTubePlatform(VideoPlatform):
         if not self.youtube:
             raise PlatformAuthenticationError(
                 "YouTube API key is required for search. Please configure 'api_key' in config.",
-                platform="YouTube"
+                platform="YouTube",
             )
 
         try:
@@ -87,13 +105,15 @@ class YouTubePlatform(VideoPlatform):
                     video_id = item["id"]
                 else:
                     continue
-                    
+
                 if not video_id:
                     continue
-                    
+
                 snippet = item.get("snippet", {})
 
-                logger.info(f"YouTube search result: video_id={video_id}, title={snippet.get('title', 'Unknown')}")
+                logger.info(
+                    f"YouTube search result: video_id={video_id}, title={snippet.get('title', 'Unknown')}"
+                )
                 results.append(
                     {
                         "id": video_id,
@@ -102,7 +122,12 @@ class YouTubePlatform(VideoPlatform):
                         "thumbnail": (
                             snippet.get("thumbnails", {})
                             .get("high", {})
-                            .get("url", snippet.get("thumbnails", {}).get("default", {}).get("url", ""))
+                            .get(
+                                "url",
+                                snippet.get("thumbnails", {})
+                                .get("default", {})
+                                .get("url", ""),
+                            )
                         ),
                         "url": f"https://www.youtube.com/watch?v={video_id}",
                         "platform": "youtube",
@@ -113,30 +138,24 @@ class YouTubePlatform(VideoPlatform):
             return results
         except HttpError as e:
             logger.error(f"YouTube API error: {e}")
-            
+
             # Check for quota exceeded
             if e.resp.status == 403 and "quotaExceeded" in str(e):
                 raise PlatformRateLimitError(
                     "YouTube API quota exceeded. Please try again later.",
                     platform="YouTube",
-                    original_error=e
+                    original_error=e,
                 )
-            
+
             # Use from_http_status for other HTTP errors
-            raise from_http_status(
-                e.resp.status,
-                "YouTube",
-                str(e)
-            )
+            raise from_http_status(e.resp.status, "YouTube", str(e))
         except NetworkResilienceError:
             # Re-raise network resilience errors as-is
             raise
         except Exception as e:
             logger.error(f"YouTube search error: {e}")
             raise PlatformAPIError(
-                f"Search failed: {str(e)}",
-                platform="YouTube",
-                original_error=e
+                f"Search failed: {str(e)}", platform="YouTube", original_error=e
             )
 
     async def get_video_details(self, video_id: str) -> Optional[Dict[str, Any]]:
@@ -183,15 +202,17 @@ class YouTubePlatform(VideoPlatform):
         """Check if URL is a YouTube URL"""
         return any(pattern.search(url) for pattern in self.url_patterns)
 
-    def _convert_cookies_to_netscape(self, json_cookie_file: str, netscape_cookie_file: str) -> bool:
+    def _convert_cookies_to_netscape(
+        self, json_cookie_file: str, netscape_cookie_file: str
+    ) -> bool:
         """Convert JSON cookies to Netscape format for yt-dlp with enhanced error handling"""
         try:
             import json
-            
+
             if not Path(json_cookie_file).exists():
                 logger.warning(f"JSON cookie file not found: {json_cookie_file}")
                 return False
-            
+
             # Validate file is readable and not empty
             try:
                 file_size = Path(json_cookie_file).stat().st_size
@@ -201,13 +222,15 @@ class YouTubePlatform(VideoPlatform):
             except Exception as e:
                 logger.error(f"Cannot access cookie file {json_cookie_file}: {e}")
                 return False
-            
+
             # Read and parse JSON cookies
             try:
-                with open(json_cookie_file, 'r', encoding='utf-8') as f:
+                with open(json_cookie_file, "r", encoding="utf-8") as f:
                     content = f.read().strip()
                     if not content:
-                        logger.warning(f"Cookie file content is empty: {json_cookie_file}")
+                        logger.warning(
+                            f"Cookie file content is empty: {json_cookie_file}"
+                        )
                         return False
                     cookies = json.loads(content)
             except json.JSONDecodeError as e:
@@ -216,80 +239,94 @@ class YouTubePlatform(VideoPlatform):
             except Exception as e:
                 logger.error(f"Failed to read cookie file {json_cookie_file}: {e}")
                 return False
-            
+
             if not cookies or not isinstance(cookies, list):
-                logger.warning(f"No valid cookies found in {json_cookie_file} (found: {type(cookies)})")
+                logger.warning(
+                    f"No valid cookies found in {json_cookie_file} (found: {type(cookies)})"
+                )
                 return False
-            
+
             # Ensure output directory exists
             try:
                 Path(netscape_cookie_file).parent.mkdir(parents=True, exist_ok=True)
             except Exception as e:
                 logger.error(f"Cannot create cookie output directory: {e}")
                 return False
-            
+
             # Convert to Netscape format
             try:
-                with open(netscape_cookie_file, 'w', encoding='utf-8') as f:
+                with open(netscape_cookie_file, "w", encoding="utf-8") as f:
                     # Write Netscape cookie file header
                     f.write("# Netscape HTTP Cookie File\n")
                     f.write("# This is a generated file! Do not edit.\n\n")
-                    
+
                     valid_cookies = 0
                     for cookie in cookies:
                         # Skip invalid cookie entries
                         if not isinstance(cookie, dict):
                             continue
-                        
-                        name = cookie.get('name', '').strip()
-                        value = cookie.get('value', '')
-                        
+
+                        name = cookie.get("name", "").strip()
+                        value = cookie.get("value", "")
+
                         # Skip cookies without name (value can be empty)
                         if not name:
                             continue
-                        
+
                         # Skip cookies with problematic characters
-                        if '\t' in name or '\t' in value or '\n' in name or '\n' in value:
-                            logger.debug(f"Skipping cookie with invalid characters: {name}")
+                        if (
+                            "\t" in name
+                            or "\t" in value
+                            or "\n" in name
+                            or "\n" in value
+                        ):
+                            logger.debug(
+                                f"Skipping cookie with invalid characters: {name}"
+                            )
                             continue
-                        
+
                         # Netscape format: domain, domain_specified, path, secure, expires, name, value
-                        domain = cookie.get('domain', '.youtube.com')
+                        domain = cookie.get("domain", ".youtube.com")
                         if not domain:
-                            domain = '.youtube.com'
-                        
-                        domain_specified = 'TRUE' if domain.startswith('.') else 'FALSE'
-                        path = cookie.get('path', '/')
-                        secure = 'TRUE' if cookie.get('secure', False) else 'FALSE'
-                        
+                            domain = ".youtube.com"
+
+                        domain_specified = "TRUE" if domain.startswith(".") else "FALSE"
+                        path = cookie.get("path", "/")
+                        secure = "TRUE" if cookie.get("secure", False) else "FALSE"
+
                         # Handle expires field - convert to Unix timestamp if needed
-                        expires = cookie.get('expires', 0)
+                        expires = cookie.get("expires", 0)
                         if expires is None:
                             expires = 0
                         elif isinstance(expires, (int, float)):
                             expires = int(expires)
                         else:
                             expires = 0
-                        
+
                         # Write cookie line in Netscape format
                         cookie_line = f"{domain}\t{domain_specified}\t{path}\t{secure}\t{expires}\t{name}\t{value}\n"
                         f.write(cookie_line)
                         valid_cookies += 1
-                
+
                 if valid_cookies > 0:
-                    logger.info(f"Successfully converted {valid_cookies} cookies to Netscape format")
+                    logger.info(
+                        f"Successfully converted {valid_cookies} cookies to Netscape format"
+                    )
                     return True
                 else:
                     logger.warning("No valid cookies were converted")
                     return False
-                    
+
             except Exception as e:
-                logger.error(f"Failed to write Netscape cookie file {netscape_cookie_file}: {e}")
+                logger.error(
+                    f"Failed to write Netscape cookie file {netscape_cookie_file}: {e}"
+                )
                 return False
-            
+
         except Exception as e:
             logger.error(f"Unexpected error during cookie conversion: {e}")
             import traceback
+
             logger.debug(f"Cookie conversion traceback: {traceback.format_exc()}")
             return False
 
@@ -298,122 +335,157 @@ class YouTubePlatform(VideoPlatform):
         circuit_breaker_config=PLATFORM_CIRCUIT_BREAKER_CONFIG,
         service_name="youtube_stream_url",
         exceptions=(Exception,),
-        exclude_exceptions=(PlatformAPIError, CircuitBreakerOpenError, NetworkResilienceError)
+        exclude_exceptions=(
+            PlatformAPIError,
+            CircuitBreakerOpenError,
+            NetworkResilienceError,
+        ),
     )
     async def get_stream_url(self, video_id: str) -> Optional[str]:
         """Get stream URL using yt-dlp with cookies and enhanced error handling"""
         import yt_dlp
         import asyncio
-        
+
         logger.info(f"Getting stream URL for YouTube video: {video_id}")
-        
+
         # Validate video ID format
         if not video_id or len(video_id) != 11:
-            logger.error(f"Invalid YouTube video ID: {video_id} (expected 11 characters)")
-            raise PlatformAPIError(
-                f"Invalid YouTube video ID: {video_id}",
-                platform="YouTube"
+            logger.error(
+                f"Invalid YouTube video ID: {video_id} (expected 11 characters)"
             )
-        
+            raise PlatformAPIError(
+                f"Invalid YouTube video ID: {video_id}", platform="YouTube"
+            )
+
         try:
             # Use yt-dlp to get stream URL
             url = f"https://www.youtube.com/watch?v={video_id}"
-            
+
             # Configure yt-dlp options optimized for Discord audio
             ydl_opts = {
-                'format': 'bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best[height<=720]',
-                'quiet': True,
-                'no_warnings': False,  # Enable warnings for debugging
-                'noplaylist': True,
-                'extract_flat': False,
-                'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'http_chunk_size': 10485760,  # 10MB chunks
-                'prefer_insecure': False,
-                'verbose': False,
-                'socket_timeout': 30,
-                'retries': 3
+                "format": "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best[height<=720]",
+                "quiet": True,
+                "no_warnings": False,  # Enable warnings for debugging
+                "noplaylist": True,
+                "extract_flat": False,
+                "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "http_chunk_size": 10485760,  # 10MB chunks
+                "prefer_insecure": False,
+                "verbose": False,
+                "socket_timeout": 30,
+                "retries": 3,
             }
-            
+
             # Try multiple cookie paths with fallback
             cookie_paths = [
-                '/app/cookies/youtube_cookies.json',
-                'data/cookies/youtube_cookies.json',
-                './cookies/youtube_cookies.json'
+                "/app/cookies/youtube_cookies.json",
+                "data/cookies/youtube_cookies.json",
+                "./cookies/youtube_cookies.json",
             ]
-            
+
             cookies_loaded = False
             for json_cookie_file in cookie_paths:
                 if Path(json_cookie_file).exists():
-                    netscape_cookie_file = str(Path(json_cookie_file).parent / 'youtube_cookies.txt')
-                    
+                    netscape_cookie_file = str(
+                        Path(json_cookie_file).parent / "youtube_cookies.txt"
+                    )
+
                     try:
-                        if self._convert_cookies_to_netscape(json_cookie_file, netscape_cookie_file):
-                            ydl_opts['cookiefile'] = netscape_cookie_file
-                            logger.info(f"Using converted YouTube cookies from {json_cookie_file}")
+                        if self._convert_cookies_to_netscape(
+                            json_cookie_file, netscape_cookie_file
+                        ):
+                            ydl_opts["cookiefile"] = netscape_cookie_file
+                            logger.info(
+                                f"Using converted YouTube cookies from {json_cookie_file}"
+                            )
                             cookies_loaded = True
                             break
                         else:
-                            logger.warning(f"Failed to convert cookies from {json_cookie_file}")
+                            logger.warning(
+                                f"Failed to convert cookies from {json_cookie_file}"
+                            )
                     except Exception as cookie_error:
-                        logger.error(f"Cookie conversion error for {json_cookie_file}: {cookie_error}")
+                        logger.error(
+                            f"Cookie conversion error for {json_cookie_file}: {cookie_error}"
+                        )
                         continue
-            
+
             if not cookies_loaded:
-                logger.info("No valid YouTube cookies found, proceeding without authentication")
-            
+                logger.info(
+                    "No valid YouTube cookies found, proceeding without authentication"
+                )
+
             def extract_info():
                 try:
                     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                         info = ydl.extract_info(url, download=False)
-                        
+
                         if not info:
                             logger.error("yt-dlp returned no information")
                             return None, "No video information found"
-                        
+
                         # Extract URL from different possible structures
                         stream_url = None
-                        
-                        if 'url' in info:
-                            stream_url = info['url']
-                        elif 'formats' in info and info['formats']:
+
+                        if "url" in info:
+                            stream_url = info["url"]
+                        elif "formats" in info and info["formats"]:
                             # Find best audio format
-                            formats = info['formats']
-                            
+                            formats = info["formats"]
+
                             # Prefer audio-only formats
-                            audio_formats = [f for f in formats if f.get('vcodec') == 'none' and f.get('url')]
+                            audio_formats = [
+                                f
+                                for f in formats
+                                if f.get("vcodec") == "none" and f.get("url")
+                            ]
                             if audio_formats:
                                 # Sort by audio quality (prefer higher bitrate)
-                                audio_formats.sort(key=lambda f: f.get('abr', 0) or f.get('tbr', 0), reverse=True)
-                                stream_url = audio_formats[0]['url']
-                                logger.debug(f"Selected audio format: {audio_formats[0].get('format_id')} (bitrate: {audio_formats[0].get('abr', 'unknown')})")
+                                audio_formats.sort(
+                                    key=lambda f: f.get("abr", 0) or f.get("tbr", 0),
+                                    reverse=True,
+                                )
+                                stream_url = audio_formats[0]["url"]
+                                logger.debug(
+                                    f"Selected audio format: {audio_formats[0].get('format_id')} (bitrate: {audio_formats[0].get('abr', 'unknown')})"
+                                )
                             else:
                                 # Fallback to best available format
-                                valid_formats = [f for f in formats if f.get('url')]
+                                valid_formats = [f for f in formats if f.get("url")]
                                 if valid_formats:
                                     # Sort by quality and prefer audio formats
-                                    valid_formats.sort(key=lambda f: (
-                                        f.get('acodec', '') != 'none',  # Audio available
-                                        f.get('abr', 0) or f.get('tbr', 0)  # Bitrate
-                                    ), reverse=True)
-                                    stream_url = valid_formats[0]['url']
-                                    logger.debug(f"Selected fallback format: {valid_formats[0].get('format_id')}")
-                        elif 'entries' in info and info['entries']:
+                                    valid_formats.sort(
+                                        key=lambda f: (
+                                            f.get("acodec", "")
+                                            != "none",  # Audio available
+                                            f.get("abr", 0)
+                                            or f.get("tbr", 0),  # Bitrate
+                                        ),
+                                        reverse=True,
+                                    )
+                                    stream_url = valid_formats[0]["url"]
+                                    logger.debug(
+                                        f"Selected fallback format: {valid_formats[0].get('format_id')}"
+                                    )
+                        elif "entries" in info and info["entries"]:
                             # Handle playlist case (should not happen with noplaylist=True)
-                            first_entry = info['entries'][0]
-                            if first_entry and 'url' in first_entry:
-                                stream_url = first_entry['url']
-                        
+                            first_entry = info["entries"][0]
+                            if first_entry and "url" in first_entry:
+                                stream_url = first_entry["url"]
+
                         if not stream_url:
-                            logger.error("No valid stream URL found in extraction result")
+                            logger.error(
+                                "No valid stream URL found in extraction result"
+                            )
                             return None, "No stream URL found"
-                        
+
                         logger.debug(f"Extracted stream URL: {stream_url[:100]}...")
                         return stream_url, None
-                        
+
                 except yt_dlp.DownloadError as e:
                     error_msg = str(e)
                     logger.error(f"yt-dlp download error: {error_msg}")
-                    
+
                     # Handle specific errors
                     if "private" in error_msg.lower():
                         return None, "Video is private"
@@ -425,89 +497,95 @@ class YouTubePlatform(VideoPlatform):
                         return None, "Video not available in your region"
                     else:
                         return None, f"Download error: {error_msg}"
-                        
+
                 except Exception as e:
                     logger.error(f"yt-dlp extraction error: {e}")
                     return None, f"Extraction error: {str(e)}"
-            
+
             # Run yt-dlp in thread to avoid blocking
             loop = asyncio.get_event_loop()
             stream_url, error = await loop.run_in_executor(None, extract_info)
-            
+
             # Handle errors
             if error:
                 logger.error(f"Stream extraction failed for video {video_id}: {error}")
                 raise PlatformAPIError(
-                    f"Failed to extract stream: {error}",
-                    platform="YouTube"
+                    f"Failed to extract stream: {error}", platform="YouTube"
                 )
-            
+
             # Return stream URL if extracted
             if stream_url:
-                logger.info(f"Successfully extracted stream URL for {video_id}: {stream_url[:100]}...")
+                logger.info(
+                    f"Successfully extracted stream URL for {video_id}: {stream_url[:100]}..."
+                )
                 return stream_url
             else:
                 logger.error(f"No stream URL extracted for video {video_id}")
                 raise PlatformAPIError(
-                    "No stream URL could be extracted",
-                    platform="YouTube"
+                    "No stream URL could be extracted", platform="YouTube"
                 )
-                
+
         except PlatformAPIError:
             # Re-raise platform errors
             raise
         except Exception as e:
             logger.error(f"Failed to get stream URL for {video_id}: {e}")
             import traceback
+
             logger.debug(f"Full traceback: {traceback.format_exc()}")
             raise PlatformAPIError(
                 f"Stream extraction failed: {str(e)}",
                 platform="YouTube",
-                original_error=e
+                original_error=e,
             )
-    
+
     def _validate_stream_url(self, url: str) -> bool:
         """Validate that the stream URL is accessible (sync version)"""
         try:
             import requests
-            
+
             # Quick HEAD request to check if URL is accessible
             response = requests.head(url, timeout=5, allow_redirects=True)
             is_valid = response.status_code < 400
-            
+
             if not is_valid:
-                logger.warning(f"Stream URL validation failed with status {response.status_code}")
-            
+                logger.warning(
+                    f"Stream URL validation failed with status {response.status_code}"
+                )
+
             return is_valid
-            
+
         except Exception as e:
             logger.warning(f"Stream URL validation error: {e}")
             # Return True on validation error to avoid blocking valid URLs
             return True
-    
+
     async def _validate_stream_url_async(self, url: str) -> bool:
         """Validate that the stream URL is accessible (async version)"""
         try:
             import aiohttp
             import asyncio
-            
+
             timeout = aiohttp.ClientTimeout(total=10)
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 try:
                     async with session.head(url, allow_redirects=True) as response:
                         is_valid = response.status < 400
-                        
+
                         if not is_valid:
-                            logger.warning(f"Stream URL validation failed with status {response.status}")
-                        
+                            logger.warning(
+                                f"Stream URL validation failed with status {response.status}"
+                            )
+
                         return is_valid
                 except asyncio.TimeoutError:
                     logger.warning("Stream URL validation timed out")
                     return True  # Assume valid on timeout
-                    
+
         except ImportError:
             # Fallback to sync validation if aiohttp not available
             import asyncio
+
             loop = asyncio.get_event_loop()
             return await loop.run_in_executor(None, self._validate_stream_url, url)
         except Exception as e:

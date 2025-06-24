@@ -1,0 +1,278 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "Robustty Health Dashboard",
+    "tags": ["robustty", "health", "monitoring"],
+    "style": "dark",
+    "timezone": "browser",
+    "refresh": "30s",
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "panels": [
+      {
+        "id": 1,
+        "title": "Overall Health Status",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "robustty_connection_status",
+            "legendFormat": "{{service}}"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [
+              {
+                "options": {
+                  "0": {"text": "Unknown", "color": "gray"},
+                  "1": {"text": "Healthy", "color": "green"},
+                  "2": {"text": "Degraded", "color": "yellow"},
+                  "3": {"text": "Unhealthy", "color": "red"}
+                },
+                "type": "value"
+              }
+            ],
+            "thresholds": {
+              "steps": [
+                {"color": "gray", "value": null},
+                {"color": "green", "value": 1},
+                {"color": "yellow", "value": 2},
+                {"color": "red", "value": 3}
+              ]
+            }
+          }
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0}
+      },
+      {
+        "id": 2,
+        "title": "System Resources",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "robustty_memory_usage_percent",
+            "legendFormat": "Memory %"
+          },
+          {
+            "expr": "robustty_cpu_usage_percent",
+            "legendFormat": "CPU %"
+          },
+          {
+            "expr": "robustty_disk_usage_percent",
+            "legendFormat": "Disk %"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "min": 0,
+            "max": 100,
+            "thresholds": {
+              "steps": [
+                {"color": "green", "value": null},
+                {"color": "yellow", "value": 70},
+                {"color": "orange", "value": 85},
+                {"color": "red", "value": 95}
+              ]
+            }
+          }
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0}
+      },
+      {
+        "id": 3,
+        "title": "Discord Connection Health",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "robustty_discord_latency",
+            "legendFormat": "Latency (seconds)"
+          },
+          {
+            "expr": "robustty_connection_status{service=\"discord_gateway\"}",
+            "legendFormat": "Connection Status"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "s",
+            "thresholds": {
+              "steps": [
+                {"color": "green", "value": null},
+                {"color": "yellow", "value": 0.5},
+                {"color": "orange", "value": 1.0},
+                {"color": "red", "value": 2.0}
+              ]
+            }
+          }
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8}
+      },
+      {
+        "id": 4,
+        "title": "Platform Health Status",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "robustty_platform_status",
+            "legendFormat": "{{platform}}"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [
+              {
+                "options": {
+                  "0": {"text": "Disabled", "color": "gray"},
+                  "1": {"text": "Healthy", "color": "green"},
+                  "2": {"text": "Degraded", "color": "yellow"},
+                  "3": {"text": "Unhealthy", "color": "red"}
+                },
+                "type": "value"
+              }
+            ]
+          }
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8}
+      },
+      {
+        "id": 5,
+        "title": "Health Check Response Times",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "robustty_health_check_duration_seconds",
+            "legendFormat": "{{service}}"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "s",
+            "thresholds": {
+              "steps": [
+                {"color": "green", "value": null},
+                {"color": "yellow", "value": 0.5},
+                {"color": "orange", "value": 2.0},
+                {"color": "red", "value": 5.0}
+              ]
+            }
+          }
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16}
+      },
+      {
+        "id": 6,
+        "title": "Connection Failures",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "rate(robustty_connection_failures_total[5m])",
+            "legendFormat": "{{service}} - {{error_type}}"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "reqps"
+          }
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16}
+      },
+      {
+        "id": 7,
+        "title": "Redis Performance",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "robustty_redis_response_time",
+            "legendFormat": "Response Time"
+          },
+          {
+            "expr": "robustty_connection_status{service=\"redis\"}",
+            "legendFormat": "Connection Status"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "s"
+          }
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 24}
+      },
+      {
+        "id": 8,
+        "title": "Voice Connections",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "robustty_active_voice_connections",
+            "legendFormat": "Active Connections"
+          },
+          {
+            "expr": "robustty_total_audio_players",
+            "legendFormat": "Total Players"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short"
+          }
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 24}
+      },
+      {
+        "id": 9,
+        "title": "Recovery Attempts",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "rate(robustty_recovery_attempts_total[5m])",
+            "legendFormat": "{{service}} - {{status}}"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "reqps"
+          }
+        },
+        "gridPos": {"h": 8, "w": 24, "x": 0, "y": 32}
+      },
+      {
+        "id": 10,
+        "title": "Security Status",
+        "type": "logs",
+        "targets": [
+          {
+            "expr": "{job=\"robustty\"} |= \"security\" |= \"warning|error|critical\"",
+            "legendFormat": ""
+          }
+        ],
+        "gridPos": {"h": 8, "w": 24, "x": 0, "y": 40}
+      }
+    ],
+    "templating": {
+      "list": [
+        {
+          "name": "instance",
+          "type": "query",
+          "query": "label_values(up{job=\"robustty-metrics\"}, instance)",
+          "refresh": 1,
+          "includeAll": false,
+          "multi": false
+        }
+      ]
+    },
+    "annotations": {
+      "list": [
+        {
+          "name": "Deployments",
+          "datasource": "prometheus",
+          "expr": "changes(robustty_build_info[5m]) > 0",
+          "titleFormat": "Deployment",
+          "textFormat": "New version deployed"
+        }
+      ]
+    }
+  }
+}

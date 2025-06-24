@@ -49,6 +49,28 @@ redis-cli FLUSHALL                        # Clear cache (direct host access)
 docker-compose exec redis redis-cli info # Redis info via container
 ```
 
+### VPS Deployment & Validation
+```bash
+# Pre-deployment validation (run locally first)
+./scripts/validate-pre-deployment.sh              # Full validation
+./scripts/validate-pre-deployment.sh --quick      # Quick validation
+./scripts/validate-pre-deployment.sh --skip-api   # Skip API key tests
+
+# VPS deployment with integrated validation
+./deploy-vps-with-validation.sh <vps-ip> ubuntu full auto  # Full deployment
+./deploy-vps-with-validation.sh <vps-ip> ubuntu quick      # Quick deployment
+./deploy-vps.sh <vps-ip> ubuntu                           # Standard deployment (with validation)
+
+# Post-deployment validation (run on VPS)
+ssh user@vps 'cd ~/robustty-bot && ./scripts/validate-vps-core.sh'
+ssh user@vps 'cd ~/robustty-bot && ./scripts/validate-vps-deployment.sh'
+
+# Validation summary and troubleshooting
+./scripts/validate-deployment-summary.sh          # Show all validation options
+./scripts/validate-deployment-summary.sh --check  # Quick status check
+./scripts/validate-deployment-summary.sh --examples # Usage examples
+```
+
 ## Architecture
 
 ### Platform System (`src/platforms/`)
@@ -182,6 +204,16 @@ python scripts/extract-brave-cookies.py
 - **Cron Not Running**: Check cron logs with `docker-compose exec robustty tail -f /var/log/cron.log`
 - **Cookie Path Issues**: Check that `/app/cookies/` directory exists and is writable
 - **Cookie Conversion Failures**: Run test script to verify JSON to Netscape conversion works
+
+### VPS Deployment Issues
+- **Pre-deployment Failures**: Run `./scripts/validate-pre-deployment.sh` to identify missing requirements
+- **Network Issues**: Use `./scripts/diagnose-vps-network.sh` for comprehensive network troubleshooting
+- **DNS Resolution**: Fix with `sudo echo 'nameserver 8.8.8.8' > /etc/resolv.conf`
+- **Docker Issues**: Install with `curl -fsSL https://get.docker.com | sh`
+- **Service Health**: Validate with `./scripts/validate-vps-core.sh` on VPS
+- **Resource Problems**: Check memory/disk usage, upgrade VPS if needed
+- **Bot Connection**: Verify Discord token and check bot logs for authentication errors
+- **Port Conflicts**: Check port availability with `ss -tlnp | grep :8080`
 
 ### Log Analysis
 - Bot logs: `docker-compose logs -f robustty`

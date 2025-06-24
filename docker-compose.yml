@@ -15,7 +15,7 @@ services:
       - SEARCH_TIMEOUT=${SEARCH_TIMEOUT:-30}
       - STREAM_TIMEOUT=${STREAM_TIMEOUT:-300}
       - MAX_QUEUE_SIZE=${MAX_QUEUE_SIZE:-100}
-      - REDIS_URL=redis://localhost:6379
+      - REDIS_URL=${REDIS_URL:-redis://localhost:6379}
       - COOKIE_REFRESH_INTERVAL=7200  # 2 hours in seconds
     volumes:
       # Mount host Brave browser data for cookie extraction
@@ -25,8 +25,15 @@ services:
       - ./logs:/app/logs
       - ./data:/app/data
       - robustty-cookies:/app/cookies
+    healthcheck:
+      test: ["CMD", "python3", "/app/scripts/health-check.py", "basic"]
+      interval: 30s
+      timeout: 15s
+      retries: 3
+      start_period: 60s
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
 
   # Redis for caching (OrbStack optimized)
   redis:
@@ -37,6 +44,12 @@ services:
     volumes:
       - robustty-redis-data:/data
     command: redis-server --appendonly yes --port 6379
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
 volumes:
   robustty-cookies:

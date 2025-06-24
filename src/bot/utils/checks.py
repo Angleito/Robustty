@@ -69,8 +69,11 @@ def is_dj():
             return True
 
         # Check if alone with bot
-        if (ctx.voice_client and hasattr(ctx.voice_client.channel, 'members') and
-                len(ctx.voice_client.channel.members) <= 2):
+        if (
+            ctx.voice_client
+            and hasattr(ctx.voice_client.channel, "members")
+            and len(ctx.voice_client.channel.members) <= 2
+        ):
             return True
 
         await ctx.send(

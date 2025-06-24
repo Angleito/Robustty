@@ -11,6 +11,7 @@ apify-client==1.6.2
 
 # Web Scraping
 aiohttp==3.9.5
+requests==2.32.0
 beautifulsoup4==4.12.2
 lxml==4.9.3
 
@@ -56,6 +57,9 @@ aiodns==3.1.1
 # cchardet==2.1.7  # Removed due to Python 3.11 compatibility issues
 charset-normalizer==3.4.2  # Alternative to cchardet
 brotli==1.1.0
+
+# DNS resolution
+dnspython==2.4.2
 
 # Flask for stream service
 flask==3.0.0

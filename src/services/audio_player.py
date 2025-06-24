@@ -15,7 +15,7 @@ from ..utils.network_resilience import (
     CircuitBreakerOpenError,
     NetworkTimeoutError,
     MaxRetriesExceededError,
-    get_resilience_manager
+    get_resilience_manager,
 )
 
 logger = logging.getLogger(__name__)
@@ -46,13 +46,17 @@ class AudioPlayer:
             raise ValueError("Queue is full")
         self.queue.append(song_info)
         logger.info(f"Added to queue: {song_info['title']}")
-        logger.info(f"Queue song info: ID={song_info.get('id')}, Platform={song_info.get('platform')}, URL={song_info.get('url')}")
+        logger.info(
+            f"Queue song info: ID={song_info.get('id')}, Platform={song_info.get('platform')}, URL={song_info.get('url')}"
+        )
         self._update_queue_metrics()
 
     async def play_next(self):
         """Play the next song in queue"""
-        logger.info(f"play_next called. Is playing: {self._is_playing}, Queue size: {len(self.queue)}")
-        
+        logger.info(
+            f"play_next called. Is playing: {self._is_playing}, Queue size: {len(self.queue)}"
+        )
+
         if self._is_playing:
             logger.info("Already playing, returning")
             return
@@ -81,12 +85,16 @@ class AudioPlayer:
         self._is_playing = True
         self._skip_flag = False
 
-        logger.info(f"Playing song: {song_info.get('title')} (ID: {song_info.get('id')})")
+        logger.info(
+            f"Playing song: {song_info.get('title')} (ID: {song_info.get('id')})"
+        )
 
         try:
             # Get stream URL from the platform with enhanced error handling
             try:
-                stream_url = song_info.get("stream_url") or await self._get_stream_url(song_info)
+                stream_url = song_info.get("stream_url") or await self._get_stream_url(
+                    song_info
+                )
                 logger.info(f"Got stream URL: {stream_url[:100]}...")
             except CircuitBreakerOpenError as e:
                 logger.error(f"Circuit breaker open for platform service: {e}")
@@ -119,7 +127,9 @@ class AudioPlayer:
                     source, volume=self._volume
                 )
             except Exception as e:
-                logger.error(f"Error creating audio source for {song_info['title']}: {e}")
+                logger.error(
+                    f"Error creating audio source for {song_info['title']}: {e}"
+                )
                 self._is_playing = False
                 await self.play_next()
                 return
@@ -146,7 +156,9 @@ class AudioPlayer:
                 return
 
         except Exception as e:
-            logger.error(f"Unexpected error playing song {song_info.get('title', 'Unknown')}: {e}")
+            logger.error(
+                f"Unexpected error playing song {song_info.get('title', 'Unknown')}: {e}"
+            )
             self._is_playing = False
             await self.play_next()
 
@@ -155,7 +167,7 @@ class AudioPlayer:
         circuit_breaker_config=PLATFORM_CIRCUIT_BREAKER_CONFIG,
         service_name="platform_stream_url",
         exceptions=(Exception,),
-        exclude_exceptions=(CircuitBreakerOpenError, NetworkResilienceError)
+        exclude_exceptions=(CircuitBreakerOpenError, NetworkResilienceError),
     )
     async def _get_stream_url(self, song_info: Dict) -> str:
         """Get stream URL directly from platform with enhanced error handling"""
@@ -163,24 +175,24 @@ class AudioPlayer:
         video_id = song_info["id"]
         logger.info(f"Song info: {song_info}")
         logger.info(f"Getting stream URL for {platform_name}/{video_id}")
-        
+
         try:
             # Get the platform from the bot's registry
-            if not self.bot or not hasattr(self.bot, 'platform_registry'):
+            if not self.bot or not hasattr(self.bot, "platform_registry"):
                 raise Exception("Bot or platform registry not available")
-            
+
             platform = self.bot.platform_registry.get_platform(platform_name)
             if not platform:
                 raise Exception(f"Platform {platform_name} not found")
-            
+
             # Get stream URL from platform
             stream_url = await platform.get_stream_url(video_id)
             if not stream_url:
                 raise Exception(f"No stream URL returned from {platform_name}")
-            
+
             logger.info(f"Got stream URL from {platform_name}: {stream_url[:100]}...")
             return stream_url
-            
+
         except NetworkResilienceError:
             # Re-raise network resilience errors as-is
             raise
@@ -191,21 +203,26 @@ class AudioPlayer:
     async def _playback_finished(self, error):
         """Called when playback finishes"""
         logger.info(f"Playback finished callback triggered. Error: {error}")
-        
+
         if error:
             logger.error(f"Playback error: {error}")
             logger.error(f"Error type: {type(error)}")
-            logger.error(f"Current song: {self.current.get('title') if self.current else 'None'}")
+            logger.error(
+                f"Current song: {self.current.get('title') if self.current else 'None'}"
+            )
             import traceback
+
             logger.error(f"Traceback: {traceback.format_exc()}")
 
         self._is_playing = False
-        
+
         # Always reset skip flag
         skip_was_requested = self._skip_flag
         self._skip_flag = False
-        
-        logger.info(f"Skip flag was: {skip_was_requested}, Queue length: {len(self.queue)}")
+
+        logger.info(
+            f"Skip flag was: {skip_was_requested}, Queue length: {len(self.queue)}"
+        )
 
         # Always advance to next song when playback finishes (whether by skip or natural end)
         logger.info("Attempting to play next song...")
@@ -267,7 +284,7 @@ class AudioPlayer:
         self.queue.clear()
         self.current = None
         self._update_queue_metrics()
-    
+
     def _update_queue_metrics(self):
         """Update queue size metric"""
         # Count current + queue size
@@ -275,31 +292,33 @@ class AudioPlayer:
         if self.current:
             total_size += 1
         self.metrics.set_queue_size(total_size)
-    
+
     def get_network_status(self) -> Dict:
         """Get network resilience status for debugging"""
         resilience_manager = get_resilience_manager()
         return resilience_manager.get_all_status()
-    
+
     def is_service_healthy(self) -> bool:
         """Check if audio player and related services are healthy"""
         try:
             resilience_manager = get_resilience_manager()
             status = resilience_manager.get_all_status()
-            
+
             # Check if any circuit breakers are open
             for cb_name, cb_status in status.get("circuit_breakers", {}).items():
                 if cb_status.get("state") == "open":
-                    logger.warning(f"Circuit breaker {cb_name} is open - service unhealthy")
+                    logger.warning(
+                        f"Circuit breaker {cb_name} is open - service unhealthy"
+                    )
                     return False
-            
+
             # Check overall success rate
             global_stats = status.get("global_stats", {})
             success_rate = global_stats.get("success_rate", 0)
-            
+
             # Consider service healthy if success rate > 80%
             return success_rate > 80.0
-            
+
         except Exception as e:
             logger.error(f"Error checking service health: {e}")
             return False

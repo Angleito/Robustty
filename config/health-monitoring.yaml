@@ -1,0 +1,291 @@
+# Health Monitoring Configuration for Robustty
+# Defines health check thresholds, monitoring endpoints, and alerting rules
+
+health_monitoring:
+  # Global health check settings
+  global:
+    check_interval: 30  # seconds
+    cache_ttl: 30      # seconds - how long to cache health results
+    timeout: 15        # seconds - max time for individual checks
+    
+  # Health check thresholds
+  thresholds:
+    memory:
+      healthy: 70      # % - below this is healthy
+      degraded: 85     # % - between healthy and this is degraded
+      unhealthy: 95    # % - above this is unhealthy
+      critical: 98     # % - above this triggers immediate alerts
+    
+    cpu:
+      healthy: 70
+      degraded: 85
+      unhealthy: 95
+      critical: 98
+    
+    disk:
+      healthy: 75
+      degraded: 85
+      unhealthy: 95
+      critical: 98
+    
+    latency:
+      discord:
+        healthy: 0.5   # seconds
+        degraded: 1.0
+        unhealthy: 2.0
+        critical: 5.0
+      
+      redis:
+        healthy: 0.1
+        degraded: 0.5
+        unhealthy: 1.0
+        critical: 2.0
+    
+    response_time:
+      health_check:
+        healthy: 0.5
+        degraded: 2.0
+        unhealthy: 5.0
+        critical: 10.0
+
+  # Component-specific health checks
+  components:
+    system:
+      enabled: true
+      critical: true
+      checks:
+        - memory_usage
+        - cpu_usage
+        - disk_usage
+        - load_average
+        - uptime
+    
+    discord:
+      enabled: true
+      critical: true
+      checks:
+        - connection_status
+        - websocket_health
+        - latency
+        - guild_connectivity
+        - voice_connections
+      
+    platforms:
+      enabled: true
+      critical: false  # Platform failures shouldn't kill the service
+      checks:
+        - api_connectivity
+        - cookie_freshness
+        - search_functionality
+        - rate_limiting_status
+      
+    infrastructure:
+      enabled: true
+      critical: true
+      checks:
+        - redis_connectivity
+        - redis_performance
+        - filesystem_health
+        - permissions_check
+        - directory_accessibility
+    
+    security:
+      enabled: true
+      critical: false
+      checks:
+        - file_permissions
+        - environment_variables
+        - process_security
+        - certificate_validity
+
+  # Health endpoints configuration
+  endpoints:
+    basic_health:
+      path: "/health"
+      description: "Basic health status - dependency-free"
+      cache: true
+      public: true
+      
+    detailed_health:
+      path: "/health/detailed"
+      description: "Comprehensive component health status"
+      cache: true
+      public: true
+      
+    readiness_probe:
+      path: "/ready"
+      description: "Kubernetes-style readiness probe"
+      cache: false
+      public: true
+      strict: true  # More strict than basic health
+      
+    liveness_probe:
+      path: "/live"
+      description: "Kubernetes-style liveness probe"
+      cache: false
+      public: true
+      lenient: true  # More lenient than readiness
+      
+    discord_health:
+      path: "/health/discord"
+      description: "Discord-specific connectivity and functionality"
+      cache: true
+      public: true
+      
+    platforms_health:
+      path: "/health/platforms"
+      description: "Platform API and cookie status"
+      cache: true
+      public: true
+      
+    performance_health:
+      path: "/health/performance"
+      description: "Performance metrics and thresholds"
+      cache: true
+      public: true
+      
+    infrastructure_health:
+      path: "/health/infrastructure"
+      description: "Infrastructure component status"
+      cache: true
+      public: true
+      
+    security_health:
+      path: "/health/security"
+      description: "Security checks and compliance"
+      cache: true
+      public: false  # Security info should be restricted
+
+  # Monitoring integration
+  monitoring:
+    prometheus:
+      enabled: true
+      metrics_path: "/metrics"
+      health_metrics: true  # Export health status as metrics
+      
+    external_monitoring:
+      enabled: true
+      endpoints:
+        - name: "uptime_check"
+          url: "/health"
+          method: "GET"
+          expected_status: 200
+          interval: 60
+          
+        - name: "readiness_check"
+          url: "/ready"
+          method: "GET"
+          expected_status: 200
+          interval: 30
+          
+        - name: "performance_check"
+          url: "/health/performance"
+          method: "GET"
+          expected_status: 200
+          interval: 120
+
+  # Alerting rules
+  alerting:
+    enabled: true
+    rules:
+      critical_memory:
+        condition: "memory_percent > 95"
+        severity: "critical"
+        description: "Memory usage critically high"
+        actions:
+          - log_error
+          - restart_container
+          
+      discord_disconnected:
+        condition: "discord.status == 'unhealthy'"
+        severity: "critical"
+        description: "Discord connection lost"
+        actions:
+          - log_error
+          - attempt_reconnect
+          
+      platform_degraded:
+        condition: "platforms.status == 'degraded'"
+        severity: "warning"
+        description: "Some platforms experiencing issues"
+        actions:
+          - log_warning
+          
+      redis_down:
+        condition: "redis.status == 'unhealthy'"
+        severity: "warning"
+        description: "Redis connection lost"
+        actions:
+          - log_warning
+          - attempt_redis_reconnect
+          
+      security_warning:
+        condition: "security.status == 'warning'"
+        severity: "warning"
+        description: "Security check warnings detected"
+        actions:
+          - log_warning
+          - audit_permissions
+
+  # Auto-recovery settings
+  auto_recovery:
+    enabled: true
+    max_attempts: 3
+    backoff_factor: 2.0
+    max_delay: 300  # 5 minutes
+    
+    recovery_actions:
+      discord_reconnect:
+        command: "reconnect_discord"
+        timeout: 30
+        
+      redis_reconnect:
+        command: "reconnect_redis"
+        timeout: 10
+        
+      platform_refresh:
+        command: "refresh_platform_cookies"
+        timeout: 60
+        
+      memory_cleanup:
+        command: "garbage_collect"
+        timeout: 5
+
+  # VPS deployment specific settings
+  vps_deployment:
+    enabled: true
+    
+    # Enhanced connectivity checks for VPS
+    connectivity_checks:
+      discord_gateways:
+        - "gateway-us-east1-a.discord.gg:443"
+        - "gateway-us-west1-a.discord.gg:443"
+        - "gateway-eu-west1-a.discord.gg:443"
+      
+      dns_servers:
+        - "8.8.8.8:53"
+        - "1.1.1.1:53"
+        - "8.8.4.4:53"
+      
+      external_apis:
+        - "www.googleapis.com:443"  # YouTube API
+        - "api.apify.com:443"       # Rumble via Apify
+    
+    # Resource monitoring for VPS
+    resource_monitoring:
+      enabled: true
+      low_resource_mode: false  # Enable if VPS has limited resources
+      
+      memory_limit: "1Gi"      # VPS memory limit
+      cpu_limit: "1.0"         # VPS CPU limit
+      disk_limit: "10Gi"       # VPS disk limit
+      
+    # Network resilience for VPS
+    network_resilience:
+      enabled: true
+      connection_timeout: 30
+      retry_attempts: 3
+      retry_delay: 5
+      
+      failover_endpoints: true
+      load_balancing: false    # Usually not needed for single-instance VPS

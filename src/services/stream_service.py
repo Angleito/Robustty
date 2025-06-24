@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 # Import rumble_extractor if available
 try:
     from extractors.rumble_extractor import RumbleExtractor
+
     RUMBLE_EXTRACTOR_AVAILABLE = True
 except ImportError:
     logger.warning("RumbleExtractor not available. Using yt-dlp for Rumble.")
@@ -33,9 +34,11 @@ if RUMBLE_EXTRACTOR_AVAILABLE and USE_RUMBLE_EXTRACTOR:
 
 # Redis connection for caching
 try:
-    r: Optional[redis.Redis] = redis.Redis(
-        host="redis", port=6379, db=0, decode_responses=True
-    )
+    # Use REDIS_URL environment variable, with fallback to traditional parameters
+    redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
+    r: Optional[redis.Redis] = redis.from_url(redis_url, decode_responses=True)
+    # Test the connection
+    r.ping()
 except Exception as e:
     logger.warning(f"Redis connection failed: {e}")
     r = None
@@ -63,7 +66,9 @@ if os.path.exists(NETSCAPE_COOKIE_FILE):
     YDL_OPTS["cookiefile"] = NETSCAPE_COOKIE_FILE
     logger.info("Using Netscape format YouTube cookies")
 elif os.path.exists(JSON_COOKIE_FILE):
-    logger.warning("JSON cookies found but Netscape format preferred - YouTube platform will handle conversion")
+    logger.warning(
+        "JSON cookies found but Netscape format preferred - YouTube platform will handle conversion"
+    )
 
 
 def get_cache_key(platform: str, video_id: str) -> str:
@@ -106,13 +111,15 @@ def cache_url(platform: str, video_id: str, url: str, ttl: int = CACHE_TTL):
 @app.route("/health")
 def health():
     """Health check endpoint"""
-    return jsonify({
-        "status": "healthy", 
-        "service": "stream-extractor",
-        "rumble_extractor_available": RUMBLE_EXTRACTOR_AVAILABLE,
-        "rumble_extractor_enabled": rumble_extractor is not None,
-        "use_rumble_extractor": USE_RUMBLE_EXTRACTOR
-    })
+    return jsonify(
+        {
+            "status": "healthy",
+            "service": "stream-extractor",
+            "rumble_extractor_available": RUMBLE_EXTRACTOR_AVAILABLE,
+            "rumble_extractor_enabled": rumble_extractor is not None,
+            "use_rumble_extractor": USE_RUMBLE_EXTRACTOR,
+        }
+    )
 
 
 @app.route("/stream/<platform>/<video_id>")
@@ -129,8 +136,17 @@ def get_stream_url(platform: str, video_id: str):
     if platform == "youtube":
         # Check if YouTube ID is complete (should be 11 characters)
         if len(video_id) != 11:
-            logger.error(f"Invalid YouTube ID length: {video_id} (length: {len(video_id)})")
-            return jsonify({"error": f"Invalid YouTube ID: {video_id} (should be 11 characters)"}), 400
+            logger.error(
+                f"Invalid YouTube ID length: {video_id} (length: {len(video_id)})"
+            )
+            return (
+                jsonify(
+                    {
+                        "error": f"Invalid YouTube ID: {video_id} (should be 11 characters)"
+                    }
+                ),
+                400,
+            )
         url = f"https://www.youtube.com/watch?v={video_id}"
     elif platform == "peertube":
         # PeerTube URLs need instance information
@@ -150,12 +166,12 @@ def get_stream_url(platform: str, video_id: str):
             try:
                 # Get metadata and stream URL from Rumble extractor
                 metadata = rumble_extractor.get_video_metadata(url)
-                stream_url = rumble_extractor.download_audio(url, quality='best')
-                
+                stream_url = rumble_extractor.download_audio(url, quality="best")
+
                 # Cache the URL
                 ttl = CACHE_TTL  # Default cache time
                 cache_url(platform, video_id, stream_url, ttl)
-                
+
                 return jsonify(
                     {
                         "url": stream_url,
@@ -163,16 +179,18 @@ def get_stream_url(platform: str, video_id: str):
                         "title": metadata.get("title", "Unknown"),
                         "duration": metadata.get("duration"),
                         "thumbnail": metadata.get("thumbnail_url"),
-                        "extractor": "rumble_extractor"
+                        "extractor": "rumble_extractor",
                     }
                 )
             except NotImplementedError:
-                logger.warning("RumbleExtractor not fully implemented. Falling back to yt-dlp.")
+                logger.warning(
+                    "RumbleExtractor not fully implemented. Falling back to yt-dlp."
+                )
                 # Fall through to yt-dlp
             except Exception as e:
                 logger.error(f"RumbleExtractor error: {e}. Falling back to yt-dlp.")
                 # Fall through to yt-dlp
-        
+
         # Use yt-dlp for extraction (default or fallback)
         # Custom options for specific platforms
         ydl_opts = YDL_OPTS.copy()
@@ -184,7 +202,9 @@ def get_stream_url(platform: str, video_id: str):
             ydl_opts["format"] = "mp4/best"
 
         # Extract stream URL using yt-dlp
-        logger.info(f"Extracting stream for {platform}/{video_id} from {url} using yt-dlp")
+        logger.info(
+            f"Extracting stream for {platform}/{video_id} from {url} using yt-dlp"
+        )
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
             logger.info(f"Extracted info for {platform}/{video_id}")
@@ -224,7 +244,7 @@ def get_stream_url(platform: str, video_id: str):
                     "title": info.get("title", "Unknown"),
                     "duration": info.get("duration"),
                     "thumbnail": info.get("thumbnail"),
-                    "extractor": "yt-dlp"
+                    "extractor": "yt-dlp",
                 }
             )
 
@@ -257,8 +277,17 @@ def get_video_info(platform: str, video_id: str):
     if platform == "youtube":
         # Check if YouTube ID is complete (should be 11 characters)
         if len(video_id) != 11:
-            logger.error(f"Invalid YouTube ID length: {video_id} (length: {len(video_id)})")
-            return jsonify({"error": f"Invalid YouTube ID: {video_id} (should be 11 characters)"}), 400
+            logger.error(
+                f"Invalid YouTube ID length: {video_id} (length: {len(video_id)})"
+            )
+            return (
+                jsonify(
+                    {
+                        "error": f"Invalid YouTube ID: {video_id} (should be 11 characters)"
+                    }
+                ),
+                400,
+            )
         url = f"https://www.youtube.com/watch?v={video_id}"
     elif platform == "peertube":
         instance = request.args.get("instance", "https://framatube.org")
@@ -287,16 +316,20 @@ def get_video_info(platform: str, video_id: str):
                         "view_count": metadata.get("view_count"),
                         "like_count": None,  # Not available in Rumble extractor
                         "upload_date": metadata.get("publish_date"),
-                        "extractor": "rumble_extractor"
+                        "extractor": "rumble_extractor",
                     }
                 )
             except NotImplementedError:
-                logger.warning("RumbleExtractor metadata not implemented. Falling back to yt-dlp.")
+                logger.warning(
+                    "RumbleExtractor metadata not implemented. Falling back to yt-dlp."
+                )
                 # Fall through to yt-dlp
             except Exception as e:
-                logger.error(f"RumbleExtractor metadata error: {e}. Falling back to yt-dlp.")
+                logger.error(
+                    f"RumbleExtractor metadata error: {e}. Falling back to yt-dlp."
+                )
                 # Fall through to yt-dlp
-        
+
         # Use yt-dlp for metadata extraction (default or fallback)
         ydl_opts = YDL_OPTS.copy()
         ydl_opts["extract_flat"] = True  # Only extract metadata
@@ -314,7 +347,7 @@ def get_video_info(platform: str, video_id: str):
                     "view_count": info.get("view_count"),
                     "like_count": info.get("like_count"),
                     "upload_date": info.get("upload_date"),
-                    "extractor": "yt-dlp"
+                    "extractor": "yt-dlp",
                 }
             )
 

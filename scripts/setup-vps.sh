@@ -20,6 +20,59 @@ if [[ ! -f .env ]]; then
     exit 1
 fi
 
+# Run network diagnostics before setup
+echo "🔍 Running network diagnostics..."
+if [[ -f scripts/diagnose-vps-network.sh ]]; then
+    echo "📊 Running comprehensive network diagnostics..."
+    # Run with timeout to prevent hanging
+    timeout 60 bash scripts/diagnose-vps-network.sh || {
+        echo "⚠️  Diagnostics timed out or failed, continuing with setup..."
+    }
+else
+    echo "📋 Running basic DNS checks..."
+    # Basic DNS resolution test
+    DISCORD_ENDPOINTS=("gateway-us-east1-d.discord.gg" "discord.com")
+    DNS_ISSUES=false
+    
+    for endpoint in "${DISCORD_ENDPOINTS[@]}"; do
+        if ! nslookup "$endpoint" >/dev/null 2>&1; then
+            echo "❌ DNS resolution failed for $endpoint"
+            DNS_ISSUES=true
+        else
+            echo "✅ DNS resolution OK for $endpoint"
+        fi
+    done
+    
+    # Test HTTPS connectivity
+    if command -v nc >/dev/null 2>&1; then
+        if ! timeout 10 nc -z gateway-us-east1-d.discord.gg 443 >/dev/null 2>&1; then
+            echo "❌ Cannot connect to Discord gateway on port 443"
+            DNS_ISSUES=true
+        else
+            echo "✅ Discord gateway HTTPS is accessible"
+        fi
+    fi
+    
+    if [[ "$DNS_ISSUES" = true ]]; then
+        echo ""
+        echo "⚠️  NETWORK CONNECTIVITY ISSUES DETECTED!"
+        echo "The Discord bot may fail to connect due to DNS/network problems."
+        echo ""
+        echo "Common fixes:"
+        echo "1. Add public DNS servers to /etc/resolv.conf:"
+        echo "   echo 'nameserver 8.8.8.8' | sudo tee -a /etc/resolv.conf"
+        echo "2. Check firewall settings (allow outbound ports 53, 443)"
+        echo "3. Verify VPS security groups allow outbound internet access"
+        echo ""
+        read -p "Continue with setup despite network issues? (y/N): " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            echo "Setup cancelled. Please fix network issues first."
+            exit 1
+        fi
+    fi
+fi
+
 # Create necessary directories
 echo "📁 Creating directories..."
 mkdir -p logs data cookies

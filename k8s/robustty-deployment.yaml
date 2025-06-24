@@ -1,0 +1,287 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: robustty-bot
+  labels:
+    app: robustty
+    component: discord-bot
+    version: v1
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: robustty
+      component: discord-bot
+  template:
+    metadata:
+      labels:
+        app: robustty
+        component: discord-bot
+        version: v1
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+      - name: robustty
+        image: robustty:latest
+        ports:
+        - containerPort: 8080
+          name: http-metrics
+          protocol: TCP
+        env:
+        - name: DISCORD_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: robustty-secrets
+              key: discord-token
+        - name: YOUTUBE_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: robustty-secrets
+              key: youtube-api-key
+        - name: APIFY_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: robustty-secrets
+              key: apify-api-key
+              optional: true
+        - name: LOG_LEVEL
+          value: "INFO"
+        - name: REDIS_URL
+          value: "redis://robustty-redis:6379"
+        - name: METRICS_PORT
+          value: "8080"
+        - name: COOKIE_SOURCE
+          value: "remote"
+        
+        # Resource limits
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+        
+        # Enhanced health checks using new endpoints
+        livenessProbe:
+          httpGet:
+            path: /live
+            port: 8080
+            scheme: HTTP
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 15
+          failureThreshold: 3
+          successThreshold: 1
+        
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8080
+            scheme: HTTP
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 10
+          failureThreshold: 3
+          successThreshold: 1
+        
+        # Startup probe for initial Discord connection
+        startupProbe:
+          httpGet:
+            path: /health
+            port: 8080
+            scheme: HTTP
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 12  # Allow up to 2 minutes for startup
+          successThreshold: 1
+        
+        # Volume mounts
+        volumeMounts:
+        - name: config
+          mountPath: /app/config
+          readOnly: true
+        - name: cookies
+          mountPath: /app/cookies
+          readOnly: true
+        - name: logs
+          mountPath: /app/logs
+        - name: data
+          mountPath: /app/data
+        
+        # Security context
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+          runAsGroup: 1000
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: false
+          capabilities:
+            drop:
+            - ALL
+      
+      # Init container for dependency checks
+      initContainers:
+      - name: wait-for-redis
+        image: busybox:1.35
+        command: ['sh', '-c']
+        args:
+        - |
+          until nc -z robustty-redis 6379; do
+            echo "Waiting for Redis..."
+            sleep 2
+          done
+          echo "Redis is ready!"
+      
+      volumes:
+      - name: config
+        configMap:
+          name: robustty-config
+      - name: cookies
+        persistentVolumeClaim:
+          claimName: robustty-cookies-pvc
+      - name: logs
+        emptyDir: {}
+      - name: data
+        persistentVolumeClaim:
+          claimName: robustty-data-pvc
+      
+      # DNS and networking configuration
+      dnsPolicy: ClusterFirst
+      restartPolicy: Always
+      terminationGracePeriodSeconds: 30
+      
+      # Node selection and affinity
+      nodeSelector:
+        kubernetes.io/os: linux
+      
+      # Tolerations for node issues
+      tolerations:
+      - key: "node.kubernetes.io/unreachable"
+        operator: "Exists"
+        effect: "NoExecute"
+        tolerationSeconds: 300
+      - key: "node.kubernetes.io/not-ready"
+        operator: "Exists"
+        effect: "NoExecute"
+        tolerationSeconds: 300
+
+---
+# Service for health checks and metrics
+apiVersion: v1
+kind: Service
+metadata:
+  name: robustty-metrics
+  labels:
+    app: robustty
+    component: metrics
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8080
+    targetPort: 8080
+    protocol: TCP
+    name: http-metrics
+  selector:
+    app: robustty
+    component: discord-bot
+
+---
+# Horizontal Pod Autoscaler (optional)
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: robustty-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: robustty-bot
+  minReplicas: 1
+  maxReplicas: 1  # Discord bots should typically only have 1 replica
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 80
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 85
+
+---
+# ServiceMonitor for Prometheus scraping
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: robustty-metrics
+  labels:
+    app: robustty
+spec:
+  selector:
+    matchLabels:
+      app: robustty
+      component: metrics
+  endpoints:
+  - port: http-metrics
+    path: /metrics
+    interval: 30s
+    scrapeTimeout: 10s
+    
+---
+# PrometheusRule for alerting
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: robustty-alerts
+  labels:
+    app: robustty
+    prometheus: kube-prometheus
+    role: alert-rules
+spec:
+  groups:
+  - name: robustty.rules
+    rules:
+    - alert: RobusttyDown
+      expr: up{job="robustty-metrics"} == 0
+      for: 5m
+      labels:
+        severity: critical
+      annotations:
+        summary: "Robustty bot is down"
+        description: "Robustty bot has been down for more than 5 minutes."
+    
+    - alert: RobusttyHighMemoryUsage
+      expr: robustty_memory_usage_percent > 90
+      for: 2m
+      labels:
+        severity: warning
+      annotations:
+        summary: "Robustty high memory usage"
+        description: "Robustty memory usage is above 90% for more than 2 minutes."
+    
+    - alert: RobusttyDiscordDisconnected
+      expr: robustty_connection_status{service="discord_gateway"} != 1
+      for: 1m
+      labels:
+        severity: critical
+      annotations:
+        summary: "Robustty Discord connection lost"
+        description: "Robustty has lost connection to Discord gateway."
+    
+    - alert: RobusttyHighLatency
+      expr: robustty_discord_latency > 2
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "Robustty high Discord latency"
+        description: "Robustty Discord latency is above 2 seconds for more than 5 minutes."

@@ -1,71 +1,10 @@
 """
-HTTP server for exposing Prometheus metrics.
+HTTP server for exposing Prometheus metrics and comprehensive health check endpoints.
+Enhanced version with dependency-free health checks for VPS deployment monitoring.
 """
 
-import asyncio
-from aiohttp import web
-from .metrics_collector import get_metrics_collector
+# Import the enhanced metrics server for backward compatibility
+from .enhanced_metrics_server import EnhancedMetricsServer
 
-
-class MetricsServer:
-    """Simple HTTP server for exposing metrics endpoint."""
-    
-    def __init__(self, host: str = "0.0.0.0", port: int = 8080):
-        self.host = host
-        self.port = port
-        self.app = web.Application()
-        self.runner = None
-        self._setup_routes()
-        
-    def _setup_routes(self):
-        """Setup HTTP routes."""
-        self.app.router.add_get('/metrics', self.handle_metrics)
-        self.app.router.add_get('/health', self.handle_health)
-        self.app.router.add_get('/health/detailed', self.handle_detailed_health)
-        
-    async def handle_metrics(self, request):
-        """Handle metrics endpoint request."""
-        collector = get_metrics_collector()
-        metrics_data = collector.get_metrics()
-        return web.Response(
-            body=metrics_data,
-            content_type='text/plain; version=0.0.4'
-        )
-        
-    async def handle_health(self, request):
-        """Handle basic health check endpoint."""
-        return web.json_response({'status': 'healthy'})
-        
-    async def handle_detailed_health(self, request):
-        """Handle detailed health check endpoint."""
-        # Try to get health monitor from bot instance if available
-        bot = getattr(self, 'bot', None)
-        if bot and hasattr(bot, 'health_monitor') and bot.health_monitor:
-            health_status = bot.health_monitor.get_health_status()
-            return web.json_response(health_status)
-        else:
-            return web.json_response({
-                'error': 'Health monitor not available',
-                'status': 'unknown'
-            }, status=503)
-        
-    async def start(self):
-        """Start the metrics server."""
-        self.runner = web.AppRunner(self.app)
-        await self.runner.setup()
-        site = web.TCPSite(self.runner, self.host, self.port)
-        await site.start()
-        print(f"Metrics server started on http://{self.host}:{self.port}")
-        
-    async def stop(self):
-        """Stop the metrics server."""
-        if self.runner:
-            await self.runner.cleanup()
-            
-    async def run_forever(self):
-        """Run the server forever."""
-        await self.start()
-        try:
-            await asyncio.Event().wait()
-        except (KeyboardInterrupt, SystemExit):
-            await self.stop()
+# Create alias for backward compatibility
+MetricsServer = EnhancedMetricsServer

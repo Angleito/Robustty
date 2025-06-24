@@ -1,4 +1,5 @@
 """Configuration loader with environment variable substitution."""
+
 import os
 import re
 import sys
@@ -10,15 +11,17 @@ import yaml
 class ConfigurationError(Exception):
     """
     Custom exception for configuration-related errors.
-    
+
     Provides clear error messages about missing configuration values
     and how to fix them.
     """
+
     pass
 
 
 class BotSection(TypedDict):
     """Bot configuration section."""
+
     command_prefix: str
     description: str
     activity: str
@@ -26,6 +29,7 @@ class BotSection(TypedDict):
 
 class PlatformConfig(TypedDict, total=False):
     """Generic platform configuration."""
+
     enabled: bool
     api_key: Optional[str]
     max_results: Optional[int]
@@ -40,6 +44,7 @@ class PlatformConfig(TypedDict, total=False):
 
 class PerformanceConfig(TypedDict):
     """Performance configuration section."""
+
     search_timeout: int
     stream_timeout: int
     max_queue_size: int
@@ -48,6 +53,7 @@ class PerformanceConfig(TypedDict):
 
 class FeaturesConfig(TypedDict):
     """Features configuration section."""
+
     auto_disconnect: bool
     auto_disconnect_timeout: int
     save_queue: bool
@@ -56,6 +62,7 @@ class FeaturesConfig(TypedDict):
 
 class ConfigType(TypedDict):
     """Main configuration type."""
+
     bot: BotSection
     platforms: Dict[str, PlatformConfig]
     performance: PerformanceConfig
@@ -90,8 +97,8 @@ def load_config(config_path: str) -> ConfigType:
     process_config_dict(config)
 
     # Ensure cookies section exists with default empty dict
-    if 'cookies' not in config:
-        config['cookies'] = {}
+    if "cookies" not in config:
+        config["cookies"] = {}
 
     # Validate platform credentials
     validate_platform_credentials(config)
@@ -131,7 +138,7 @@ def process_config_dict(config: Dict[str, Any]):
 def validate_platform_credentials(config: Dict[str, Any]):
     """Validate required API credentials for enabled platforms."""
     platforms = config.get("platforms", {})
-    
+
     # Check YouTube API key
     if platforms.get("youtube", {}).get("enabled"):
         api_key = platforms["youtube"].get("api_key")
@@ -144,7 +151,7 @@ def validate_platform_credentials(config: Dict[str, Any]):
                 "3. Or disable YouTube in config by setting 'enabled: false'\n"
                 "\nExample: export YOUTUBE_API_KEY='your-api-key-here'"
             )
-    
+
     # Check Rumble API token
     if platforms.get("rumble", {}).get("enabled"):
         api_token = platforms["rumble"].get("api_token")

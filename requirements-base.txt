@@ -12,6 +12,7 @@ colorlog==6.7.0
 
 # Web scraping essentials
 aiohttp==3.9.5
+requests==2.32.0
 beautifulsoup4==4.12.2
 
 # Media processing

@@ -52,19 +52,43 @@ class CacheManager:
                 
                 # Try new redis.asyncio API first
                 if hasattr(aioredis, 'Redis'):
-                    self.redis_client = aioredis.Redis(
-                        host=redis_config.get('host', 'localhost'),
-                        port=redis_config.get('port', 6379),
-                        db=redis_config.get('db', 0),
-                        password=redis_config.get('password'),
-                        decode_responses=True
-                    )
+                    # Check if REDIS_URL is configured, use it preferentially
+                    redis_url = redis_config.get('url')
+                    if redis_url:
+                        self.redis_client = aioredis.from_url(
+                            redis_url,
+                            decode_responses=True
+                        )
+                    else:
+                        # Fall back to individual parameters
+                        self.redis_client = aioredis.Redis(
+                            host=redis_config.get('host', 'localhost'),
+                            port=redis_config.get('port', 6379),
+                            db=redis_config.get('db', 0),
+                            password=redis_config.get('password'),
+                            decode_responses=True
+                        )
                 else:
                     # Fall back to legacy aioredis API
+                    redis_url = redis_config.get('url')
+                    if redis_url:
+                        # Parse URL for legacy API (limited URL support)
+                        import urllib.parse
+                        parsed = urllib.parse.urlparse(redis_url)
+                        host = parsed.hostname or 'localhost'
+                        port = parsed.port or 6379
+                        db = int(parsed.path[1:]) if parsed.path and parsed.path != '/' else 0
+                        password = parsed.password
+                    else:
+                        host = redis_config.get('host', 'localhost')
+                        port = redis_config.get('port', 6379)
+                        db = redis_config.get('db', 0)
+                        password = redis_config.get('password')
+                    
                     self.redis_client = await aioredis.create_redis_pool(
-                        f"redis://{redis_config.get('host', 'localhost')}:{redis_config.get('port', 6379)}",
-                        db=redis_config.get('db', 0),
-                        password=redis_config.get('password'),
+                        f"redis://{host}:{port}",
+                        db=db,
+                        password=password,
                         minsize=5,
                         maxsize=20
                     )

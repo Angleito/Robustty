@@ -45,6 +45,7 @@ features:
 cache:
   redis:
     enabled: ${REDIS_ENABLED:false}
+    url: ${REDIS_URL:redis://localhost:6379}
     host: ${REDIS_HOST:localhost}
     port: ${REDIS_PORT:6379}
     db: ${REDIS_DB:0}
@@ -65,3 +66,51 @@ health_monitor:
     max_attempts: ${MAX_RECOVERY_ATTEMPTS:5}
     exponential_backoff: true
     max_delay: ${MAX_RECOVERY_DELAY:300}  # seconds (5 minutes)
+
+network:
+  # DNS server fallbacks (in priority order)
+  dns_servers:
+    - address: "8.8.8.8"
+      name: "Google Primary"
+      timeout: 3
+      priority: 1
+    - address: "1.1.1.1"
+      name: "Cloudflare Primary"
+      timeout: 3
+      priority: 2
+  
+  # Discord gateway regions (in priority order)
+  discord_gateways:
+    - region: "us-west"
+      endpoint: "gateway-us-west-1.discord.gg"
+      priority: 1
+    - region: "us-east"
+      endpoint: "gateway-us-east-1.discord.gg"
+      priority: 2
+  
+  # Essential endpoints for connectivity checks
+  essential_endpoints:
+    - name: "Discord API"
+      url: "https://discord.com/api/v10/gateway" 
+      timeout: 10
+      required: true
+      priority: 1
+    - name: "Discord CDN"
+      url: "https://cdn.discordapp.com"
+      timeout: 5
+      required: true
+      priority: 2
+  
+  # Reconnection behavior
+  reconnection:
+    max_attempts: ${NETWORK_MAX_RECONNECT_ATTEMPTS:10}
+    base_delay: ${NETWORK_BASE_DELAY:2.0}
+    max_delay: ${NETWORK_MAX_DELAY:300.0}  # 5 minutes
+    exponential_base: ${NETWORK_EXPONENTIAL_BASE:2.0}
+    jitter_factor: ${NETWORK_JITTER_FACTOR:0.1}
+    fast_reconnect_threshold: ${NETWORK_FAST_RECONNECT_THRESHOLD:3}
+    fast_reconnect_delay: ${NETWORK_FAST_RECONNECT_DELAY:1.0}
+    gateway_rotation_threshold: ${NETWORK_GATEWAY_ROTATION_THRESHOLD:2}
+  
+  # Connectivity check caching
+  check_cache_timeout: ${NETWORK_CHECK_CACHE_TIMEOUT:300}  # 5 minutes

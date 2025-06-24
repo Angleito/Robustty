@@ -13,14 +13,14 @@ from .queue_manager import QueueManager
 from .searcher import MultiPlatformSearcher
 
 __all__ = [
-    'AudioPlayer',
-    'CacheManager', 
-    'CookieManager',
-    'EnhancedCookieManager',
-    'HealthMonitor',
-    'MetricsCollector',
-    'get_metrics_collector',
-    'MetricsServer',
-    'QueueManager',
-    'MultiPlatformSearcher',
+    "AudioPlayer",
+    "CacheManager",
+    "CookieManager",
+    "EnhancedCookieManager",
+    "HealthMonitor",
+    "MetricsCollector",
+    "get_metrics_collector",
+    "MetricsServer",
+    "QueueManager",
+    "MultiPlatformSearcher",
 ]

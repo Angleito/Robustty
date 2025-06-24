@@ -39,7 +39,9 @@ class PeerTubePlatform(VideoPlatform):
             return []
 
         all_results: List[Dict[str, Any]] = []
-        tasks: List[Coroutine[Any, Any, Union[List[Dict[str, Any]], PeerTubeError]]] = []
+        tasks: List[Coroutine[Any, Any, Union[List[Dict[str, Any]], PeerTubeError]]] = (
+            []
+        )
 
         # Calculate results per instance
         results_per_instance: int = min(
@@ -52,9 +54,7 @@ class PeerTubePlatform(VideoPlatform):
             tasks.append(task)
 
         # Gather results from all instances
-        instance_results = await asyncio.gather(
-            *tasks, return_exceptions=True
-        )
+        instance_results = await asyncio.gather(*tasks, return_exceptions=True)
 
         for i, results in enumerate(instance_results):
             if isinstance(results, Exception):

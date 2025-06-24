@@ -15,6 +15,7 @@ from dotenv import load_dotenv  # noqa: E402
 from src.bot.bot import RobusttyBot  # noqa: E402
 from src.utils.config_loader import load_config, ConfigurationError  # noqa: E402
 from src.services.metrics_server import MetricsServer  # noqa: E402
+from src.utils.network_connectivity import run_preflight_checks  # noqa: E402
 
 # Configure logging
 logging.basicConfig(
@@ -36,7 +37,7 @@ async def main() -> None:
     try:
         # Load .env file
         load_dotenv()
-        
+
         # Load configuration
         config = load_config("config/config.yaml")
 
@@ -44,6 +45,12 @@ async def main() -> None:
         token = os.getenv("DISCORD_TOKEN")
         if not token:
             logger.error("DISCORD_TOKEN not found in environment")
+            sys.exit(1)
+
+        # Run preflight network checks
+        if not await run_preflight_checks(config):
+            logger.error("Preflight network checks failed - aborting startup")
+            logger.error("Please check your network connectivity and try again")
             sys.exit(1)
 
         # Create bot first
