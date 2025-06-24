@@ -340,4 +340,121 @@ class PlatformFallbackManager:
     async def _monitor_fallbacks(self):
         """Monitor active fallbacks and attempt recovery"""
         while not self._stop_event.is_set():
-            try:\n                await self._check_fallback_recovery()\n                \n                # Wait for next check\n                try:\n                    await asyncio.wait_for(\n                        self._stop_event.wait(),\n                        timeout=self.retry_interval * 60\n                    )\n                except asyncio.TimeoutError:\n                    continue\n                    \n            except Exception as e:\n                logger.error(f\"Error in fallback monitoring: {e}\")\n                await asyncio.sleep(60)\n    \n    async def _check_fallback_recovery(self):\n        \"\"\"Check if any platforms can recover from fallback mode\"\"\"\n        if not self.active_fallbacks:\n            return\n        \n        logger.debug(f\"Checking recovery for {len(self.active_fallbacks)} platforms in fallback mode\")\n        \n        # This would typically check cookie health or other recovery conditions\n        # For now, we'll just log the active fallbacks\n        for platform, strategy in self.active_fallbacks.items():\n            fallback_duration = self._get_fallback_duration(platform)\n            \n            if fallback_duration and fallback_duration > self.max_fallback_duration:\n                logger.warning(f\"Platform {platform} has been in fallback mode for {fallback_duration:.1f} hours\")\n    \n    def _get_fallback_duration(self, platform: str) -> Optional[float]:\n        \"\"\"Get how long a platform has been in fallback mode (in hours)\"\"\"\n        if platform not in self.fallback_history:\n            return None\n        \n        # Find the most recent activation\n        recent_activations = [\n            record for record in self.fallback_history[platform]\n            if record['action'] == 'activated'\n        ]\n        \n        if not recent_activations:\n            return None\n        \n        latest_activation = max(recent_activations, key=lambda r: r['timestamp'])\n        activation_time = datetime.fromisoformat(latest_activation['timestamp'])\n        \n        # Check if there's a deactivation after this activation\n        recent_deactivations = [\n            record for record in self.fallback_history[platform]\n            if (record['action'] == 'deactivated' and \n                record['timestamp'] > latest_activation['timestamp'])\n        ]\n        \n        if recent_deactivations:\n            return None  # Already deactivated\n        \n        # Calculate duration\n        duration = datetime.now() - activation_time\n        return duration.total_seconds() / 3600\n    \n    def get_fallback_report(self) -> Dict[str, Any]:\n        \"\"\"Get comprehensive fallback status report\"\"\"\n        active_count = len(self.active_fallbacks)\n        total_platforms = len(self.fallback_strategies)\n        \n        return {\n            'timestamp': datetime.now().isoformat(),\n            'enabled': self.enable_fallbacks,\n            'summary': {\n                'active_fallbacks': active_count,\n                'total_platforms': total_platforms,\n                'fallback_rate': active_count / total_platforms if total_platforms > 0 else 0\n            },\n            'active_fallbacks': {\n                platform: {\n                    'mode': strategy.mode.value,\n                    'description': strategy.description,\n                    'limitations': strategy.limitations,\n                    'duration_hours': self._get_fallback_duration(platform)\n                }\n                for platform, strategy in self.active_fallbacks.items()\n            },\n            'platform_strategies': {\n                platform: [s.to_dict() for s in strategies]\n                for platform, strategies in self.fallback_strategies.items()\n            },\n            'history_summary': {\n                platform: len(history)\n                for platform, history in self.fallback_history.items()\n            }\n        }\n    \n    def clear_fallback_history(self, platform: Optional[str] = None):\n        \"\"\"Clear fallback history for a platform or all platforms\"\"\"\n        if platform:\n            if platform in self.fallback_history:\n                self.fallback_history[platform] = []\n                logger.info(f\"Cleared fallback history for {platform}\")\n        else:\n            self.fallback_history.clear()\n            logger.info(\"Cleared all fallback history\")\n    \n    def configure_platform_strategies(self, platform: str, strategies: List[FallbackStrategy]):\n        \"\"\"Configure custom fallback strategies for a platform\"\"\"\n        if not strategies:\n            logger.warning(f\"No strategies provided for {platform}\")\n            return\n        \n        self.fallback_strategies[platform] = strategies\n        logger.info(f\"Configured {len(strategies)} fallback strategies for {platform}\")\n        \n        # If platform is currently in fallback, re-evaluate\n        if platform in self.active_fallbacks:\n            logger.info(f\"Re-evaluating active fallback for {platform}\")\n            self.deactivate_fallback(platform, \"Strategy reconfiguration\")\n            self.activate_fallback(platform, \"Strategy reconfiguration\")
+            try:
+                await self._check_fallback_recovery()
+                
+                # Wait for next check
+                try:
+                    await asyncio.wait_for(
+                        self._stop_event.wait(),
+                        timeout=self.retry_interval * 60
+                    )
+                except asyncio.TimeoutError:
+                    continue
+                    
+            except Exception as e:
+                logger.error(f"Error in fallback monitoring: {e}")
+                await asyncio.sleep(60)
+    
+    async def _check_fallback_recovery(self):
+        """Check if any platforms can recover from fallback mode"""
+        if not self.active_fallbacks:
+            return
+        
+        logger.debug(f"Checking recovery for {len(self.active_fallbacks)} platforms in fallback mode")
+        
+        # This would typically check cookie health or other recovery conditions
+        # For now, we'll just log the active fallbacks
+        for platform, strategy in self.active_fallbacks.items():
+            fallback_duration = self._get_fallback_duration(platform)
+            
+            if fallback_duration and fallback_duration > self.max_fallback_duration:
+                logger.warning(f"Platform {platform} has been in fallback mode for {fallback_duration:.1f} hours")
+    
+    def _get_fallback_duration(self, platform: str) -> Optional[float]:
+        """Get how long a platform has been in fallback mode (in hours)"""
+        if platform not in self.fallback_history:
+            return None
+        
+        # Find the most recent activation
+        recent_activations = [
+            record for record in self.fallback_history[platform]
+            if record['action'] == 'activated'
+        ]
+        
+        if not recent_activations:
+            return None
+        
+        latest_activation = max(recent_activations, key=lambda r: r['timestamp'])
+        activation_time = datetime.fromisoformat(latest_activation['timestamp'])
+        
+        # Check if there's a deactivation after this activation
+        recent_deactivations = [
+            record for record in self.fallback_history[platform]
+            if (record['action'] == 'deactivated' and 
+                record['timestamp'] > latest_activation['timestamp'])
+        ]
+        
+        if recent_deactivations:
+            return None  # Already deactivated
+        
+        # Calculate duration
+        duration = datetime.now() - activation_time
+        return duration.total_seconds() / 3600
+    
+    def get_fallback_report(self) -> Dict[str, Any]:
+        """Get comprehensive fallback status report"""
+        active_count = len(self.active_fallbacks)
+        total_platforms = len(self.fallback_strategies)
+        
+        return {
+            'timestamp': datetime.now().isoformat(),
+            'enabled': self.enable_fallbacks,
+            'summary': {
+                'active_fallbacks': active_count,
+                'total_platforms': total_platforms,
+                'fallback_rate': active_count / total_platforms if total_platforms > 0 else 0
+            },
+            'active_fallbacks': {
+                platform: {
+                    'mode': strategy.mode.value,
+                    'description': strategy.description,
+                    'limitations': strategy.limitations,
+                    'duration_hours': self._get_fallback_duration(platform)
+                }
+                for platform, strategy in self.active_fallbacks.items()
+            },
+            'platform_strategies': {
+                platform: [s.to_dict() for s in strategies]
+                for platform, strategies in self.fallback_strategies.items()
+            },
+            'history_summary': {
+                platform: len(history)
+                for platform, history in self.fallback_history.items()
+            }
+        }
+    
+    def clear_fallback_history(self, platform: Optional[str] = None):
+        """Clear fallback history for a platform or all platforms"""
+        if platform:
+            if platform in self.fallback_history:
+                self.fallback_history[platform] = []
+                logger.info(f"Cleared fallback history for {platform}")
+        else:
+            self.fallback_history.clear()
+            logger.info("Cleared all fallback history")
+    
+    def configure_platform_strategies(self, platform: str, strategies: List[FallbackStrategy]):
+        """Configure custom fallback strategies for a platform"""
+        if not strategies:
+            logger.warning(f"No strategies provided for {platform}")
+            return
+        
+        self.fallback_strategies[platform] = strategies
+        logger.info(f"Configured {len(strategies)} fallback strategies for {platform}")
+        
+        # If platform is currently in fallback, re-evaluate
+        if platform in self.active_fallbacks:
+            logger.info(f"Re-evaluating active fallback for {platform}")
+            self.deactivate_fallback(platform, "Strategy reconfiguration")
+            self.activate_fallback(platform, "Strategy reconfiguration")
