@@ -8,7 +8,6 @@ from googleapiclient.errors import HttpError  # type: ignore
 
 from .base import VideoPlatform
 from .errors import (
-    PlatformNotAvailableError,
     PlatformAPIError,
     PlatformRateLimitError,
     PlatformAuthenticationError,
@@ -51,7 +50,8 @@ class YouTubePlatform(VideoPlatform):
         """Search YouTube videos"""
         if not self.youtube:
             raise PlatformAuthenticationError(
-                "YouTube API key is required for search. Please configure 'api_key' in config.",
+                "YouTube API key is required for search. "
+                "Please configure 'api_key' in config.",
                 platform="YouTube",
             )
 
@@ -77,7 +77,8 @@ class YouTubePlatform(VideoPlatform):
                 snippet = item.get("snippet", {})
 
                 logger.info(
-                    f"YouTube search result: video_id={video_id}, title={snippet.get('title', 'Unknown')}"
+                    f"YouTube search result: video_id={video_id}, "
+                    f"title={snippet.get('title', 'Unknown')}"
                 )
                 results.append(
                     {
@@ -165,7 +166,8 @@ class YouTubePlatform(VideoPlatform):
     def _convert_cookies_to_netscape(
         self, json_cookie_file: str, netscape_cookie_file: str
     ) -> bool:
-        """Convert JSON cookies to Netscape format for yt-dlp with enhanced error handling"""
+        """Convert JSON cookies to Netscape format for yt-dlp with 
+        enhanced error handling"""
         try:
             import json
 
@@ -202,7 +204,8 @@ class YouTubePlatform(VideoPlatform):
 
             if not cookies or not isinstance(cookies, list):
                 logger.warning(
-                    f"No valid cookies found in {json_cookie_file} (found: {type(cookies)})"
+                    f"No valid cookies found in {json_cookie_file} "
+                    f"(found: {type(cookies)})"
                 )
                 return False
 
@@ -245,7 +248,8 @@ class YouTubePlatform(VideoPlatform):
                             )
                             continue
 
-                        # Netscape format: domain, domain_specified, path, secure, expires, name, value
+                        # Netscape format: domain, domain_specified, path, 
+                        # secure, expires, name, value
                         domain = cookie.get("domain", ".youtube.com")
                         if not domain:
                             domain = ".youtube.com"
@@ -264,13 +268,17 @@ class YouTubePlatform(VideoPlatform):
                             expires = 0
 
                         # Write cookie line in Netscape format
-                        cookie_line = f"{domain}\t{domain_specified}\t{path}\t{secure}\t{expires}\t{name}\t{value}\n"
+                        cookie_line = (
+                            f"{domain}\t{domain_specified}\t{path}\t{secure}\t"
+                            f"{expires}\t{name}\t{value}\n"
+                        )
                         f.write(cookie_line)
                         valid_cookies += 1
 
                 if valid_cookies > 0:
                     logger.info(
-                        f"Successfully converted {valid_cookies} cookies to Netscape format"
+                        f"Successfully converted {valid_cookies} cookies to "
+                        f"Netscape format"
                     )
                     return True
                 else:
@@ -301,17 +309,28 @@ class YouTubePlatform(VideoPlatform):
             # Use yt-dlp to get stream URL
             url = f"https://www.youtube.com/watch?v={video_id}"
 
-            # Configure yt-dlp options optimized for Discord audio
+            # Configure yt-dlp options optimized for Discord audio compatibility
+            # Priority: M4A with AAC > WebM non-Opus > Any non-Opus > Fallback
             ydl_opts = {
-                "format": "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio",
+                "format": (
+                    "bestaudio[ext=m4a][acodec=mp4a.40.2]/bestaudio[ext=m4a]/"
+                    "bestaudio[ext=webm][acodec!=opus]/"
+                    "bestaudio[acodec!=opus]/"
+                    "bestaudio/best[acodec!=none]"
+                ),
                 "quiet": True,
                 "no_warnings": False,  # Enable warnings for debugging
                 "noplaylist": True,
                 "extract_flat": False,
-                "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "user_agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/120.0.0.0 Safari/537.36"
+                ),
                 "http_chunk_size": 10485760,  # 10MB chunks
                 "prefer_insecure": False,
                 "verbose": False,
+                "ignoreerrors": False,  # Don't ignore errors for better debugging
             }
 
             # Standardized cookie path
@@ -330,7 +349,8 @@ class YouTubePlatform(VideoPlatform):
                         ):
                             ydl_opts["cookiefile"] = netscape_cookie_file
                             logger.info(
-                                f"Using converted YouTube cookies from {json_cookie_file}"
+                                f"Using converted YouTube cookies from "
+                                f"{json_cookie_file}"
                             )
                             cookies_loaded = True
                             break
@@ -340,7 +360,8 @@ class YouTubePlatform(VideoPlatform):
                             )
                     except Exception as cookie_error:
                         logger.error(
-                            f"Cookie conversion error for {json_cookie_file}: {cookie_error}"
+                            f"Cookie conversion error for {json_cookie_file}: "
+                            f"{cookie_error}"
                         )
                         continue
 
@@ -358,89 +379,42 @@ class YouTubePlatform(VideoPlatform):
                             logger.error("yt-dlp returned no information")
                             return None
 
-                        # Extract URL from different possible structures, preferring direct URLs over HLS
+                        # Extract URL with enhanced format selection for Discord compatibility
                         stream_url = None
+                        selected_format = None
 
                         if "url" in info:
+                            # Direct URL available (preferred)
                             stream_url = info["url"]
+                            selected_format = info
+                            logger.info(f"Using direct URL from yt-dlp")
                         elif "formats" in info and info["formats"]:
-                            # Find best audio format
+                            # Multiple formats available - select best for Discord
                             formats = info["formats"]
-
-                            # Prefer audio-only formats
+                            
+                            # Filter for audio-only formats with URLs
                             audio_formats = [
-                                f
-                                for f in formats
+                                f for f in formats 
                                 if f.get("vcodec") == "none" and f.get("url")
                             ]
 
                             if audio_formats:
-                                # Separate direct URLs from HLS/DASH
-                                direct_formats = [
-                                    f
-                                    for f in audio_formats
-                                    if not any(
-                                        x in f.get("url", "")
-                                        for x in ["m3u8", "mpd", "manifest"]
-                                    )
-                                ]
-                                hls_formats = [
-                                    f
-                                    for f in audio_formats
-                                    if any(
-                                        x in f.get("url", "")
-                                        for x in ["m3u8", "manifest"]
-                                    )
-                                ]
-
-                                # Prefer direct formats for better stability
-                                preferred_formats = (
-                                    direct_formats if direct_formats else hls_formats
-                                )
-
-                                if preferred_formats:
-                                    # Sort by audio quality
-                                    preferred_formats.sort(
-                                        key=lambda f: f.get("abr", 0)
-                                        or f.get("tbr", 0),
-                                        reverse=True,
-                                    )
-                                    stream_url = preferred_formats[0]["url"]
-                                    format_type = "direct" if direct_formats else "HLS"
-                                    logger.info(
-                                        f"Selected {format_type} audio format with bitrate {preferred_formats[0].get('abr', 'unknown')}"
-                                    )
-                                else:
-                                    # Sort all audio formats by quality
-                                    audio_formats.sort(
-                                        key=lambda f: f.get("abr", 0)
-                                        or f.get("tbr", 0),
-                                        reverse=True,
-                                    )
-                                    stream_url = audio_formats[0]["url"]
+                                selected_format = self._select_best_discord_format(audio_formats)
+                                if selected_format:
+                                    stream_url = selected_format["url"]
                             else:
-                                # Fallback to best available format
+                                # Fallback to any valid format
                                 valid_formats = [f for f in formats if f.get("url")]
                                 if valid_formats:
-                                    # Prefer non-HLS formats
+                                    # Prefer direct URLs even for video formats
                                     direct_formats = [
-                                        f
-                                        for f in valid_formats
-                                        if not any(
-                                            x in f.get("url", "")
-                                            for x in ["m3u8", "mpd", "manifest"]
-                                        )
+                                        f for f in valid_formats
+                                        if not any(x in f.get("url", "") for x in ["m3u8", "mpd", "manifest"])
                                     ]
-                                    if direct_formats:
-                                        stream_url = direct_formats[-1]["url"]
-                                        logger.info(
-                                            "Using direct video format as audio fallback"
-                                        )
-                                    else:
-                                        stream_url = valid_formats[-1]["url"]
-                                        logger.info(
-                                            "Using HLS video format as audio fallback"
-                                        )
+                                    selected_format = direct_formats[0] if direct_formats else valid_formats[0]
+                                    stream_url = selected_format["url"]
+                                    logger.warning("Using video format as audio fallback")
+                                    
                         elif "entries" in info and info["entries"]:
                             # Handle playlist case (should not happen with noplaylist=True)
                             first_entry = info["entries"][0]
@@ -453,6 +427,17 @@ class YouTubePlatform(VideoPlatform):
                             )
                             return None
 
+                        # Log selected format details for debugging
+                        if selected_format:
+                            codec = selected_format.get("acodec", "unknown")
+                            ext = selected_format.get("ext", "unknown")
+                            bitrate = selected_format.get("abr") or selected_format.get("tbr", "unknown")
+                            url_type = "direct" if not any(x in stream_url for x in ["m3u8", "mpd", "manifest"]) else "streaming"
+                            logger.info(
+                                f"Selected format: {ext} ({codec}) at {bitrate}kbps, "
+                                f"URL type: {url_type}"
+                            )
+                        
                         logger.debug(f"Extracted stream URL: {stream_url[:100]}...")
                         return stream_url
 
@@ -481,6 +466,65 @@ class YouTubePlatform(VideoPlatform):
 
             logger.debug(f"Full traceback: {traceback.format_exc()}")
             return None
+
+    def _select_best_discord_format(self, audio_formats):
+        """Select the best audio format for Discord compatibility"""
+        if not audio_formats:
+            return None
+        
+        # Scoring system for Discord compatibility
+        def score_format(fmt):
+            score = 0
+            url = fmt.get("url", "")
+            acodec = fmt.get("acodec", "")
+            ext = fmt.get("ext", "")
+            
+            # Prefer direct URLs over streaming
+            if not any(x in url for x in ["m3u8", "mpd", "manifest"]):
+                score += 100
+            
+            # Codec preferences (higher is better)
+            if acodec == "mp4a.40.2":  # AAC
+                score += 50
+            elif acodec == "mp4a":
+                score += 40
+            elif "mp4a" in acodec:
+                score += 30
+            elif acodec != "opus":  # Avoid Opus
+                score += 20
+            
+            # Container preferences
+            if ext == "m4a":
+                score += 30
+            elif ext == "webm" and "opus" not in acodec:
+                score += 20
+            elif ext in ["mp4", "aac"]:
+                score += 10
+            
+            # Bitrate preference (reasonable quality)
+            bitrate = fmt.get("abr") or fmt.get("tbr", 0)
+            if bitrate:
+                if 96 <= bitrate <= 192:  # Sweet spot for Discord
+                    score += 20
+                elif 64 <= bitrate <= 256:
+                    score += 10
+            
+            return score
+        
+        # Sort by score (highest first)
+        scored_formats = [(score_format(fmt), fmt) for fmt in audio_formats]
+        scored_formats.sort(key=lambda x: x[0], reverse=True)
+        
+        best_format = scored_formats[0][1]
+        best_score = scored_formats[0][0]
+        
+        logger.debug(
+            f"Selected format with score {best_score}: "
+            f"{best_format.get('ext', 'unknown')} "
+            f"({best_format.get('acodec', 'unknown')})"
+        )
+        
+        return best_format
 
     def _validate_stream_url(self, url: str) -> bool:
         """Validate that the stream URL is accessible (sync version)"""

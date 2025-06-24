@@ -38,14 +38,16 @@ class AudioPlayer:
         self.queue.append(song_info)
         logger.info(f"Added to queue: {song_info['title']}")
         logger.info(
-            f"Queue song info: ID={song_info.get('id')}, Platform={song_info.get('platform')}, URL={song_info.get('url')}"
+            f"Queue song info: ID={song_info.get('id')}, "
+            f"Platform={song_info.get('platform')}, URL={song_info.get('url')}"
         )
         self._update_queue_metrics()
 
     async def play_next(self):
         """Play the next song in queue"""
         logger.info(
-            f"play_next called. Is playing: {self._is_playing}, Queue size: {len(self.queue)}"
+            f"play_next called. Is playing: {self._is_playing}, "
+            f"Queue size: {len(self.queue)}"
         )
 
         if self._is_playing:
@@ -81,7 +83,8 @@ class AudioPlayer:
         for attempt in range(max_retries):
             try:
                 logger.info(
-                    f"Playing song: {song_info.get('title')} (ID: {song_info.get('id')}) - Attempt {attempt + 1}"
+                    f"Playing song: {song_info.get('title')} "
+                    f"(ID: {song_info.get('id')}) - Attempt {attempt + 1}"
                 )
 
                 # Get stream URL from the platform
@@ -116,7 +119,7 @@ class AudioPlayer:
                             "Stream URL validation failed after all retries"
                         )
 
-                # Create FFmpeg source with enhanced stability for HLS streams
+                # Create FFmpeg source with Discord-compatible options
                 ffmpeg_options = {
                     "before_options": (
                         "-reconnect 1 "
@@ -124,13 +127,15 @@ class AudioPlayer:
                         "-reconnect_delay_max 5 "
                         "-reconnect_at_eof 1 "
                         "-multiple_requests 1 "
-                        "-http_persistent 0 "
-                        "-user_agent 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' "
+                        "-user_agent 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                        "AppleWebKit/537.36' "
                         "-headers 'Accept: */*' "
                         "-rw_timeout 30000000 "
                         "-loglevel warning"
                     ),
-                    "options": "-vn -ar 48000 -ac 2 -b:a 128k -bufsize 512k -maxrate 256k",
+                    "options": (
+                        "-vn -f s16le -ar 48000 -ac 2 -frame_duration 20 -bufsize 3840"
+                    ),
                 }
 
                 # Ensure voice client is still connected before creating source
@@ -138,10 +143,27 @@ class AudioPlayer:
                     logger.error("Voice client disconnected during playback attempt")
                     raise Exception("Voice client disconnected")
 
-                source = discord.FFmpegPCMAudio(stream_url, **ffmpeg_options)  # type: ignore[arg-type]
-                transformed_source = discord.PCMVolumeTransformer(
-                    source, volume=self._volume
-                )
+                # Create FFmpeg PCM audio source with optimized settings for Discord v8
+                try:
+                    source = discord.FFmpegPCMAudio(
+                        stream_url, **ffmpeg_options
+                    )  # type: ignore[arg-type]
+                    transformed_source = discord.PCMVolumeTransformer(
+                        source, volume=self._volume
+                    )
+                except Exception as source_error:
+                    logger.error(f"Failed to create audio source: {source_error}")
+                    # Try fallback with simpler options if the enhanced options fail
+                    fallback_options = {
+                        "before_options": "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5",
+                        "options": "-vn -f s16le -ar 48000 -ac 2"
+                    }
+                    source = discord.FFmpegPCMAudio(
+                        stream_url, **fallback_options
+                    )  # type: ignore[arg-type]
+                    transformed_source = discord.PCMVolumeTransformer(
+                        source, volume=self._volume
+                    )
 
                 # Play the audio
                 def after_play(error):
@@ -222,7 +244,8 @@ class AudioPlayer:
 
                         if not is_valid:
                             logger.warning(
-                                f"Stream URL validation failed with status {response.status}"
+                                f"Stream URL validation failed with status "
+                                f"{response.status}"
                             )
 
                         return is_valid
@@ -269,7 +292,8 @@ class AudioPlayer:
                 logger.error(f"Playback error: {error}")
                 logger.error(f"Error type: {type(error)}")
                 logger.error(
-                    f"Current song: {self.current.get('title') if self.current else 'None'}"
+                    f"Current song: "
+                    f"{self.current.get('title') if self.current else 'None'}"
                 )
 
                 # Mark stream URL as failed if it was a stream-related error
@@ -293,7 +317,8 @@ class AudioPlayer:
                 )
                 return
 
-            # Always advance to next song when playback finishes (whether by skip or natural end)
+            # Always advance to next song when playback finishes
+            # (whether by skip or natural end)
             logger.info("Attempting to play next song...")
             await self.play_next()
 

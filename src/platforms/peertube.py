@@ -158,7 +158,8 @@ class PeerTubePlatform(VideoPlatform):
                         ):
                             logger.warning(
                                 f"PeerTube instance {instance} returned unexpected "
-                                f"content type for video details: {response.content_type}"
+                                f"content type for video details: "
+                                f"{response.content_type}"
                             )
                             continue
 

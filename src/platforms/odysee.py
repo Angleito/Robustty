@@ -1,10 +1,6 @@
-import asyncio
 import logging
 import re
 from typing import Any, Dict, List, Optional
-from urllib.parse import quote
-
-import aiohttp
 
 from src.platforms.base import VideoPlatform
 

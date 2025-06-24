@@ -27,7 +27,10 @@ class Music(commands.Cog):
         self.voice_timeout = float(os.getenv("DISCORD_VOICE_TIMEOUT", "30"))
         self.reconnect_timeout = float(os.getenv("DISCORD_RECONNECT_TIMEOUT", "60"))
         
-        logger.info(f"Discord voice timeout settings: voice={self.voice_timeout}s, reconnect={self.reconnect_timeout}s")
+        logger.info(
+            f"Discord voice timeout settings: "
+            f"voice={self.voice_timeout}s, reconnect={self.reconnect_timeout}s"
+        )
 
         # Expose command callbacks for direct invocation in tests
         for cmd_name in [
@@ -82,7 +85,9 @@ class Music(commands.Cog):
                 else:
                     embed = create_error_embed(
                         "Connection failed",
-                        "Unable to connect to voice channel after multiple attempts. This may be due to Discord voice server issues or network connectivity problems.",
+                        "Unable to connect to voice channel after multiple attempts. "
+                "This may be due to Discord voice server issues or network "
+                "connectivity problems.",
                     )
                     await ctx.send(embed=embed)
                     return
@@ -92,9 +97,10 @@ class Music(commands.Cog):
             ):
                 if hasattr(ctx.voice_client, "move_to"):
                     try:
-                        voice_client: Any = ctx.voice_client
+                        current_voice_client: Any = ctx.voice_client
                         await asyncio.wait_for(
-                            voice_client.move_to(voice_channel), timeout=self.voice_timeout
+                            current_voice_client.move_to(voice_channel),
+                            timeout=self.voice_timeout
                         )
                         embed = create_embed("Moved", f"Moved to {voice_channel.name}")
                         await ctx.send(embed=embed)
@@ -179,7 +185,9 @@ class Music(commands.Cog):
             logger.error(f"Discord connection closed during voice connection: {e}")
             embed = create_error_embed(
                 "Discord connection error",
-                "Discord voice connection was closed. This may indicate server issues or rate limiting. Please wait a moment and try again.",
+                "Discord voice connection was closed. This may indicate "
+                "server issues or rate limiting. Please wait a moment and "
+                "try again.",
             )
             await ctx.send(embed=embed)
         except Exception as e:
@@ -196,13 +204,16 @@ class Music(commands.Cog):
         """Connect to voice channel with enhanced retry logic and proper cleanup"""
         voice_client = None
         logger.info(
-            f"🎵 Starting voice connection to {voice_channel.name} (max {max_retries} attempts) with timeouts: voice={self.voice_timeout}s, reconnect={self.reconnect_timeout}s"
+            f"🎵 Starting voice connection to {voice_channel.name} "
+            f"(max {max_retries} attempts) with timeouts: "
+            f"voice={self.voice_timeout}s, reconnect={self.reconnect_timeout}s"
         )
 
         for attempt in range(max_retries):
             try:
                 logger.info(
-                    f"Attempting to connect to voice channel {voice_channel.name} (attempt {attempt + 1})"
+                    f"Attempting to connect to voice channel {voice_channel.name} "
+                    f"(attempt {attempt + 1})"
                 )
 
                 # Clean up any existing failed connection
@@ -223,26 +234,36 @@ class Music(commands.Cog):
                     if attempt == 0:
                         # First attempt: use configured voice timeout
                         voice_client = await asyncio.wait_for(
-                            voice_channel.connect(timeout=self.voice_timeout, reconnect=False),
+                            voice_channel.connect(
+                                timeout=self.voice_timeout, reconnect=False
+                            ),
                             timeout=self.voice_timeout + 5,
                         )
                     elif attempt == 1:
                         # Second attempt: use reconnect timeout for more patience
                         voice_client = await asyncio.wait_for(
-                            voice_channel.connect(timeout=self.reconnect_timeout, reconnect=False),
+                            voice_channel.connect(
+                                timeout=self.reconnect_timeout, reconnect=False
+                            ),
                             timeout=self.reconnect_timeout + 10,
                         )
                     else:
-                        # Later attempts: maximum timeout but ensure reconnect is disabled
+                        # Later attempts: maximum timeout but ensure reconnect is
+                        # disabled
                         # to prevent Discord's built-in retry interference
-                        max_timeout = max(self.voice_timeout, self.reconnect_timeout)
+                        max_timeout = max(
+                            self.voice_timeout, self.reconnect_timeout
+                        )
                         voice_client = await asyncio.wait_for(
-                            voice_channel.connect(timeout=max_timeout, reconnect=False),
+                            voice_channel.connect(
+                                timeout=max_timeout, reconnect=False
+                            ),
                             timeout=max_timeout + 15,
                         )
                 except asyncio.TimeoutError:
                     logger.warning(
-                        f"Connection attempt {attempt + 1} timed out after configured timeout"
+                        f"Connection attempt {attempt + 1} timed out after "
+                        f"configured timeout"
                     )
                     voice_client = None
                     # Don't continue to validation - let our retry logic handle it
@@ -262,7 +283,8 @@ class Music(commands.Cog):
                         return voice_client
                     else:
                         logger.warning(
-                            f"Connection became unstable immediately after connecting (attempt {attempt + 1})"
+                            f"Connection became unstable immediately after "
+                            f"connecting (attempt {attempt + 1})"
                         )
                         continue
                 else:
@@ -275,25 +297,30 @@ class Music(commands.Cog):
                 logger.warning(f"Voice connection attempt {attempt + 1} timed out")
             except discord.errors.ConnectionClosed as e:
                 logger.warning(
-                    f"Voice connection attempt {attempt + 1} failed with ConnectionClosed: {e}"
+                    f"Voice connection attempt {attempt + 1} failed with "
+                    f"ConnectionClosed: {e}"
                 )
                 # For error 4006, implement aggressive backoff
                 if hasattr(e, "code") and e.code == 4006:
                     logger.error(
-                        f"🚨 Discord Error 4006 detected on attempt {attempt + 1} - voice servers unavailable"
+                        f"🚨 Discord Error 4006 detected on attempt {attempt + 1} - "
+                        f"voice servers unavailable"
                     )
                     if attempt < max_retries - 1:
-                        # Exponentially increasing delays for 4006 errors, scaled with reconnect timeout
+                        # Exponentially increasing delays for 4006 errors,
+                        # scaled with reconnect timeout
                         base_delay = max(30, self.reconnect_timeout)
                         delay = min(base_delay * (2**attempt), 180)  # Cap at 3 minutes
                         logger.warning(
-                            f"⏰ Implementing {delay}s cooling-off period for error 4006..."
+                            f"⏰ Implementing {delay}s cooling-off period for "
+                            f"error 4006..."
                         )
                         await asyncio.sleep(delay)
                         continue
                     else:
                         logger.error(
-                            "❌ All attempts failed with error 4006 - Discord voice infrastructure issue"
+                            "❌ All attempts failed with error 4006 - "
+                            "Discord voice infrastructure issue"
                         )
             except Exception as e:
                 logger.warning(
@@ -312,7 +339,8 @@ class Music(commands.Cog):
                 finally:
                     voice_client = None
 
-            # Exponential backoff with jitter for non-4006 errors, scaled with configured timeouts
+            # Exponential backoff with jitter for non-4006 errors,
+            # scaled with configured timeouts
             if attempt < max_retries - 1:
                 base_delay = min(
                     (2**attempt) * max(3, self.voice_timeout / 10), 
@@ -348,9 +376,14 @@ class Music(commands.Cog):
         # Connect to voice if not already connected using retry logic
         try:
             if not ctx.voice_client:
-                voice_client = await self._connect_with_retry(voice_channel)
-                if not voice_client:
-                    embed = create_error_embed("Connection failed", "Unable to connect to voice channel after multiple attempts. This may be due to Discord voice server issues or network connectivity problems.")
+                test_voice_client = await self._connect_with_retry(voice_channel)
+                if not test_voice_client:
+                    embed = create_error_embed(
+                        "Connection failed",
+                        "Unable to connect to voice channel after multiple attempts. "
+                        "This may be due to Discord voice server issues or network "
+                        "connectivity problems."
+                    )
                     await ctx.send(embed=embed)
                     return
                 # Set up audio player for this guild
@@ -358,34 +391,48 @@ class Music(commands.Cog):
                 if guild_id and hasattr(self.bot, 'audio_players'):
                     audio_player = self.bot.audio_players.get(guild_id)
                     if audio_player:
-                        audio_player.voice_client = voice_client
+                        audio_player.voice_client = test_voice_client
             elif (
                 hasattr(ctx.voice_client, "channel")
                 and ctx.voice_client.channel != voice_channel
             ):
                 if hasattr(ctx.voice_client, "move_to"):
                     try:
-                        voice_client: Any = ctx.voice_client
-                        await asyncio.wait_for(voice_client.move_to(voice_channel), timeout=self.voice_timeout)
+                        existing_test_client: Any = ctx.voice_client
+                        await asyncio.wait_for(
+                            existing_test_client.move_to(voice_channel),
+                            timeout=self.voice_timeout
+                        )
                     except asyncio.TimeoutError:
-                        logger.warning("Move operation timed out, attempting reconnect with retry logic")
+                        logger.warning(
+                            "Move operation timed out, attempting reconnect with "
+                            "retry logic"
+                        )
                         await ctx.voice_client.disconnect(force=True)
-                        voice_client = await self._connect_with_retry(voice_channel)
-                        if not voice_client:
-                            embed = create_error_embed("Connection failed", "Failed to move or reconnect to voice channel")
+                        reconnected_test_client = await self._connect_with_retry(
+                            voice_channel
+                        )
+                        if not reconnected_test_client:
+                            embed = create_error_embed(
+                                "Connection failed",
+                                "Failed to move or reconnect to voice channel"
+                            )
                             await ctx.send(embed=embed)
                             return
                         guild_id = ctx.guild.id if ctx.guild else None
                         if guild_id and hasattr(self.bot, 'audio_players'):
                             audio_player = self.bot.audio_players.get(guild_id)
                             if audio_player:
-                                audio_player.voice_client = voice_client
+                                audio_player.voice_client = reconnected_test_client
                 else:
                     await ctx.voice_client.disconnect(force=True)
                     await asyncio.sleep(1)  # Brief pause after disconnect
-                    voice_client = await self._connect_with_retry(voice_channel)
-                    if not voice_client:
-                        embed = create_error_embed("Connection failed", "Failed to reconnect to voice channel")
+                    fallback_test_client = await self._connect_with_retry(voice_channel)
+                    if not fallback_test_client:
+                        embed = create_error_embed(
+                            "Connection failed", 
+                            "Failed to reconnect to voice channel"
+                        )
                         await ctx.send(embed=embed)
                         return
                     # Update audio player
@@ -393,10 +440,16 @@ class Music(commands.Cog):
                     if guild_id and hasattr(self.bot, 'audio_players'):
                         audio_player = self.bot.audio_players.get(guild_id)
                         if audio_player:
-                            audio_player.voice_client = voice_client
+                            audio_player.voice_client = fallback_test_client
         except Exception as e:
-            logger.error(f"Voice connection error in test command: {type(e).__name__}: {e}")
-            embed = create_error_embed("Connection failed", f"Could not connect: {type(e).__name__}")
+            logger.error(
+                f"Voice connection error in test command: "
+                f"{type(e).__name__}: {e}"
+            )
+            embed = create_error_embed(
+                "Connection failed", 
+                f"Could not connect: {type(e).__name__}"
+            )
             await ctx.send(embed=embed)
             return
 
@@ -473,9 +526,14 @@ class Music(commands.Cog):
         # Connect to voice if not already connected using retry logic
         try:
             if not ctx.voice_client:
-                voice_client = await self._connect_with_retry(voice_channel)
-                if not voice_client:
-                    embed = create_error_embed("Connection failed", "Unable to connect to voice channel after multiple attempts. This may be due to Discord voice server issues or network connectivity problems.")
+                play_voice_client = await self._connect_with_retry(voice_channel)
+                if not play_voice_client:
+                    embed = create_error_embed(
+                        "Connection failed",
+                        "Unable to connect to voice channel after multiple attempts. "
+                        "This may be due to Discord voice server issues or network "
+                        "connectivity problems."
+                    )
                     await ctx.send(embed=embed)
                     return
                 # Set up audio player for this guild
@@ -483,34 +541,48 @@ class Music(commands.Cog):
                 if guild_id and hasattr(self.bot, 'audio_players'):
                     audio_player = self.bot.audio_players.get(guild_id)
                     if audio_player:
-                        audio_player.voice_client = voice_client
+                        audio_player.voice_client = play_voice_client
             elif (
                 hasattr(ctx.voice_client, "channel")
                 and ctx.voice_client.channel != voice_channel
             ):
                 if hasattr(ctx.voice_client, "move_to"):
                     try:
-                        voice_client: Any = ctx.voice_client
-                        await asyncio.wait_for(voice_client.move_to(voice_channel), timeout=self.voice_timeout)
+                        existing_play_client: Any = ctx.voice_client
+                        await asyncio.wait_for(
+                            existing_play_client.move_to(voice_channel),
+                            timeout=self.voice_timeout
+                        )
                     except asyncio.TimeoutError:
-                        logger.warning("Move operation timed out, attempting reconnect with retry logic")
+                        logger.warning(
+                            "Move operation timed out, attempting reconnect with "
+                            "retry logic"
+                        )
                         await ctx.voice_client.disconnect(force=True)
-                        voice_client = await self._connect_with_retry(voice_channel)
-                        if not voice_client:
-                            embed = create_error_embed("Connection failed", "Failed to move or reconnect to voice channel")
+                        reconnected_play_client = await self._connect_with_retry(
+                            voice_channel
+                        )
+                        if not reconnected_play_client:
+                            embed = create_error_embed(
+                                "Connection failed",
+                                "Failed to move or reconnect to voice channel"
+                            )
                             await ctx.send(embed=embed)
                             return
                         guild_id = ctx.guild.id if ctx.guild else None
                         if guild_id and hasattr(self.bot, 'audio_players'):
                             audio_player = self.bot.audio_players.get(guild_id)
                             if audio_player:
-                                audio_player.voice_client = voice_client
+                                audio_player.voice_client = reconnected_play_client
                 else:
                     await ctx.voice_client.disconnect(force=True)
                     await asyncio.sleep(1)  # Brief pause after disconnect
-                    voice_client = await self._connect_with_retry(voice_channel)
-                    if not voice_client:
-                        embed = create_error_embed("Connection failed", "Failed to reconnect to voice channel")
+                    fallback_play_client = await self._connect_with_retry(voice_channel)
+                    if not fallback_play_client:
+                        embed = create_error_embed(
+                            "Connection failed", 
+                            "Failed to reconnect to voice channel"
+                        )
                         await ctx.send(embed=embed)
                         return
                     # Update audio player
@@ -518,10 +590,16 @@ class Music(commands.Cog):
                     if guild_id and hasattr(self.bot, 'audio_players'):
                         audio_player = self.bot.audio_players.get(guild_id)
                         if audio_player:
-                            audio_player.voice_client = voice_client
+                            audio_player.voice_client = fallback_play_client
         except Exception as e:
-            logger.error(f"Voice connection error in play command: {type(e).__name__}: {e}")
-            embed = create_error_embed("Connection failed", f"Could not connect to voice channel: {type(e).__name__}")
+            logger.error(
+                f"Voice connection error in play command: "
+                f"{type(e).__name__}: {e}"
+            )
+            embed = create_error_embed(
+                "Connection failed", 
+                f"Could not connect to voice channel: {type(e).__name__}"
+            )
             await ctx.send(embed=embed)
             return
 
@@ -596,7 +674,8 @@ class Music(commands.Cog):
         # Add to queue
         logger.info(f"Adding to queue: {selected}")
         logger.info(
-            f"Selected YouTube ID: {selected.get('id')} (length: {len(selected.get('id', ''))})"
+            f"Selected YouTube ID: {selected.get('id')} "
+            f"(length: {len(selected.get('id', ''))})"
         )
         await player.add_to_queue(selected)  # type: ignore
 

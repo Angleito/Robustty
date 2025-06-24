@@ -2,7 +2,6 @@
 
 import os
 import re
-import sys
 from typing import Any, Dict, List, TypedDict, Optional
 
 import yaml

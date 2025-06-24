@@ -15,7 +15,6 @@ from .errors import (
     PlatformAPIError,
     PlatformRateLimitError,
     PlatformAuthenticationError,
-    from_http_status,
 )
 from ..extractors.rumble_extractor import RumbleExtractor
 from ..services.metrics_collector import get_metrics_collector
@@ -59,7 +58,8 @@ class RumblePlatform(VideoPlatform):
         if not self.api_token or not self.extractor:
             logger.error("Rumble API token not configured")
             raise PlatformAuthenticationError(
-                "API token is required for Rumble searches. Please configure 'api_token' in config.",
+                "API token is required for Rumble searches. "
+                "Please configure 'api_token' in config.",
                 platform="Rumble",
             )
 
@@ -113,7 +113,8 @@ class RumblePlatform(VideoPlatform):
         if not self.api_token or not self.extractor:
             logger.error("Rumble API token not configured")
             raise PlatformAuthenticationError(
-                "API token is required for video details. Please configure 'api_token' in config.",
+                "API token is required for video details. "
+                "Please configure 'api_token' in config.",
                 platform="Rumble",
             )
 

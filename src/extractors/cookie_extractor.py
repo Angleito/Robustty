@@ -59,11 +59,13 @@ def extract_cookies_browser() -> Dict[str, List[Dict]]:
             if browser_cookies:
                 cookies[browser_name] = browser_cookies
                 logger.info(
-                    f"Extracted {len(browser_cookies)} cookies from {browser_name.title()}"
+                    f"Extracted {len(browser_cookies)} cookies from "
+                    f"{browser_name.title()}"
                 )
         except AttributeError:
             logger.debug(
-                f"Browser {browser_name} not supported in this version of browser_cookie3"
+                f"Browser {browser_name} not supported in this version of "
+                f"browser_cookie3"
             )
         except Exception as e:
             logger.warning(f"Failed to extract {browser_name.title()} cookies: {e}")
@@ -175,7 +177,8 @@ def main():
             if BROWSER_COOKIE3_AVAILABLE:
                 logger.info("Extracting cookies...")
                 logger.info(
-                    "Attempting to extract cookies from: Brave, Opera, Chrome, Edge, Firefox, Chromium"
+                    "Attempting to extract cookies from: Brave, Opera, Chrome, "
+                    "Edge, Firefox, Chromium"
                 )
 
                 cookies = extract_cookies_browser()
@@ -183,7 +186,8 @@ def main():
                 if cookies:
                     browsers_found = list(cookies.keys())
                     logger.info(
-                        f"Successfully extracted cookies from: {', '.join(browsers_found)}"
+                        f"Successfully extracted cookies from: "
+                        f"{', '.join(browsers_found)}"
                     )
                 else:
                     logger.warning("No cookies found in any supported browser")

@@ -3,12 +3,10 @@
 Cookie extractor that syncs to remote VPS
 """
 import json
-import os
 import asyncio
 import logging
 from pathlib import Path
-from typing import Dict, List, Optional
-import subprocess
+from typing import Dict
 import aiofiles
 
 logger = logging.getLogger(__name__)

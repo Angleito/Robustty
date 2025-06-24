@@ -5,7 +5,6 @@ This module uses the Apify API to interact with Rumble content.
 """
 
 import os
-import json
 import logging
 import time
 import random
@@ -13,7 +12,7 @@ import asyncio
 import uuid
 from functools import wraps
 from typing import Optional, Dict, Any, List, Callable, TypeVar
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse
 
 try:
     from apify_client import ApifyClient
@@ -27,7 +26,6 @@ from ..platforms.errors import (
     PlatformAPIError,
     PlatformRateLimitError,
     PlatformAuthenticationError,
-    from_http_status,
 )
 from ..services.cache_manager import CacheManager
 from ..services.metrics_collector import get_metrics_collector

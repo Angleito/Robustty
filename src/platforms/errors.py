@@ -14,11 +14,17 @@ Usage:
         ...
     except requests.HTTPError as e:
         if e.response.status_code == 429:
-            raise PlatformRateLimitError("Too many requests", platform="YouTube", original_error=e)
+            raise PlatformRateLimitError(
+                "Too many requests", platform="YouTube", original_error=e
+            )
         elif e.response.status_code == 401:
-            raise PlatformAuthenticationError("Invalid API key", platform="YouTube", original_error=e)
+            raise PlatformAuthenticationError(
+                "Invalid API key", platform="YouTube", original_error=e
+            )
         else:
-            raise PlatformAPIError(f"Request failed: {e}", platform="YouTube", original_error=e)
+            raise PlatformAPIError(
+                f"Request failed: {e}", platform="YouTube", original_error=e
+            )
 """
 
 from typing import Optional

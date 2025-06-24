@@ -3,7 +3,6 @@ Metrics collector for monitoring Apify API usage and system performance.
 """
 
 import time
-import asyncio
 from typing import Dict, Any, Optional
 from prometheus_client import Counter, Histogram, Gauge, generate_latest
 from functools import wraps
