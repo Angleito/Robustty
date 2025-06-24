@@ -3,7 +3,7 @@ services:
   robustty:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.vps
     container_name: robustty-bot
     restart: unless-stopped
     network_mode: host  # OrbStack optimization - use host networking
