@@ -21,6 +21,7 @@ class MetricsServer:
         """Setup HTTP routes."""
         self.app.router.add_get('/metrics', self.handle_metrics)
         self.app.router.add_get('/health', self.handle_health)
+        self.app.router.add_get('/health/detailed', self.handle_detailed_health)
         
     async def handle_metrics(self, request):
         """Handle metrics endpoint request."""
@@ -32,8 +33,21 @@ class MetricsServer:
         )
         
     async def handle_health(self, request):
-        """Handle health check endpoint."""
+        """Handle basic health check endpoint."""
         return web.json_response({'status': 'healthy'})
+        
+    async def handle_detailed_health(self, request):
+        """Handle detailed health check endpoint."""
+        # Try to get health monitor from bot instance if available
+        bot = getattr(self, 'bot', None)
+        if bot and hasattr(bot, 'health_monitor') and bot.health_monitor:
+            health_status = bot.health_monitor.get_health_status()
+            return web.json_response(health_status)
+        else:
+            return web.json_response({
+                'error': 'Health monitor not available',
+                'status': 'unknown'
+            }, status=503)
         
     async def start(self):
         """Start the metrics server."""

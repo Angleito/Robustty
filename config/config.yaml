@@ -56,3 +56,12 @@ cache:
     search: 1800      # 30 minutes for search results
   
   max_memory_size: 1000  # Maximum number of items in memory cache
+
+health_monitor:
+  enabled: ${HEALTH_MONITOR_ENABLED:true}
+  check_interval: ${HEALTH_CHECK_INTERVAL:30}  # seconds
+  max_consecutive_failures: ${MAX_CONSECUTIVE_FAILURES:3}
+  recovery:
+    max_attempts: ${MAX_RECOVERY_ATTEMPTS:5}
+    exponential_backoff: true
+    max_delay: ${MAX_RECOVERY_DELAY:300}  # seconds (5 minutes)

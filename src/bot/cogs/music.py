@@ -6,7 +6,9 @@ import discord
 from discord.ext import commands
 
 from ..utils.checks import is_in_voice_channel, is_same_voice_channel
-from ..utils.embeds import create_embed, create_error_embed  # type: ignore
+from ..utils.embeds import create_embed, create_error_embed, create_warning_embed  # type: ignore
+from ...platforms.errors import PlatformError, PlatformNotAvailableError, PlatformRateLimitError, PlatformAuthenticationError
+from ...utils.network_resilience import CircuitBreakerOpenError, MaxRetriesExceededError, NetworkTimeoutError
 
 if TYPE_CHECKING:
     from discord import Message
@@ -80,8 +82,33 @@ class Music(commands.Cog):
             else:
                 embed = create_embed("Already connected", f"Already in {voice_channel.name}")
                 await ctx.send(embed=embed)
+        except discord.ClientException as e:
+            if "already connected" in str(e).lower():
+                embed = create_warning_embed("Already Connected", "I'm already connected to a voice channel.")
+            else:
+                embed = create_error_embed("Discord Connection Error", 
+                    f"Discord reported an issue: {str(e)[:100]}...\n\n"
+                    "💡 **Try this:**\n"
+                    "• Check bot permissions in voice channel\n"
+                    "• Try the `leave` command first, then `join` again")
+            await ctx.send(embed=embed)
+        except asyncio.TimeoutError:
+            embed = create_error_embed("Connection Timeout", 
+                "Connection to voice channel timed out.\n\n"
+                "💡 **This might help:**\n"
+                "• Check your internet connection\n"
+                "• Try a different voice channel\n"
+                "• Wait a moment and try again")
+            await ctx.send(embed=embed)
         except Exception as e:
-            embed = create_error_embed("Connection failed", f"Could not connect to voice channel: {e}")
+            logger.error(f"Unexpected voice connection error: {e}")
+            embed = create_error_embed("Connection Failed", 
+                f"Unexpected error connecting to voice channel.\n\n"
+                f"**Error:** {str(e)[:100]}...\n\n"
+                "💡 **Try this:**\n"
+                "• Check bot permissions\n"
+                "• Try again in a few moments\n"
+                "• Contact support if this persists")
             await ctx.send(embed=embed)
 
     @commands.command(name="test")
@@ -169,12 +196,57 @@ class Music(commands.Cog):
 
         # Perform the search early to satisfy tests and avoid connection errors
         if self.bot.searcher is None:
-            embed = create_error_embed("Bot error", "Searcher not initialized")
+            embed = create_error_embed("Service Unavailable", 
+                "Music search service is not available right now.\n\n"
+                "💡 **Try this:**\n"
+                "• Wait a moment and try again\n"
+                "• Check if the bot is still starting up")
             await ctx.send(embed=embed)
             return
-        results: Dict[
-            str, List[Dict[str, Any]]
-        ] = await self.bot.searcher.search_all_platforms(query)
+            
+        # Search with comprehensive error handling
+        try:
+            results: Dict[
+                str, List[Dict[str, Any]]
+            ] = await self.bot.searcher.search_all_platforms(query)
+        except CircuitBreakerOpenError:
+            embed = create_error_embed("Service Temporarily Unavailable", 
+                "Music search services are experiencing issues and are temporarily disabled.\n\n"
+                "💡 **What you can do:**\n"
+                "• Try again in a few minutes\n"
+                "• Search services will automatically recover\n"
+                "• Check service status with admin commands")
+            await ctx.send(embed=embed)
+            return
+        except MaxRetriesExceededError:
+            embed = create_error_embed("Search Failed", 
+                "Unable to search for music after multiple attempts.\n\n"
+                "💡 **This might help:**\n"
+                "• Check your internet connection\n"
+                "• Try a simpler search term\n"
+                "• Wait a moment and try again")
+            await ctx.send(embed=embed)
+            return
+        except NetworkTimeoutError:
+            embed = create_error_embed("Search Timeout", 
+                "Music search took too long and timed out.\n\n"
+                "💡 **Try this:**\n"
+                "• Use more specific search terms\n"
+                "• Check your internet connection\n"
+                "• Try again in a moment")
+            await ctx.send(embed=embed)
+            return
+        except Exception as e:
+            logger.error(f"Unexpected search error: {e}")
+            embed = create_error_embed("Search Error", 
+                "An unexpected error occurred while searching for music.\n\n"
+                f"**Error:** {str(e)[:100]}...\n\n"
+                "💡 **Try this:**\n"
+                "• Try a different search term\n"
+                "• Wait a moment and try again\n"
+                "• Contact support if this persists")
+            await ctx.send(embed=embed)
+            return
 
         # Get voice channel
         if (
@@ -187,7 +259,7 @@ class Music(commands.Cog):
             return
         voice_channel = ctx.author.voice.channel
 
-        # Connect to voice if not already connected
+        # Connect to voice if not already connected with better error handling
         try:
             if not ctx.voice_client:
                 await voice_channel.connect()
@@ -201,16 +273,53 @@ class Music(commands.Cog):
                 else:
                     await ctx.voice_client.disconnect(force=True)
                     await voice_channel.connect()
-        except Exception:
-            pass
+        except discord.ClientException as e:
+            logger.warning(f"Voice connection issue during play: {e}")
+            # Continue with playback attempt - voice client might still work
+        except Exception as e:
+            logger.error(f"Failed to connect to voice for playback: {e}")
+            embed = create_error_embed("Voice Connection Failed", 
+                "Could not connect to voice channel for playback.\n\n"
+                "💡 **Try this:**\n"
+                "• Use the `join` command first\n"
+                "• Check bot permissions in voice channel\n"
+                "• Make sure you're in a voice channel")
+            await ctx.send(embed=embed)
+            return
 
         # Search for the song
         # search already performed above
 
         if not any(results.values()):
-            embed = create_error_embed(
-                "No results found", f"Could not find any results for: {query}"
-            )
+            # Check if all platforms failed or just no results
+            search_status = self.bot.searcher.get_search_health_status()
+            platform_count = search_status.get('total_platforms', 0)
+            
+            if platform_count == 0:
+                embed = create_error_embed("No Search Services", 
+                    "No music platforms are currently available.\n\n"
+                    "💡 **This might mean:**\n"
+                    "• Bot is still starting up\n"
+                    "• All platforms are temporarily down\n"
+                    "• Configuration issue")
+            else:
+                # Check for common issues
+                description = f"Could not find any results for: **{query}**\n\n"
+                description += "💡 **Try this:**\n"
+                description += "• Use different search terms\n"
+                description += "• Try searching for the artist name\n"
+                description += "• Use exact song titles\n"
+                description += "• Try again in a few moments\n\n"
+                
+                # Add platform status if available
+                if hasattr(self.bot.searcher, 'get_search_health_status'):
+                    status = self.bot.searcher.get_search_health_status()
+                    enabled_platforms = status.get('enabled_platforms', [])
+                    if enabled_platforms:
+                        description += f"**Searched platforms:** {', '.join(enabled_platforms)}"
+                
+                embed = create_error_embed("No Results Found", description)
+            
             await ctx.send(embed=embed)
             return
 
@@ -272,10 +381,30 @@ class Music(commands.Cog):
         if isinstance(ctx.voice_client, discord.VoiceClient):
             player.voice_client = ctx.voice_client
 
-        # Add to queue
+        # Add to queue with error handling
         logger.info(f"Adding to queue: {selected}")
-        logger.info(f"Selected YouTube ID: {selected.get('id')} (length: {len(selected.get('id', ''))})")
-        await player.add_to_queue(selected)  # type: ignore
+        logger.info(f"Selected {selected.get('platform', 'unknown')} ID: {selected.get('id')} (length: {len(selected.get('id', ''))})")
+        
+        try:
+            await player.add_to_queue(selected)  # type: ignore
+        except ValueError as e:
+            if "queue is full" in str(e).lower():
+                embed = create_error_embed("Queue Full", 
+                    "The music queue is full. Please wait for some songs to finish or use the `stop` command to clear it.")
+            else:
+                embed = create_error_embed("Queue Error", f"Could not add song to queue: {e}")
+            await ctx.send(embed=embed)
+            return
+        except Exception as e:
+            logger.error(f"Unexpected error adding to queue: {e}")
+            embed = create_error_embed("Queue Error", 
+                "An unexpected error occurred while adding the song to queue.\n\n"
+                "💡 **Try this:**\n"
+                "• Try a different song\n"
+                "• Use the `stop` command to reset the queue\n"
+                "• Try again in a moment")
+            await ctx.send(embed=embed)
+            return
 
         # Update embed
         embed = create_embed(
@@ -288,9 +417,19 @@ class Music(commands.Cog):
 
         await search_msg.edit(embed=embed)
 
-        # Start playing if not already
+        # Start playing if not already with error handling
         if not player.is_playing():  # type: ignore
-            await player.play_next()  # type: ignore
+            try:
+                await player.play_next()  # type: ignore
+            except Exception as e:
+                logger.error(f"Error starting playback: {e}")
+                embed = create_error_embed("Playback Error", 
+                    "Could not start playing the music.\n\n"
+                    "💡 **Try this:**\n"
+                    "• Make sure I'm connected to voice\n"
+                    "• Check if the song URL is still valid\n"
+                    "• Try the `join` command first")
+                await ctx.send(embed=embed)
 
     @commands.command(name="skip", aliases=["s"])
     @is_same_voice_channel()

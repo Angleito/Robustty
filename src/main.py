@@ -46,14 +46,15 @@ async def main() -> None:
             logger.error("DISCORD_TOKEN not found in environment")
             sys.exit(1)
 
-        # Start metrics server
+        # Create bot first
+        bot = RobusttyBot(config)
+
+        # Start metrics server with bot reference
         metrics_port = int(os.getenv("METRICS_PORT", "8080"))
         metrics_server = MetricsServer(port=metrics_port)
+        metrics_server.bot = bot  # Add bot reference for health checks
         await metrics_server.start()
         logger.info(f"Metrics server started on port {metrics_port}")
-
-        # Create and run bot
-        bot = RobusttyBot(config)
 
         logger.info("Starting Robustty Music Bot...")
         await bot.start(token)

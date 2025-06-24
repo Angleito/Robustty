@@ -173,7 +173,7 @@ Common issues and solutions:
 ### No audio playback
 - Ensure FFmpeg is installed
 - Check voice permissions
-- Verify stream service: `docker-compose logs stream-service`
+- Check bot logs for stream extraction errors: `docker-compose logs robustty`
 
 ### Search not working
 - Verify API keys

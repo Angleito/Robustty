@@ -14,6 +14,16 @@ from .errors import (
     PlatformAuthenticationError,
     from_http_status
 )
+from ..utils.network_resilience import (
+    with_retry,
+    with_circuit_breaker,
+    PLATFORM_RETRY_CONFIG,
+    PLATFORM_CIRCUIT_BREAKER_CONFIG,
+    NetworkResilienceError,
+    CircuitBreakerOpenError,
+    NetworkTimeoutError,
+    MaxRetriesExceededError
+)
 
 logger = logging.getLogger(__name__)
 
@@ -45,10 +55,17 @@ class YouTubePlatform(VideoPlatform):
         else:
             logger.warning("YouTube API key not provided")
 
+    @with_retry(
+        retry_config=PLATFORM_RETRY_CONFIG,
+        circuit_breaker_config=PLATFORM_CIRCUIT_BREAKER_CONFIG,
+        service_name="youtube_search",
+        exceptions=(HttpError, PlatformAPIError, PlatformRateLimitError),
+        exclude_exceptions=(PlatformAuthenticationError, CircuitBreakerOpenError)
+    )
     async def search_videos(
         self, query: str, max_results: int = 10
     ) -> List[Dict[str, Any]]:
-        """Search YouTube videos"""
+        """Search YouTube videos with enhanced error handling"""
         if not self.youtube:
             raise PlatformAuthenticationError(
                 "YouTube API key is required for search. Please configure 'api_key' in config.",
@@ -100,7 +117,7 @@ class YouTubePlatform(VideoPlatform):
             # Check for quota exceeded
             if e.resp.status == 403 and "quotaExceeded" in str(e):
                 raise PlatformRateLimitError(
-                    "YouTube API quota exceeded",
+                    "YouTube API quota exceeded. Please try again later.",
                     platform="YouTube",
                     original_error=e
                 )
@@ -111,6 +128,9 @@ class YouTubePlatform(VideoPlatform):
                 "YouTube",
                 str(e)
             )
+        except NetworkResilienceError:
+            # Re-raise network resilience errors as-is
+            raise
         except Exception as e:
             logger.error(f"YouTube search error: {e}")
             raise PlatformAPIError(
@@ -273,12 +293,27 @@ class YouTubePlatform(VideoPlatform):
             logger.debug(f"Cookie conversion traceback: {traceback.format_exc()}")
             return False
 
+    @with_retry(
+        retry_config=PLATFORM_RETRY_CONFIG,
+        circuit_breaker_config=PLATFORM_CIRCUIT_BREAKER_CONFIG,
+        service_name="youtube_stream_url",
+        exceptions=(Exception,),
+        exclude_exceptions=(PlatformAPIError, CircuitBreakerOpenError, NetworkResilienceError)
+    )
     async def get_stream_url(self, video_id: str) -> Optional[str]:
-        """Get stream URL using yt-dlp with cookies"""
+        """Get stream URL using yt-dlp with cookies and enhanced error handling"""
         import yt_dlp
         import asyncio
         
         logger.info(f"Getting stream URL for YouTube video: {video_id}")
+        
+        # Validate video ID format
+        if not video_id or len(video_id) != 11:
+            logger.error(f"Invalid YouTube video ID: {video_id} (expected 11 characters)")
+            raise PlatformAPIError(
+                f"Invalid YouTube video ID: {video_id}",
+                platform="YouTube"
+            )
         
         try:
             # Use yt-dlp to get stream URL
@@ -286,7 +321,7 @@ class YouTubePlatform(VideoPlatform):
             
             # Configure yt-dlp options optimized for Discord audio
             ydl_opts = {
-                'format': 'bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio',
+                'format': 'bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best[height<=720]',
                 'quiet': True,
                 'no_warnings': False,  # Enable warnings for debugging
                 'noplaylist': True,
@@ -294,12 +329,16 @@ class YouTubePlatform(VideoPlatform):
                 'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                 'http_chunk_size': 10485760,  # 10MB chunks
                 'prefer_insecure': False,
-                'verbose': False
+                'verbose': False,
+                'socket_timeout': 30,
+                'retries': 3
             }
             
-            # Standardized cookie path
+            # Try multiple cookie paths with fallback
             cookie_paths = [
-                '/app/cookies/youtube_cookies.json'
+                '/app/cookies/youtube_cookies.json',
+                'data/cookies/youtube_cookies.json',
+                './cookies/youtube_cookies.json'
             ]
             
             cookies_loaded = False
@@ -329,7 +368,7 @@ class YouTubePlatform(VideoPlatform):
                         
                         if not info:
                             logger.error("yt-dlp returned no information")
-                            return None
+                            return None, "No video information found"
                         
                         # Extract URL from different possible structures
                         stream_url = None
@@ -343,14 +382,21 @@ class YouTubePlatform(VideoPlatform):
                             # Prefer audio-only formats
                             audio_formats = [f for f in formats if f.get('vcodec') == 'none' and f.get('url')]
                             if audio_formats:
-                                # Sort by audio quality
+                                # Sort by audio quality (prefer higher bitrate)
                                 audio_formats.sort(key=lambda f: f.get('abr', 0) or f.get('tbr', 0), reverse=True)
                                 stream_url = audio_formats[0]['url']
+                                logger.debug(f"Selected audio format: {audio_formats[0].get('format_id')} (bitrate: {audio_formats[0].get('abr', 'unknown')})")
                             else:
                                 # Fallback to best available format
                                 valid_formats = [f for f in formats if f.get('url')]
                                 if valid_formats:
-                                    stream_url = valid_formats[-1]['url']
+                                    # Sort by quality and prefer audio formats
+                                    valid_formats.sort(key=lambda f: (
+                                        f.get('acodec', '') != 'none',  # Audio available
+                                        f.get('abr', 0) or f.get('tbr', 0)  # Bitrate
+                                    ), reverse=True)
+                                    stream_url = valid_formats[0]['url']
+                                    logger.debug(f"Selected fallback format: {valid_formats[0].get('format_id')}")
                         elif 'entries' in info and info['entries']:
                             # Handle playlist case (should not happen with noplaylist=True)
                             first_entry = info['entries'][0]
@@ -359,35 +405,66 @@ class YouTubePlatform(VideoPlatform):
                         
                         if not stream_url:
                             logger.error("No valid stream URL found in extraction result")
-                            return None
+                            return None, "No stream URL found"
                         
                         logger.debug(f"Extracted stream URL: {stream_url[:100]}...")
-                        return stream_url
+                        return stream_url, None
                         
                 except yt_dlp.DownloadError as e:
-                    logger.error(f"yt-dlp download error: {e}")
-                    return None
+                    error_msg = str(e)
+                    logger.error(f"yt-dlp download error: {error_msg}")
+                    
+                    # Handle specific errors
+                    if "private" in error_msg.lower():
+                        return None, "Video is private"
+                    elif "unavailable" in error_msg.lower():
+                        return None, "Video is unavailable"
+                    elif "copyright" in error_msg.lower():
+                        return None, "Video blocked due to copyright"
+                    elif "region" in error_msg.lower():
+                        return None, "Video not available in your region"
+                    else:
+                        return None, f"Download error: {error_msg}"
+                        
                 except Exception as e:
                     logger.error(f"yt-dlp extraction error: {e}")
-                    return None
+                    return None, f"Extraction error: {str(e)}"
             
             # Run yt-dlp in thread to avoid blocking
             loop = asyncio.get_event_loop()
-            stream_url = await loop.run_in_executor(None, extract_info)
+            stream_url, error = await loop.run_in_executor(None, extract_info)
             
-            # Return stream URL if extracted (validation was too strict)
+            # Handle errors
+            if error:
+                logger.error(f"Stream extraction failed for video {video_id}: {error}")
+                raise PlatformAPIError(
+                    f"Failed to extract stream: {error}",
+                    platform="YouTube"
+                )
+            
+            # Return stream URL if extracted
             if stream_url:
-                logger.info(f"Successfully extracted stream URL: {stream_url[:100]}...")
+                logger.info(f"Successfully extracted stream URL for {video_id}: {stream_url[:100]}...")
                 return stream_url
             else:
                 logger.error(f"No stream URL extracted for video {video_id}")
-                return None
+                raise PlatformAPIError(
+                    "No stream URL could be extracted",
+                    platform="YouTube"
+                )
                 
+        except PlatformAPIError:
+            # Re-raise platform errors
+            raise
         except Exception as e:
             logger.error(f"Failed to get stream URL for {video_id}: {e}")
             import traceback
             logger.debug(f"Full traceback: {traceback.format_exc()}")
-            return None
+            raise PlatformAPIError(
+                f"Stream extraction failed: {str(e)}",
+                platform="YouTube",
+                original_error=e
+            )
     
     def _validate_stream_url(self, url: str) -> bool:
         """Validate that the stream URL is accessible (sync version)"""

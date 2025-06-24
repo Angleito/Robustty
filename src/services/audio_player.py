@@ -6,6 +6,17 @@ from typing import Dict, List, Optional
 import discord
 
 from ..services.metrics_collector import get_metrics_collector
+from ..utils.network_resilience import (
+    with_retry,
+    with_circuit_breaker,
+    PLATFORM_RETRY_CONFIG,
+    PLATFORM_CIRCUIT_BREAKER_CONFIG,
+    NetworkResilienceError,
+    CircuitBreakerOpenError,
+    NetworkTimeoutError,
+    MaxRetriesExceededError,
+    get_resilience_manager
+)
 
 logger = logging.getLogger(__name__)
 
@@ -73,11 +84,28 @@ class AudioPlayer:
         logger.info(f"Playing song: {song_info.get('title')} (ID: {song_info.get('id')})")
 
         try:
-            # Get stream URL from the platform
-            stream_url = song_info.get("stream_url") or await self._get_stream_url(
-                song_info
-            )
-            logger.info(f"Got stream URL: {stream_url[:100]}...")
+            # Get stream URL from the platform with enhanced error handling
+            try:
+                stream_url = song_info.get("stream_url") or await self._get_stream_url(song_info)
+                logger.info(f"Got stream URL: {stream_url[:100]}...")
+            except CircuitBreakerOpenError as e:
+                logger.error(f"Circuit breaker open for platform service: {e}")
+                # Skip to next song if platform service is unavailable
+                self._is_playing = False
+                await self.play_next()
+                return
+            except MaxRetriesExceededError as e:
+                logger.error(f"Max retries exceeded getting stream URL: {e}")
+                # Skip to next song if we can't get stream URL after retries
+                self._is_playing = False
+                await self.play_next()
+                return
+            except NetworkTimeoutError as e:
+                logger.error(f"Network timeout getting stream URL: {e}")
+                # Skip to next song on timeout
+                self._is_playing = False
+                await self.play_next()
+                return
 
             # Create FFmpeg source with enhanced Discord compatibility
             ffmpeg_options = {
@@ -85,10 +113,16 @@ class AudioPlayer:
                 "options": "-vn -ar 48000 -ac 2 -b:a 128k",
             }
 
-            source = discord.FFmpegPCMAudio(stream_url, **ffmpeg_options)  # type: ignore[arg-type]
-            transformed_source = discord.PCMVolumeTransformer(
-                source, volume=self._volume
-            )
+            try:
+                source = discord.FFmpegPCMAudio(stream_url, **ffmpeg_options)  # type: ignore[arg-type]
+                transformed_source = discord.PCMVolumeTransformer(
+                    source, volume=self._volume
+                )
+            except Exception as e:
+                logger.error(f"Error creating audio source for {song_info['title']}: {e}")
+                self._is_playing = False
+                await self.play_next()
+                return
 
             # Play the audio
             def after_play(error):
@@ -102,17 +136,29 @@ class AudioPlayer:
                         # This happens when there's no running event loop
                         pass
 
-            self.voice_client.play(transformed_source, after=after_play)
-
-            logger.info(f"Now playing: {song_info['title']}")
+            try:
+                self.voice_client.play(transformed_source, after=after_play)
+                logger.info(f"Now playing: {song_info['title']}")
+            except Exception as e:
+                logger.error(f"Error starting playback for {song_info['title']}: {e}")
+                self._is_playing = False
+                await self.play_next()
+                return
 
         except Exception as e:
-            logger.error(f"Error playing song: {e}")
+            logger.error(f"Unexpected error playing song {song_info.get('title', 'Unknown')}: {e}")
             self._is_playing = False
             await self.play_next()
 
+    @with_retry(
+        retry_config=PLATFORM_RETRY_CONFIG,
+        circuit_breaker_config=PLATFORM_CIRCUIT_BREAKER_CONFIG,
+        service_name="platform_stream_url",
+        exceptions=(Exception,),
+        exclude_exceptions=(CircuitBreakerOpenError, NetworkResilienceError)
+    )
     async def _get_stream_url(self, song_info: Dict) -> str:
-        """Get stream URL directly from platform"""
+        """Get stream URL directly from platform with enhanced error handling"""
         platform_name = song_info["platform"]
         video_id = song_info["id"]
         logger.info(f"Song info: {song_info}")
@@ -135,6 +181,9 @@ class AudioPlayer:
             logger.info(f"Got stream URL from {platform_name}: {stream_url[:100]}...")
             return stream_url
             
+        except NetworkResilienceError:
+            # Re-raise network resilience errors as-is
+            raise
         except Exception as e:
             logger.error(f"Error getting stream URL from platform: {e}")
             raise
@@ -226,3 +275,31 @@ class AudioPlayer:
         if self.current:
             total_size += 1
         self.metrics.set_queue_size(total_size)
+    
+    def get_network_status(self) -> Dict:
+        """Get network resilience status for debugging"""
+        resilience_manager = get_resilience_manager()
+        return resilience_manager.get_all_status()
+    
+    def is_service_healthy(self) -> bool:
+        """Check if audio player and related services are healthy"""
+        try:
+            resilience_manager = get_resilience_manager()
+            status = resilience_manager.get_all_status()
+            
+            # Check if any circuit breakers are open
+            for cb_name, cb_status in status.get("circuit_breakers", {}).items():
+                if cb_status.get("state") == "open":
+                    logger.warning(f"Circuit breaker {cb_name} is open - service unhealthy")
+                    return False
+            
+            # Check overall success rate
+            global_stats = status.get("global_stats", {})
+            success_rate = global_stats.get("success_rate", 0)
+            
+            # Consider service healthy if success rate > 80%
+            return success_rate > 80.0
+            
+        except Exception as e:
+            logger.error(f"Error checking service health: {e}")
+            return False

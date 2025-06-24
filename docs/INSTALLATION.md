@@ -79,7 +79,7 @@ This will start all services using Docker Compose.
 ### No audio playback
 - Check FFmpeg installation in container
 - Verify voice permissions
-- Check stream service logs: `docker-compose logs stream-service`
+- Check bot logs for stream extraction errors: `docker-compose logs robustty`
 
 ### Search not working
 - Verify API keys are correct

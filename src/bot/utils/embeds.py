@@ -64,3 +64,77 @@ def create_music_embed(song_info: dict[str, Any], queued: bool = False) -> Embed
         embed.set_thumbnail(url=song_info["thumbnail"])
 
     return embed
+
+
+def create_service_status_embed(service_status: dict[str, Any]) -> Embed:
+    """Create an embed for service status information"""
+    overall_health = service_status.get('overall_health', 'unknown')
+    
+    if overall_health == 'healthy':
+        color = discord.Color.green()
+        title = "🟢 All Services Healthy"
+    elif overall_health == 'degraded':
+        color = discord.Color.yellow()
+        title = "🟡 Some Services Degraded"
+    elif overall_health == 'unhealthy':
+        color = discord.Color.red()
+        title = "🔴 Service Issues Detected"
+    else:
+        color = discord.Color.blue()
+        title = "📊 Service Status"
+    
+    embed = create_embed(
+        title=title,
+        color=color
+    )
+    
+    # Add platform status
+    platforms = service_status.get('platforms', {})
+    if platforms:
+        platform_text = ""
+        for platform, status in platforms.items():
+            if status.get('available', False):
+                platform_text += f"🟢 {platform.title()}\n"
+            else:
+                platform_text += f"🔴 {platform.title()}\n"
+        
+        embed.add_field(
+            name="Platform Status",
+            value=platform_text or "No platforms configured",
+            inline=True
+        )
+    
+    # Add circuit breaker status
+    circuit_breakers = service_status.get('circuit_breakers', {})
+    if circuit_breakers:
+        cb_text = ""
+        for cb_name, cb_status in circuit_breakers.items():
+            state = cb_status.get('state', 'unknown')
+            if state == 'closed':
+                cb_text += f"🟢 {cb_name.replace('_', ' ').title()}\n"
+            elif state == 'half_open':
+                cb_text += f"🟡 {cb_name.replace('_', ' ').title()}\n"
+            else:
+                cb_text += f"🔴 {cb_name.replace('_', ' ').title()}\n"
+        
+        embed.add_field(
+            name="Circuit Breakers",
+            value=cb_text or "No circuit breakers",
+            inline=True
+        )
+    
+    # Add success rate
+    global_stats = service_status.get('global_stats', {})
+    success_rate = global_stats.get('success_rate', 0)
+    total_calls = global_stats.get('total_calls', 0)
+    
+    stats_text = f"Success Rate: {success_rate:.1f}%\n"
+    stats_text += f"Total Calls: {total_calls:,}"
+    
+    embed.add_field(
+        name="Performance",
+        value=stats_text,
+        inline=True
+    )
+    
+    return embed

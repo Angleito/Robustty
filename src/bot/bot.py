@@ -10,6 +10,7 @@ from src.services.cookie_manager import CookieManager
 from src.services.searcher import MultiPlatformSearcher
 from src.utils.config_loader import ConfigType
 from src.services.metrics_collector import get_metrics_collector
+from src.services.health_monitor import HealthMonitor
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +34,7 @@ class RobusttyBot(commands.Bot):
         self.cookie_manager: Optional[CookieManager] = None
         self.audio_players: Dict[int, AudioPlayer] = {}
         self.metrics = get_metrics_collector()
+        self.health_monitor: Optional[HealthMonitor] = None
 
     async def setup_hook(self) -> None:
         """Initialize bot components"""
@@ -58,6 +60,14 @@ class RobusttyBot(commands.Bot):
         # Initialize services
         self.searcher = MultiPlatformSearcher(self.platform_registry)
         self.cookie_manager = CookieManager(self.config.get("cookies", {}))
+        
+        # Initialize cache manager if needed
+        from src.services.cache_manager import CacheManager
+        self.cache_manager = CacheManager(self.config)
+        await self.cache_manager.initialize()
+        
+        # Initialize health monitor
+        self.health_monitor = HealthMonitor(self, self.config)
 
         # Load cogs
         await self.load_extension("src.bot.cogs.music")
@@ -79,6 +89,11 @@ class RobusttyBot(commands.Bot):
             type=discord.ActivityType.listening, name=self.config["bot"]["activity"]
         )
         await self.change_presence(activity=activity)
+        
+        # Start health monitor if enabled
+        if self.health_monitor and self.config.get('health_monitor', {}).get('enabled', True):
+            await self.health_monitor.start()
+            logger.info("Health monitor started")
         
         # Update metrics with active connections
         self._update_connection_metrics()
@@ -111,12 +126,20 @@ class RobusttyBot(commands.Bot):
         """Cleanup on bot shutdown"""
         logger.info("Shutting down bot...")
 
+        # Stop health monitor first
+        if self.health_monitor:
+            await self.health_monitor.stop()
+
         # Cleanup audio players
         for player in self.audio_players.values():
             await player.cleanup()
 
         # Cleanup platforms
         await self.platform_registry.cleanup_all()
+
+        # Cleanup cache manager
+        if hasattr(self, 'cache_manager') and self.cache_manager:
+            await self.cache_manager.close()
 
         # Cleanup cookie manager
         if self.cookie_manager:

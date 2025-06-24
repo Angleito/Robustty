@@ -1,0 +1,22 @@
+services:
+  # Cookie extraction service only
+  cookie-extractor:
+    build:
+      context: .
+      dockerfile: Dockerfile.cookies
+    container_name: robustty-cookies
+    restart: unless-stopped
+    environment:
+      - COOKIE_REFRESH_INTERVAL=7200  # 2 hours in seconds
+    volumes:
+      # Mount host Brave browser data for cookie extraction
+      - "${HOME}/Library/Application Support/BraveSoftware/Brave-Browser:/host-brave:ro"
+      # Cookie output directory
+      - robustty-cookies:/app/cookies
+      # Logs
+      - ./logs:/app/logs
+    command: /app/cookie-service.sh
+
+volumes:
+  robustty-cookies:
+    driver: local
