@@ -6,7 +6,8 @@ services:
       dockerfile: Dockerfile.vps
     container_name: robustty-bot
     restart: unless-stopped
-    network_mode: host  # OrbStack optimization - use host networking
+    ports:
+      - "8000:8000"  # Health check and metrics port
     environment:
       - DISCORD_TOKEN=${DISCORD_TOKEN}
       - YOUTUBE_API_KEY=${YOUTUBE_API_KEY}
@@ -15,7 +16,7 @@ services:
       - SEARCH_TIMEOUT=${SEARCH_TIMEOUT:-30}
       - STREAM_TIMEOUT=${STREAM_TIMEOUT:-300}
       - MAX_QUEUE_SIZE=${MAX_QUEUE_SIZE:-100}
-      - REDIS_URL=redis://localhost:6379
+      - REDIS_URL=redis://redis:6379
       - COOKIE_SOURCE=remote  # Use remote cookies instead of local extraction
     volumes:
       # App data persistence
@@ -27,12 +28,13 @@ services:
     depends_on:
       - redis
 
-  # Redis for caching (OrbStack optimized)
+  # Redis for caching
   redis:
     image: redis:7-alpine
     container_name: robustty-redis
     restart: unless-stopped
-    network_mode: host  # OrbStack optimization
+    ports:
+      - "6379:6379"
     volumes:
       - robustty-redis-data:/data
     command: redis-server --appendonly yes --port 6379
