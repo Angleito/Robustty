@@ -127,10 +127,10 @@ class RobusttyBot(commands.Bot):
         # Initialize health monitor
         self.health_monitor = HealthMonitor(self, self.config)
 
-        # Setup connection monitoring callbacks
-        self.add_connection_callback(
-            on_lost=self._on_connection_lost, on_restored=self._on_connection_restored
-        )
+        # Setup connection monitoring callbacks (stub implementation since resilient client is disabled)
+        # self.add_connection_callback(
+        #     on_lost=self._on_connection_lost, on_restored=self._on_connection_restored
+        # )
 
         # Load cogs
         await self.load_extension("src.bot.cogs.music")
