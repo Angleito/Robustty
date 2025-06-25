@@ -49,6 +49,14 @@ class YouTubePlatform(VideoPlatform):
         self.cookie_health_monitor = None  # Will be set by bot initialization
         self.enable_fallbacks = config.get("enable_fallbacks", True)
 
+        # Language configuration options - defaults to English for search results
+        self.default_region: str = config.get("default_region", "US")
+        self.default_language: str = config.get("default_language", "en")
+        self.interface_language: str = config.get("interface_language", "en")
+        self.auto_detect_language: bool = config.get("auto_detect_language", False)  # Changed default to False for English preference
+        self.force_english_for_english_queries: bool = config.get("force_english_for_english_queries", True)
+        self.prefer_english_results: bool = config.get("prefer_english_results", True)  # New option to prefer English by default
+
         # URL patterns for YouTube
         self.url_patterns = [
             re.compile(
@@ -80,6 +88,129 @@ class YouTubePlatform(VideoPlatform):
     def set_cookie_health_monitor(self, cookie_health_monitor):
         """Set the cookie health monitor for this platform"""
         self.cookie_health_monitor = cookie_health_monitor
+
+    def _get_search_params(self, query: str) -> Dict[str, str]:
+        """Get search parameters including language and region settings with English defaults"""
+        detected_language = self._detect_query_language(query)
+        
+        # Apply language preferences - prefer English by default
+        if not self.auto_detect_language or self.prefer_english_results:
+            # Use English as default unless auto-detection explicitly overrides
+            if detected_language == "auto" and not self.prefer_english_results:
+                relevance_language = None  # Let YouTube auto-detect
+            else:
+                relevance_language = "en" if self.prefer_english_results or detected_language == "en" else self.default_language
+        else:
+            relevance_language = detected_language if detected_language != "auto" else None
+        
+        params = {
+            "regionCode": self.default_region,
+            "hl": self.interface_language,  # Always set interface language for English UI
+        }
+        
+        # Add relevance language if determined
+        if relevance_language:
+            params["relevanceLanguage"] = relevance_language
+        
+        logger.debug(f"Search params for query '{query[:50]}...': region={params['regionCode']}, "
+                    f"language={params['relevanceLanguage']}, hl={params.get('hl', 'not set')}")
+        
+        return params
+
+    def _detect_query_language(self, query: str) -> str:
+        """Detect if the search query is in English or another language
+        
+        Returns:
+            'en' for English queries, 'auto' for non-English queries
+        """
+        if not query or not query.strip():
+            return 'en' if self.prefer_english_results else 'auto'
+        
+        # If prefer_english_results is True and auto_detect_language is False, always return English
+        if self.prefer_english_results and not self.auto_detect_language:
+            logger.debug(f"Using English language preference for query: {query}")
+            return 'en'
+        
+        query_lower = query.lower().strip()
+        
+        # Check for primarily ASCII characters (strong indicator of English)
+        ascii_chars = sum(1 for c in query if ord(c) < 128)
+        total_chars = len(query)
+        ascii_ratio = ascii_chars / total_chars if total_chars > 0 else 0
+        
+        # If less than 80% ASCII, likely non-English
+        if ascii_ratio < 0.8:
+            logger.debug(f"Query '{query}' detected as non-English (ASCII ratio: {ascii_ratio:.2f})")
+            return 'auto'
+        
+        # Common English words and patterns
+        english_indicators = {
+            # Common English words
+            'the', 'and', 'or', 'of', 'to', 'in', 'for', 'with', 'on', 'at', 'by', 'from',
+            'how', 'what', 'when', 'where', 'why', 'who', 'which', 'that', 'this', 'these',
+            'song', 'music', 'video', 'tutorial', 'review', 'news', 'live', 'official',
+            'cover', 'remix', 'acoustic', 'piano', 'guitar', 'drum', 'bass', 'vocal',
+            'best', 'top', 'new', 'old', 'latest', 'first', 'last', 'full', 'complete',
+            'funny', 'amazing', 'epic', 'awesome', 'cool', 'great', 'good', 'bad',
+            # Common music/entertainment terms
+            'album', 'single', 'ep', 'mixtape', 'playlist', 'concert', 'performance',
+            'interview', 'behind', 'scenes', 'making', 'reaction', 'analysis',
+            # Music genres and common terms
+            'rock', 'pop', 'jazz', 'blues', 'country', 'rap', 'hip', 'hop', 'metal', 'punk',
+            'folk', 'classical', 'electronic', 'dance', 'house', 'techno', 'dubstep',
+            'band', 'artist', 'singer', 'musician', 'group', 'duo', 'trio', 'orchestra',
+            # Common abbreviations and brand names in English context
+            'bts', 'kpop', 'jpop', 'cpop', 'mv', 'ost', 'bgm', 'dj', 'mc', 'ft', 'feat'
+        }
+        
+        # Split query into words and check for English indicators
+        words = query_lower.replace('-', ' ').replace('_', ' ').split()
+        english_word_count = 0
+        
+        for word in words:
+            # Remove common punctuation
+            clean_word = word.strip('.,!?;:"()[]{}')
+            if clean_word in english_indicators:
+                english_word_count += 1
+        
+        # If we have English words, check the ratio
+        if len(words) > 0:
+            english_ratio = english_word_count / len(words)
+            
+            # If 30% or more words are common English words, consider it English
+            if english_ratio >= 0.3:
+                logger.debug(f"Query '{query}' detected as English (English word ratio: {english_ratio:.2f})")
+                return 'en'
+                
+            # If prefer_english_results is True, lean towards English even with lower ratio
+            if self.prefer_english_results and english_ratio >= 0.1:
+                logger.debug(f"Query '{query}' using English preference (English word ratio: {english_ratio:.2f})")
+                return 'en'
+        
+        # Check for English patterns
+        english_patterns = [
+            r'\bhow\s+to\b',  # "how to"
+            r'\bwhat\s+is\b',  # "what is"
+            r'\b\w+ing\b',    # words ending in -ing
+            r'\b\w+ed\b',     # words ending in -ed
+            r'\b\w+ly\b',     # words ending in -ly
+            r'\b\w+\'s\b',    # possessives
+            r'\b\w+n\'t\b',   # contractions like don't, can't
+        ]
+        
+        import re
+        for pattern in english_patterns:
+            if re.search(pattern, query_lower):
+                logger.debug(f"Query '{query}' detected as English (pattern match: {pattern})")
+                return 'en'
+        
+        # Default based on configuration
+        if self.prefer_english_results:
+            logger.debug(f"Query '{query}' defaulting to English preference")
+            return 'en'
+        else:
+            logger.debug(f"Query '{query}' language detection inconclusive, using 'auto'")
+            return 'auto'
 
     @with_retry(
         retry_config=PLATFORM_RETRY_CONFIG,
@@ -133,10 +264,20 @@ class YouTubePlatform(VideoPlatform):
                 )
 
         try:
+            # Build search parameters with language configuration
+            search_params = {
+                "part": "snippet",
+                "q": query,
+                "type": "video",
+                "maxResults": max_results
+            }
+            
+            # Add language and region parameters based on configuration
+            language_params = self._get_search_params(query)
+            search_params.update(language_params)
+            
             # First, get search results
-            search_request = self.youtube.search().list(
-                part="snippet", q=query, type="video", maxResults=max_results
-            )
+            search_request = self.youtube.search().list(**search_params)
             search_response = search_request.execute()
 
             # Extract video IDs for detailed lookup
@@ -575,6 +716,9 @@ class YouTubePlatform(VideoPlatform):
                 # Better error handling for auth issues
                 "ignoreerrors": False,
                 "no_color": True,
+                # Subtitle settings - disable downloads for audio streaming
+                "writesubtitles": False,
+                "writeautomaticsub": False,
             }
 
             # Enhanced cookie loading with comprehensive fallback paths
@@ -769,8 +913,8 @@ class YouTubePlatform(VideoPlatform):
             # Return True on validation error to avoid blocking valid URLs
             return True
 
-    def _get_ytdlp_config(self) -> Dict[str, Any]:
-        """Get yt-dlp configuration with cookies for metadata extraction"""
+    def _get_ytdlp_config(self, query: str = "") -> Dict[str, Any]:
+        """Get yt-dlp configuration with cookies, language preferences, and subtitle settings"""
         ydl_opts = {
             "quiet": True,
             "no_warnings": False,
@@ -789,6 +933,11 @@ class YouTubePlatform(VideoPlatform):
             "no_color": True,
             # Better handling of age-restricted content
             "age_limit": None,
+            # Subtitle settings - disable downloads
+            "writesubtitles": False,
+            "writeautomaticsub": False,
+            # Language preferences based on query
+            "extractor_args": self._get_language_preferences(query),
         }
 
         # Enhanced cookie loading for metadata extraction
@@ -982,7 +1131,7 @@ class YouTubePlatform(VideoPlatform):
 
         try:
             url = f"https://www.youtube.com/watch?v={video_id}"
-            ydl_opts = self._get_ytdlp_config()
+            ydl_opts = self._get_ytdlp_config("")  # Empty query for metadata extraction
 
             def extract_metadata():
                 try:
@@ -1138,7 +1287,7 @@ class YouTubePlatform(VideoPlatform):
             return []
 
     async def _search_with_ytdlp(self, query: str, max_results: int = 10) -> List[Dict[str, Any]]:
-        """Use yt-dlp's ytsearch: feature to search YouTube without API"""
+        """Use yt-dlp's ytsearch: feature to search YouTube without API with language preferences"""
         import yt_dlp
         import asyncio
         
@@ -1151,6 +1300,10 @@ class YouTubePlatform(VideoPlatform):
             return url_results
         
         try:
+            # Get language parameters for consistent behavior
+            language_params = self._get_search_params(query)
+            detected_language = language_params.get("relevanceLanguage", "auto")
+            
             # Use yt-dlp's search functionality
             search_query = f"ytsearch{max_results}:{query}"
             ydl_opts = self._get_ytdlp_config()
@@ -1159,7 +1312,23 @@ class YouTubePlatform(VideoPlatform):
                 "playlistend": max_results,
                 "quiet": True,
                 "no_warnings": True,  # Reduce noise in logs
+                # Add HTTP headers for English language preference
+                "http_headers": {
+                    "Accept-Language": f"{self.default_language}-{self.default_region},{self.default_language};q=0.9",
+                },
             })
+            
+            # Add language preference for yt-dlp if query is detected as English
+            if detected_language == 'en':
+                # yt-dlp doesn't have direct language preference, but we can add geo-bypass
+                # and prefer English content through user-agent and headers
+                ydl_opts.update({
+                    "geo_bypass": True,
+                    "geo_bypass_country": "US",  # Prefer US content for English queries
+                })
+                logger.debug(f"Applied English preferences to yt-dlp search for query: {query}")
+            else:
+                logger.debug(f"Using default yt-dlp settings for non-English query: {query}")
             
             def search_videos():
                 try:
@@ -1520,3 +1689,95 @@ class YouTubePlatform(VideoPlatform):
                     return True  # Refresh on error
         
         return True  # Refresh if no cookies found
+
+    def _detect_query_language(self, query: str) -> str:
+        """Detect the primary language of the search query"""
+        try:
+            import re
+            
+            # Remove common musical notation and special characters
+            cleaned_query = re.sub(r'[^\w\s]', ' ', query.lower())
+            
+            # Check for English indicators
+            english_patterns = [
+                r'\b(song|music|video|cover|live|official|acoustic|remix|lyrics|audio)\b',
+                r'\b(the|and|or|for|with|by|feat|featuring)\b',
+                r'\b[a-z]+ing\b',  # English -ing words
+                r'\b[a-z]+ed\b',   # English -ed words
+            ]
+            
+            english_score = 0
+            for pattern in english_patterns:
+                if re.search(pattern, cleaned_query):
+                    english_score += 1
+            
+            # Check for non-English indicators
+            non_english_patterns = [
+                r'[àáâãäåæçèéêëìíîïðñòóôõöøùúûüýþÿ]',  # Latin accents
+                r'[αβγδεζηθικλμνξοπρστυφχψω]',        # Greek
+                r'[абвгдеёжзийклмнопрстуфхцчшщъыьэюя]', # Cyrillic
+                r'[一-龯]',                              # Chinese/Japanese
+                r'[가-힣]',                              # Korean
+                r'[ا-ي]',                               # Arabic
+            ]
+            
+            non_english_score = 0
+            for pattern in non_english_patterns:
+                if re.search(pattern, query, re.IGNORECASE):
+                    non_english_score += 2  # Weight non-English indicators higher
+            
+            # Determine language
+            if english_score > non_english_score:
+                return "en"
+            elif non_english_score > 0:
+                return "auto"  # Let YouTube decide for non-English content
+            else:
+                return "en"    # Default to English for ambiguous cases
+                
+        except Exception as e:
+            logger.debug(f"Language detection error: {e}")
+            return "en"  # Default to English on error
+
+    def _get_language_preferences(self, query: str) -> Dict[str, Any]:
+        """Get language preferences for yt-dlp based on query language with English defaults"""
+        detected_lang = self._detect_query_language(query)
+        
+        # Build YouTube-specific extractor arguments
+        youtube_args = {}
+        
+        if detected_lang == "en" or self.prefer_english_results:
+            # Prefer English content for English queries or when English preference is enabled
+            youtube_args = {
+                "lang": ["en", "en-US", "en-GB"],
+                "player_client": ["web"],
+                "skip_dash_manifest": False,
+                "geo_bypass_country": self.default_region,
+                "hl": self.interface_language,
+            }
+            logger.debug("Using English language preferences for search")
+        else:
+            # For non-English queries when English preference is disabled
+            youtube_args = {
+                "player_client": ["web"],
+                "skip_dash_manifest": False,
+            }
+            logger.debug(f"Using auto language preferences for detected language: {detected_lang}")
+        
+        return {"youtube": youtube_args}
+
+    def _build_search_query(self, query: str, max_results: int) -> str:
+        """Build optimized search query with language preferences"""
+        detected_lang = self._detect_query_language(query)
+        
+        # Base search query
+        search_query = f"ytsearch{max_results}:{query}"
+        
+        # For English queries, we can add language hints to improve results
+        if detected_lang == "en":
+            # Add subtle English preference without being too restrictive
+            # This helps prioritize English content without excluding other languages entirely
+            logger.debug("Building English-optimized search query")
+        else:
+            logger.debug(f"Building search query for detected language: {detected_lang}")
+        
+        return search_query

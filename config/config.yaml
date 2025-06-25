@@ -8,6 +8,13 @@ platforms:
     enabled: true
     api_key: ${YOUTUBE_API_KEY:}
     max_results: 10
+    # Language and region preferences for search results (defaults to English)
+    default_region: ${YOUTUBE_DEFAULT_REGION:US}  # Region code for localized results (US, GB, CA, etc.)
+    default_language: ${YOUTUBE_DEFAULT_LANGUAGE:en}  # Default language code (en, es, fr, etc.)
+    interface_language: ${YOUTUBE_INTERFACE_LANGUAGE:en}  # Interface language for YouTube UI elements
+    prefer_english_results: ${YOUTUBE_PREFER_ENGLISH_RESULTS:true}  # Prefer English results by default
+    auto_detect_language: ${YOUTUBE_AUTO_DETECT_LANGUAGE:false}  # Auto-detect query language (false = use defaults)
+    force_english_for_english_queries: ${YOUTUBE_FORCE_ENGLISH_FOR_ENGLISH_QUERIES:true}  # Force English settings for detected English queries
 
   peertube:
     enabled: true
