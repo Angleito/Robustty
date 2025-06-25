@@ -17,6 +17,11 @@ services:
       - MAX_QUEUE_SIZE=${MAX_QUEUE_SIZE:-100}
       - REDIS_URL=${REDIS_URL:-redis://localhost:6379}
       - COOKIE_REFRESH_INTERVAL=7200  # 2 hours in seconds
+      # Platform enable/disable flags
+      - YOUTUBE_ENABLED=${YOUTUBE_ENABLED:-true}
+      - RUMBLE_ENABLED=${RUMBLE_ENABLED:-true}
+      - ODYSEE_ENABLED=${ODYSEE_ENABLED:-true}
+      - PEERTUBE_ENABLED=${PEERTUBE_ENABLED:-true}
     volumes:
       # Mount host Brave browser data for cookie extraction
       - "${HOME}/Library/Application Support/BraveSoftware/Brave-Browser:/host-brave:ro"

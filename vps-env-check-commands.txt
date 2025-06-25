@@ -1,0 +1,61 @@
+# VPS Environment Configuration Check Commands
+# Run these commands on your VPS to diagnose the YouTube API quota issues
+
+# 1. Check current directory and environment files
+cd ~/robustty-bot
+pwd
+ls -la | grep -E "(.env|config)"
+
+# 2. Check the .env file content (if it exists)
+cat .env 2>/dev/null || echo "No .env file found"
+
+# 3. Check environment variables that are currently set
+echo "=== Current Environment Variables ==="
+env | grep -E "(DISCORD_TOKEN|YOUTUBE_API_KEY|APIFY_API_KEY|LOG_LEVEL|REDIS_URL)" || echo "No relevant env vars found"
+
+# 4. Check if the YouTube API key is properly set and not empty
+echo "=== YouTube API Key Status ==="
+if [ -z "$YOUTUBE_API_KEY" ]; then
+    echo "ERROR: YOUTUBE_API_KEY is not set"
+else
+    echo "YOUTUBE_API_KEY is set (length: ${#YOUTUBE_API_KEY} characters)"
+    echo "First 10 characters: ${YOUTUBE_API_KEY:0:10}..."
+fi
+
+# 5. Check Docker environment if running in containers
+echo "=== Docker Environment Check ==="
+docker-compose ps 2>/dev/null || echo "Docker compose not running or not available"
+
+# 6. Check Docker container environment variables
+echo "=== Container Environment Variables ==="
+docker-compose exec robustty env | grep -E "(DISCORD_TOKEN|YOUTUBE_API_KEY|APIFY_API_KEY)" 2>/dev/null || echo "Cannot access container environment"
+
+# 7. Check bot logs for specific YouTube API errors
+echo "=== Recent YouTube API Errors ==="
+docker-compose logs robustty --tail=100 | grep -i "youtube\|quota\|api" || echo "No YouTube-related logs found"
+
+# 8. Check if the .env file exists in the container
+echo "=== Container .env File Check ==="
+docker-compose exec robustty ls -la /app/.env 2>/dev/null || echo "No .env file in container"
+docker-compose exec robustty cat /app/.env 2>/dev/null || echo "Cannot read .env file in container"
+
+# 9. Verify API quota usage (if you have access to Google Cloud Console)
+echo "=== API Key Validation ==="
+echo "You should manually check:"
+echo "1. Google Cloud Console -> APIs & Services -> Credentials"
+echo "2. Check YouTube Data API v3 quota usage"
+echo "3. Verify the API key restrictions (if any)"
+
+# 10. Test API key directly (optional - be careful with quota)
+echo "=== Direct API Test (use sparingly) ==="
+echo "To test the API key directly, you can run:"
+echo "curl 'https://www.googleapis.com/youtube/v3/search?part=snippet&q=test&key=YOUR_API_KEY&maxResults=1'"
+
+# 11. Check config files
+echo "=== Configuration Files ==="
+ls -la config/ 2>/dev/null || echo "No config directory found"
+cat config/config.yaml 2>/dev/null | grep -A5 -B5 youtube || echo "No config.yaml or YouTube config found"
+
+# 12. Check if there are any API key conflicts
+echo "=== Potential API Key Conflicts ==="
+grep -r "YOUTUBE_API_KEY\|AIza" . --exclude-dir=.git 2>/dev/null | head -10 || echo "No API key references found in files"

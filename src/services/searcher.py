@@ -18,6 +18,16 @@ from src.utils.network_resilience import (
     MaxRetriesExceededError,
     get_resilience_manager,
 )
+from src.services.status_reporting import (
+    SearchMethod,
+    PlatformStatus,
+    StatusReport,
+    MultiPlatformStatus,
+    get_status_reporter,
+    report_search_success,
+    report_platform_error,
+    report_direct_url_success,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +37,8 @@ class MultiPlatformSearcher:
 
     def __init__(self, platform_registry: PlatformRegistry):
         self.platform_registry = platform_registry
+        self.status_reporter = get_status_reporter()
+        self._last_search_status: Optional[MultiPlatformStatus] = None
 
     async def search_all_platforms(
         self, query: str, max_results: int = 10
@@ -34,6 +46,7 @@ class MultiPlatformSearcher:
         """Search across all enabled platforms with enhanced error handling and fallback"""
         results: Dict[str, List[Dict[str, Any]]] = {}
         platforms = self.platform_registry.get_enabled_platforms()
+        platform_reports: Dict[str, StatusReport] = {}
 
         # Check service health before attempting searches
         resilience_manager = get_resilience_manager()
@@ -55,9 +68,35 @@ class MultiPlatformSearcher:
             results = await self._search_for_mirrors_with_fallback(
                 video_info, max_results
             )
+            
+            # Create status reports for URL-based search
+            for platform_name, platform_results in results.items():
+                if platform_results:
+                    if platform_name == video_info['platform']:
+                        # Original platform - direct URL processing
+                        platform_reports[platform_name] = StatusReport.create_direct_url_success(
+                            platform_name,
+                            f"Direct URL processing successful",
+                            details={'results_count': len(platform_results)}
+                        )
+                    else:
+                        # Mirror search on other platforms
+                        platform_reports[platform_name] = StatusReport.create_search_success(
+                            platform_name,
+                            SearchMethod.MIRROR_SEARCH,
+                            len(platform_results),
+                            f"Mirror search successful"
+                        )
+                else:
+                    platform_reports[platform_name] = StatusReport.create_platform_error(
+                        platform_name,
+                        SearchMethod.MIRROR_SEARCH if platform_name != video_info['platform'] else SearchMethod.DIRECT_URL,
+                        "No results found",
+                        f"No results found for {platform_name}"
+                    )
         else:
             # Text-based search with parallel execution and fallback
-            results = await self._search_all_platforms_with_fallback(
+            results, platform_reports = await self._search_all_platforms_with_fallback(
                 platforms, query, max_results
             )
 
@@ -76,7 +115,19 @@ class MultiPlatformSearcher:
         if failed_platforms:
             logger.warning(f"Failed platforms: {failed_platforms}")
 
+        # Create and store multi-platform status
+        multi_status = self.status_reporter.create_multi_platform_status(
+            query, platform_reports, total_results
+        )
+        
+        # Store the multi-platform status for later retrieval
+        self._last_search_status = multi_status
+
         return results
+    
+    def get_last_search_status(self) -> Optional[MultiPlatformStatus]:
+        """Get the status of the last search operation"""
+        return self._last_search_status
 
     @with_retry(
         retry_config=PLATFORM_RETRY_CONFIG,
@@ -150,9 +201,10 @@ class MultiPlatformSearcher:
 
     async def _search_all_platforms_with_fallback(
         self, platforms: Dict[str, VideoPlatform], query: str, max_results: int
-    ) -> Dict[str, List[Dict[str, Any]]]:
+    ) -> Tuple[Dict[str, List[Dict[str, Any]]], Dict[str, StatusReport]]:
         """Search all platforms with fallback and prioritization"""
         results: Dict[str, List[Dict[str, Any]]] = {}
+        platform_reports: Dict[str, StatusReport] = {}
 
         # Prioritize platforms by reliability (you can adjust this based on your experience)
         platform_priority = ["youtube", "odysee", "peertube", "rumble"]
@@ -194,19 +246,45 @@ class MultiPlatformSearcher:
                 if isinstance(platform_results, Exception):
                     logger.error(f"Platform {name} search failed: {platform_results}")
                     results[name] = []
+                    platform_reports[name] = StatusReport.create_platform_error(
+                        name,
+                        SearchMethod.API_SEARCH,
+                        str(platform_results),
+                        f"{name} search failed: {str(platform_results)[:100]}"
+                    )
                 else:
                     results[name] = platform_results
+                    if platform_results:
+                        platform_reports[name] = StatusReport.create_search_success(
+                            name,
+                            SearchMethod.API_SEARCH,
+                            len(platform_results),
+                            f"Search successful - found {len(platform_results)} results"
+                        )
+                    else:
+                        platform_reports[name] = StatusReport.create_platform_error(
+                            name,
+                            SearchMethod.API_SEARCH,
+                            "No results found",
+                            f"Search completed but no results found"
+                        )
 
         except asyncio.TimeoutError:
             logger.warning(
                 f"Multi-platform search timed out after 30 seconds for query: {query}"
             )
-            # Return partial results
+            # Return partial results and create timeout reports
             for name, _ in sorted_platforms:
                 if name not in results:
                     results[name] = []
+                    platform_reports[name] = StatusReport.create_platform_error(
+                        name,
+                        SearchMethod.API_SEARCH,
+                        "Search timeout",
+                        f"{name} search timed out"
+                    )
 
-        return results
+        return results, platform_reports
 
     async def _search_for_mirrors_with_fallback(
         self, video_info: Dict[str, Any], max_results: int

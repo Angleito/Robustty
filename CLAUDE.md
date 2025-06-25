@@ -19,6 +19,11 @@ pytest tests/integration -v              # Integration tests only
 pytest tests/test_platforms/ -k rumble   # Specific platform tests
 ./scripts/run-integration-tests.sh       # Full integration test suite
 
+# YouTube fallback functionality tests
+python tests/run_fallback_tests.py       # Comprehensive fallback tests
+python tests/run_fallback_tests.py --scenarios url_processing api_quota  # Specific scenarios
+python tests/run_fallback_tests.py --include-integration  # Include integration tests
+
 # Type checking
 mypy src/                                 # Full type check
 mypy src/platforms/                       # Platform-specific

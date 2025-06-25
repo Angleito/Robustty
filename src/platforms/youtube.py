@@ -1,7 +1,9 @@
 import logging
+import os
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from datetime import datetime
 
 from googleapiclient.discovery import build  # type: ignore
 from googleapiclient.errors import HttpError  # type: ignore
@@ -19,6 +21,16 @@ from ..utils.network_resilience import (
     PLATFORM_CIRCUIT_BREAKER_CONFIG,
     NetworkResilienceError,
     CircuitBreakerOpenError,
+)
+from ..services.status_reporting import (
+    SearchMethod,
+    PlatformStatus,
+    report_api_quota_exceeded,
+    report_fallback_success,
+    report_direct_url_success,
+    report_search_success,
+    report_no_api_key,
+    report_platform_error,
 )
 
 logger = logging.getLogger(__name__)
@@ -80,11 +92,45 @@ class YouTubePlatform(VideoPlatform):
         self, query: str, max_results: int = 10
     ) -> List[Dict[str, Any]]:
         """Search YouTube videos with enhanced error handling and detailed metadata"""
-        if not self.youtube:
-            raise PlatformAuthenticationError(
-                "YouTube API key is required for search. Please configure 'api_key' in config.",
-                platform="YouTube",
+        # First try URL parsing if query contains a YouTube URL
+        url_results = await self._search_via_url_parsing(query)
+        if url_results:
+            logger.info("Successfully found YouTube URL in query and extracted metadata")
+            report_direct_url_success(
+                "YouTube",
+                f"Processed direct YouTube URL successfully",
+                details={'results_count': len(url_results)}
             )
+            return url_results
+        
+        # If no API key, try yt-dlp fallback search
+        if not self.youtube:
+            logger.warning("No YouTube API key available, attempting yt-dlp fallback search")
+            report_no_api_key(
+                "YouTube",
+                "No API key configured - attempting yt-dlp fallback search"
+            )
+            fallback_results = await self._search_with_ytdlp(query, max_results)
+            if fallback_results:
+                logger.info(f"yt-dlp fallback search successful without API, returning {len(fallback_results)} results")
+                report_fallback_success(
+                    "YouTube", 
+                    SearchMethod.YTDLP_SEARCH,
+                    f"yt-dlp fallback search successful",
+                    details={'results_count': len(fallback_results)}
+                )
+                return fallback_results
+            else:
+                report_platform_error(
+                    "YouTube",
+                    SearchMethod.YTDLP_SEARCH,
+                    "yt-dlp fallback search failed",
+                    "No API key and fallback search failed. Please configure API key or use direct URLs."
+                )
+                raise PlatformAuthenticationError(
+                    "YouTube API key is required for reliable text search. yt-dlp fallback also failed. Please configure 'api_key' in config, or provide a direct YouTube URL.",
+                    platform="YouTube",
+                )
 
         try:
             # First, get search results
@@ -165,14 +211,50 @@ class YouTubePlatform(VideoPlatform):
                     }
                 )
 
+            # Report successful API search
+            report_search_success(
+                "YouTube",
+                SearchMethod.API_SEARCH,
+                len(results),
+                f"API search successful - found {len(results)} results"
+            )
             return results
         except HttpError as e:
             logger.error(f"YouTube API error: {e}")
 
-            # Check for quota exceeded
+            # Check for quota exceeded and attempt fallback
             if e.resp.status == 403 and "quotaExceeded" in str(e):
+                logger.warning("YouTube API quota exceeded, attempting yt-dlp fallback search")
+                report_api_quota_exceeded(
+                    "YouTube",
+                    "YouTube API quota exceeded - attempting yt-dlp fallback search"
+                )
+                
+                try:
+                    fallback_results = await self._search_with_ytdlp(query, max_results)
+                    if fallback_results:
+                        logger.info(f"yt-dlp fallback search successful, returning {len(fallback_results)} results")
+                        report_fallback_success(
+                            "YouTube",
+                            SearchMethod.YTDLP_SEARCH,
+                            f"yt-dlp fallback search successful after quota exceeded",
+                            details={'results_count': len(fallback_results)}
+                        )
+                        return fallback_results
+                    else:
+                        logger.warning("yt-dlp fallback search returned no results")
+                        report_platform_error(
+                            "YouTube",
+                            SearchMethod.YTDLP_SEARCH,
+                            "yt-dlp fallback returned no results",
+                            "API quota exceeded and fallback search found no results"
+                        )
+                except Exception as fallback_error:
+                    logger.error(f"yt-dlp fallback search failed with error: {fallback_error}")
+                
+                # If fallback fails, raise the original error
                 raise PlatformRateLimitError(
-                    "YouTube API quota exceeded. Please try again later.",
+                    "YouTube API quota exceeded and yt-dlp fallback search failed. Please try again later.",
                     platform="YouTube",
                     original_error=e,
                 )
@@ -282,51 +364,57 @@ class YouTubePlatform(VideoPlatform):
             return "Unknown"
 
     async def get_video_details(self, video_id: str) -> Optional[Dict[str, Any]]:
-        """Get detailed information about a video"""
-        if not self.youtube:
-            return None
+        """Get detailed information about a video with fallback to yt-dlp"""
+        # Try API first if available
+        if self.youtube:
+            try:
+                request = self.youtube.videos().list(
+                    part="snippet,contentDetails,statistics", id=video_id
+                )
+                response = request.execute()
 
-        try:
-            request = self.youtube.videos().list(
-                part="snippet,contentDetails,statistics", id=video_id
-            )
-            response = request.execute()
+                if response.get("items"):
+                    item = response["items"][0]
+                    snippet = item["snippet"]
 
-            if not response.get("items"):
-                return None
+                    # Format the detailed video information
+                    duration = self._parse_duration(item["contentDetails"].get("duration", ""))
+                    view_count = item["statistics"].get("viewCount", "0")
+                    view_count_formatted = self._format_view_count(view_count)
+                    thumbnail_url = self._get_best_thumbnail(snippet.get("thumbnails", {}))
+                    published_formatted = self._format_publish_date(
+                        snippet.get("publishedAt", "")
+                    )
 
-            item = response["items"][0]
-            snippet = item["snippet"]
+                    return {
+                        "id": video_id,
+                        "title": snippet["title"],
+                        "channel": snippet["channelTitle"],
+                        "thumbnail": thumbnail_url,
+                        "url": f"https://www.youtube.com/watch?v={video_id}",
+                        "platform": "youtube",
+                        "description": (
+                            snippet.get("description", "")[:200] + "..."
+                            if len(snippet.get("description", "")) > 200
+                            else snippet.get("description", "")
+                        ),
+                        "duration": duration,
+                        "views": view_count_formatted,
+                        "published": published_formatted,
+                        "view_count_raw": int(view_count) if view_count.isdigit() else 0,
+                    }
+            except HttpError as e:
+                # Check for quota exceeded
+                if e.resp.status == 403 and "quotaExceeded" in str(e):
+                    logger.warning("YouTube API quota exceeded for video details, falling back to yt-dlp")
+                else:
+                    logger.error(f"YouTube API error getting video details: {e}")
+            except Exception as e:
+                logger.error(f"YouTube video details error: {e}")
 
-            # Format the detailed video information
-            duration = self._parse_duration(item["contentDetails"].get("duration", ""))
-            view_count = item["statistics"].get("viewCount", "0")
-            view_count_formatted = self._format_view_count(view_count)
-            thumbnail_url = self._get_best_thumbnail(snippet.get("thumbnails", {}))
-            published_formatted = self._format_publish_date(
-                snippet.get("publishedAt", "")
-            )
-
-            return {
-                "id": video_id,
-                "title": snippet["title"],
-                "channel": snippet["channelTitle"],
-                "thumbnail": thumbnail_url,
-                "url": f"https://www.youtube.com/watch?v={video_id}",
-                "platform": "youtube",
-                "description": (
-                    snippet.get("description", "")[:200] + "..."
-                    if len(snippet.get("description", "")) > 200
-                    else snippet.get("description", "")
-                ),
-                "duration": duration,
-                "views": view_count_formatted,
-                "published": published_formatted,
-                "view_count_raw": int(view_count) if view_count.isdigit() else 0,
-            }
-        except Exception as e:
-            logger.error(f"YouTube video details error: {e}")
-            return None
+        # Fallback to yt-dlp if API failed or not available
+        logger.info(f"Using yt-dlp fallback for video details: {video_id}")
+        return await self._extract_metadata_via_ytdlp(video_id)
 
     def extract_video_id(self, url: str) -> Optional[str]:
         """Extract video ID from YouTube URL"""
@@ -343,9 +431,17 @@ class YouTubePlatform(VideoPlatform):
     def _convert_cookies_to_netscape(
         self, json_cookie_file: str, netscape_cookie_file: str
     ) -> bool:
-        """Convert JSON cookies to Netscape format for yt-dlp with enhanced error handling"""
+        """Convert JSON cookies to Netscape format for yt-dlp with enhanced error handling
+        
+        Supports multiple cookie formats:
+        - Standard browser export format
+        - Chrome/Brave cookie format
+        - Firefox cookie format
+        - Custom extraction formats
+        """
         try:
             import json
+            import time
 
             if not Path(json_cookie_file).exists():
                 logger.warning(f"JSON cookie file not found: {json_cookie_file}")
@@ -357,11 +453,19 @@ class YouTubePlatform(VideoPlatform):
                 if file_size == 0:
                     logger.warning(f"Cookie file is empty: {json_cookie_file}")
                     return False
+                
+                # Check file age for staleness warning
+                file_stat = Path(json_cookie_file).stat()
+                file_age_hours = (time.time() - file_stat.st_mtime) / 3600
+                if file_age_hours > 24:
+                    logger.warning(
+                        f"Cookie file is {file_age_hours:.1f} hours old, consider refreshing: {json_cookie_file}"
+                    )
             except Exception as e:
                 logger.error(f"Cannot access cookie file {json_cookie_file}: {e}")
                 return False
 
-            # Read and parse JSON cookies
+            # Read and parse JSON cookies with multiple format support
             try:
                 with open(json_cookie_file, "r", encoding="utf-8") as f:
                     content = f.read().strip()
@@ -370,7 +474,12 @@ class YouTubePlatform(VideoPlatform):
                             f"Cookie file content is empty: {json_cookie_file}"
                         )
                         return False
-                    cookies = json.loads(content)
+                    
+                    cookies_data = json.loads(content)
+                    
+                    # Handle different cookie file formats
+                    cookies = self._normalize_cookie_format(cookies_data)
+                    
             except json.JSONDecodeError as e:
                 logger.error(f"Invalid JSON in cookie file {json_cookie_file}: {e}")
                 return False
@@ -378,10 +487,16 @@ class YouTubePlatform(VideoPlatform):
                 logger.error(f"Failed to read cookie file {json_cookie_file}: {e}")
                 return False
 
-            if not cookies or not isinstance(cookies, list):
+            if not cookies:
                 logger.warning(
-                    f"No valid cookies found in {json_cookie_file} (found: {type(cookies)})"
+                    f"No valid cookies found in {json_cookie_file}"
                 )
+                return False
+
+            # Validate and filter cookies
+            valid_cookies = self._validate_and_filter_cookies(cookies)
+            if not valid_cookies:
+                logger.warning("No valid cookies remained after validation")
                 return False
 
             # Ensure output directory exists
@@ -391,70 +506,9 @@ class YouTubePlatform(VideoPlatform):
                 logger.error(f"Cannot create cookie output directory: {e}")
                 return False
 
-            # Convert to Netscape format
+            # Convert to Netscape format with enhanced validation
             try:
-                with open(netscape_cookie_file, "w", encoding="utf-8") as f:
-                    # Write Netscape cookie file header
-                    f.write("# Netscape HTTP Cookie File\n")
-                    f.write("# This is a generated file! Do not edit.\n\n")
-
-                    valid_cookies = 0
-                    for cookie in cookies:
-                        # Skip invalid cookie entries
-                        if not isinstance(cookie, dict):
-                            continue
-
-                        name = cookie.get("name", "").strip()
-                        value = cookie.get("value", "")
-
-                        # Skip cookies without name (value can be empty)
-                        if not name:
-                            continue
-
-                        # Skip cookies with problematic characters
-                        if (
-                            "\t" in name
-                            or "\t" in value
-                            or "\n" in name
-                            or "\n" in value
-                        ):
-                            logger.debug(
-                                f"Skipping cookie with invalid characters: {name}"
-                            )
-                            continue
-
-                        # Netscape format: domain, domain_specified, path, secure, expires, name, value
-                        domain = cookie.get("domain", ".youtube.com")
-                        if not domain:
-                            domain = ".youtube.com"
-
-                        domain_specified = "TRUE" if domain.startswith(".") else "FALSE"
-                        path = cookie.get("path", "/")
-                        secure = "TRUE" if cookie.get("secure", False) else "FALSE"
-
-                        # Handle expires field - convert to Unix timestamp if needed
-                        expires = cookie.get("expires", 0)
-                        if expires is None:
-                            expires = 0
-                        elif isinstance(expires, (int, float)):
-                            expires = int(expires)
-                        else:
-                            expires = 0
-
-                        # Write cookie line in Netscape format
-                        cookie_line = f"{domain}\t{domain_specified}\t{path}\t{secure}\t{expires}\t{name}\t{value}\n"
-                        f.write(cookie_line)
-                        valid_cookies += 1
-
-                if valid_cookies > 0:
-                    logger.info(
-                        f"Successfully converted {valid_cookies} cookies to Netscape format"
-                    )
-                    return True
-                else:
-                    logger.warning("No valid cookies were converted")
-                    return False
-
+                return self._write_netscape_cookies(valid_cookies, netscape_cookie_file)
             except Exception as e:
                 logger.error(
                     f"Failed to write Netscape cookie file {netscape_cookie_file}: {e}"
@@ -499,7 +553,7 @@ class YouTubePlatform(VideoPlatform):
             # Use yt-dlp to get stream URL
             url = f"https://www.youtube.com/watch?v={video_id}"
 
-            # Configure yt-dlp options optimized for Discord audio
+            # Configure yt-dlp options optimized for Discord audio with enhanced cookie support
             ydl_opts = {
                 "format": "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best[height<=720]",
                 "quiet": True,
@@ -512,45 +566,29 @@ class YouTubePlatform(VideoPlatform):
                 "verbose": False,
                 "socket_timeout": 30,
                 "retries": 3,
+                # Enhanced cookie and authentication settings
+                "extractor_retries": 3,
+                "fragment_retries": 5,
+                "skip_unavailable_fragments": True,
+                "keep_fragments": False,
+                "abort_on_unavailable_fragment": False,
+                # Better error handling for auth issues
+                "ignoreerrors": False,
+                "no_color": True,
             }
 
-            # Try multiple cookie paths with fallback
-            cookie_paths = [
-                "/app/cookies/youtube_cookies.json",
-                "data/cookies/youtube_cookies.json",
-                "./cookies/youtube_cookies.json",
-            ]
-
-            cookies_loaded = False
-            for json_cookie_file in cookie_paths:
-                if Path(json_cookie_file).exists():
-                    netscape_cookie_file = str(
-                        Path(json_cookie_file).parent / "youtube_cookies.txt"
-                    )
-
-                    try:
-                        if self._convert_cookies_to_netscape(
-                            json_cookie_file, netscape_cookie_file
-                        ):
-                            ydl_opts["cookiefile"] = netscape_cookie_file
-                            logger.info(
-                                f"Using converted YouTube cookies from {json_cookie_file}"
-                            )
-                            cookies_loaded = True
-                            break
-                        else:
-                            logger.warning(
-                                f"Failed to convert cookies from {json_cookie_file}"
-                            )
-                    except Exception as cookie_error:
-                        logger.error(
-                            f"Cookie conversion error for {json_cookie_file}: {cookie_error}"
-                        )
-                        continue
-
-            if not cookies_loaded:
+            # Enhanced cookie loading with comprehensive fallback paths
+            cookie_result = self._load_cookies_with_fallback()
+            if cookie_result["success"]:
+                ydl_opts["cookiefile"] = cookie_result["cookie_file"]
                 logger.info(
-                    "No valid YouTube cookies found, proceeding without authentication"
+                    f"Using YouTube cookies: {cookie_result['cookie_file']} "
+                    f"({cookie_result['cookie_count']} cookies, {cookie_result['age_info']})"
+                )
+            else:
+                logger.warning(
+                    f"Cookie loading failed: {cookie_result['error']}. "
+                    "Proceeding without authentication - some videos may be unavailable."
                 )
 
             def extract_info():
@@ -730,3 +768,755 @@ class YouTubePlatform(VideoPlatform):
             logger.warning(f"Stream URL validation error: {e}")
             # Return True on validation error to avoid blocking valid URLs
             return True
+
+    def _get_ytdlp_config(self) -> Dict[str, Any]:
+        """Get yt-dlp configuration with cookies for metadata extraction"""
+        ydl_opts = {
+            "quiet": True,
+            "no_warnings": False,
+            "noplaylist": True,
+            "extract_flat": False,
+            "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "prefer_insecure": False,
+            "verbose": False,
+            "socket_timeout": 30,
+            "retries": 2,
+            # Enhanced settings for authenticated access
+            "extractor_retries": 2,
+            "fragment_retries": 3,
+            "skip_unavailable_fragments": True,
+            "ignoreerrors": False,
+            "no_color": True,
+            # Better handling of age-restricted content
+            "age_limit": None,
+        }
+
+        # Enhanced cookie loading for metadata extraction
+        cookie_result = self._load_cookies_with_fallback()
+        if cookie_result["success"]:
+            ydl_opts["cookiefile"] = cookie_result["cookie_file"]
+            logger.debug(
+                f"Using YouTube cookies for metadata: {cookie_result['cookie_file']} "
+                f"({cookie_result['cookie_count']} cookies)"
+            )
+
+        return ydl_opts
+
+    def _normalize_cookie_format(self, cookies_data) -> List[Dict]:
+        """Normalize different cookie formats to a standard format"""
+        if isinstance(cookies_data, list):
+            # Already in list format (most common)
+            return cookies_data
+        elif isinstance(cookies_data, dict):
+            # Handle different dictionary formats
+            if "cookies" in cookies_data:
+                # Format: {"cookies": [...]}
+                return cookies_data["cookies"]
+            elif "data" in cookies_data:
+                # Format: {"data": [...]} or {"data": {"cookies": [...]}}
+                data = cookies_data["data"]
+                if isinstance(data, list):
+                    return data
+                elif isinstance(data, dict) and "cookies" in data:
+                    return data["cookies"]
+            else:
+                # Treat dictionary as single cookie entry
+                if "name" in cookies_data and "value" in cookies_data:
+                    return [cookies_data]
+                else:
+                    # Try to extract cookies from keys
+                    potential_cookies = []
+                    for key, value in cookies_data.items():
+                        if isinstance(value, dict) and "name" in value:
+                            potential_cookies.append(value)
+                        elif isinstance(value, list):
+                            potential_cookies.extend(value)
+                    return potential_cookies
+        
+        logger.warning(f"Unknown cookie format: {type(cookies_data)}")
+        return []
+
+    def _validate_and_filter_cookies(self, cookies: List[Dict]) -> List[Dict]:
+        """Validate and filter cookies with expiration checking"""
+        import time
+        
+        valid_cookies = []
+        current_time = int(time.time())
+        expired_count = 0
+        invalid_count = 0
+        
+        for cookie in cookies:
+            # Skip invalid cookie entries
+            if not isinstance(cookie, dict):
+                invalid_count += 1
+                continue
+
+            name = cookie.get("name", "").strip()
+            value = cookie.get("value", "")
+
+            # Skip cookies without name (value can be empty)
+            if not name:
+                invalid_count += 1
+                continue
+
+            # Skip cookies with problematic characters
+            if (
+                "\t" in name
+                or "\t" in str(value)
+                or "\n" in name
+                or "\n" in str(value)
+                or "\r" in name
+                or "\r" in str(value)
+            ):
+                logger.debug(
+                    f"Skipping cookie with invalid characters: {name}"
+                )
+                invalid_count += 1
+                continue
+
+            # Check cookie expiration
+            expires = cookie.get("expires")
+            if expires is not None:
+                # Handle different expiration formats
+                if isinstance(expires, str):
+                    try:
+                        # Try parsing ISO format
+                        dt = datetime.fromisoformat(expires.replace('Z', '+00:00'))
+                        expires = int(dt.timestamp())
+                    except:
+                        try:
+                            # Try parsing as timestamp string
+                            expires = int(float(expires))
+                        except:
+                            expires = None
+                
+                if expires and expires > 0 and expires < current_time:
+                    logger.debug(f"Skipping expired cookie: {name} (expired {(current_time - expires) // 3600}h ago)")
+                    expired_count += 1
+                    continue
+
+            # Cookie is valid, add to list
+            valid_cookies.append(cookie)
+        
+        if expired_count > 0:
+            logger.info(f"Filtered out {expired_count} expired cookies")
+        if invalid_count > 0:
+            logger.debug(f"Filtered out {invalid_count} invalid cookies")
+            
+        return valid_cookies
+
+    def _write_netscape_cookies(self, cookies: List[Dict], netscape_cookie_file: str) -> bool:
+        """Write cookies to Netscape format file with enhanced validation"""
+        try:
+            with open(netscape_cookie_file, "w", encoding="utf-8") as f:
+                # Write Netscape cookie file header
+                f.write("# Netscape HTTP Cookie File\n")
+                f.write("# This is a generated file! Do not edit.\n")
+                f.write(f"# Generated at: {datetime.now().isoformat()}\n\n")
+
+                written_cookies = 0
+                for cookie in cookies:
+                    name = cookie.get("name", "").strip()
+                    value = str(cookie.get("value", ""))  # Convert to string
+
+                    # Netscape format: domain, domain_specified, path, secure, expires, name, value
+                    domain = cookie.get("domain", ".youtube.com")
+                    if not domain:
+                        domain = ".youtube.com"
+                    
+                    # Ensure domain starts with . for wildcard domains
+                    if not domain.startswith(".") and not domain.startswith("http"):
+                        if "youtube" in domain or "google" in domain:
+                            if not domain.startswith("www."):
+                                domain = f".{domain}"
+
+                    domain_specified = "TRUE" if domain.startswith(".") else "FALSE"
+                    path = cookie.get("path", "/")
+                    secure = "TRUE" if cookie.get("secure", False) else "FALSE"
+
+                    # Handle expires field with better validation
+                    expires = cookie.get("expires", 0)
+                    if expires is None:
+                        expires = 0
+                    elif isinstance(expires, (int, float)):
+                        expires = int(expires)
+                        # Validate timestamp is reasonable (not too far in future)
+                        import time
+                        max_future = int(time.time()) + (10 * 365 * 24 * 3600)  # 10 years
+                        if expires > max_future:
+                            expires = max_future
+                    else:
+                        expires = 0
+
+                    # Write cookie line in Netscape format
+                    cookie_line = f"{domain}\t{domain_specified}\t{path}\t{secure}\t{expires}\t{name}\t{value}\n"
+                    f.write(cookie_line)
+                    written_cookies += 1
+
+            if written_cookies > 0:
+                logger.info(
+                    f"Successfully converted {written_cookies} cookies to Netscape format: {netscape_cookie_file}"
+                )
+                return True
+            else:
+                logger.warning("No cookies were written to Netscape file")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Error writing Netscape cookie file: {e}")
+            return False
+
+    async def _extract_metadata_via_ytdlp(self, video_id: str) -> Optional[Dict[str, Any]]:
+        """Extract video metadata using yt-dlp as fallback when API quota is exceeded"""
+        import yt_dlp
+        import asyncio
+
+        logger.info(f"Extracting metadata via yt-dlp for video: {video_id}")
+
+        # Validate video ID format
+        if not video_id or len(video_id) != 11:
+            logger.error(
+                f"Invalid YouTube video ID: {video_id} (expected 11 characters)"
+            )
+            return None
+
+        try:
+            url = f"https://www.youtube.com/watch?v={video_id}"
+            ydl_opts = self._get_ytdlp_config()
+
+            def extract_metadata():
+                try:
+                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                        info = ydl.extract_info(url, download=False)
+                        
+                        if not info:
+                            logger.error("yt-dlp returned no information")
+                            return None
+
+                        # Extract metadata in the same format as API results
+                        title = info.get("title", "Unknown")
+                        channel = info.get("uploader", info.get("channel", "Unknown"))
+                        description = info.get("description", "")
+                        duration_seconds = info.get("duration")
+                        view_count = info.get("view_count", 0)
+                        upload_date = info.get("upload_date")
+                        
+                        # Get best thumbnail
+                        thumbnails = info.get("thumbnails", [])
+                        thumbnail_url = ""
+                        if thumbnails:
+                            # Sort by resolution/quality
+                            sorted_thumbnails = sorted(
+                                thumbnails, 
+                                key=lambda t: (t.get("width", 0) * t.get("height", 0)),
+                                reverse=True
+                            )
+                            thumbnail_url = sorted_thumbnails[0].get("url", "")
+
+                        # Format duration from seconds to readable format
+                        duration = "Unknown"
+                        if duration_seconds and isinstance(duration_seconds, (int, float)):
+                            duration_seconds = int(duration_seconds)
+                            if duration_seconds >= 3600:
+                                hours = duration_seconds // 3600
+                                minutes = (duration_seconds % 3600) // 60
+                                seconds = duration_seconds % 60
+                                duration = f"{hours}:{minutes:02d}:{seconds:02d}"
+                            else:
+                                minutes = duration_seconds // 60
+                                seconds = duration_seconds % 60
+                                duration = f"{minutes}:{seconds:02d}"
+
+                        # Format view count
+                        view_count_formatted = self._format_view_count(str(view_count))
+
+                        # Format publish date
+                        published_formatted = "Unknown"
+                        if upload_date:
+                            try:
+                                from datetime import datetime
+                                # upload_date is in format YYYYMMDD
+                                dt = datetime.strptime(upload_date, "%Y%m%d")
+                                now = datetime.now()
+                                diff = now - dt
+                                days = diff.days
+
+                                if days == 0:
+                                    published_formatted = "Today"
+                                elif days == 1:
+                                    published_formatted = "Yesterday"
+                                elif days < 7:
+                                    published_formatted = f"{days} days ago"
+                                elif days < 30:
+                                    weeks = days // 7
+                                    published_formatted = f"{weeks} week{'s' if weeks != 1 else ''} ago"
+                                elif days < 365:
+                                    months = days // 30
+                                    published_formatted = f"{months} month{'s' if months != 1 else ''} ago"
+                                else:
+                                    years = days // 365
+                                    published_formatted = f"{years} year{'s' if years != 1 else ''} ago"
+                            except Exception:
+                                published_formatted = "Unknown"
+
+                        logger.info(
+                            f"yt-dlp metadata extracted: video_id={video_id}, title={title}, duration={duration}, views={view_count_formatted}"
+                        )
+
+                        return {
+                            "id": video_id,
+                            "title": title,
+                            "channel": channel,
+                            "thumbnail": thumbnail_url,
+                            "url": url,
+                            "platform": "youtube",
+                            "description": (
+                                description[:200] + "..."
+                                if len(description) > 200
+                                else description
+                            ),
+                            "duration": duration,
+                            "views": view_count_formatted,
+                            "published": published_formatted,
+                            "view_count_raw": int(view_count) if isinstance(view_count, (int, float)) else 0,
+                        }
+
+                except yt_dlp.DownloadError as e:
+                    error_msg = str(e)
+                    logger.error(f"yt-dlp download error: {error_msg}")
+                    
+                    # Log specific errors but don't fail completely
+                    if "private" in error_msg.lower():
+                        logger.warning("Video is private")
+                    elif "unavailable" in error_msg.lower():
+                        logger.warning("Video is unavailable")
+                    elif "copyright" in error_msg.lower():
+                        logger.warning("Video blocked due to copyright")
+                    elif "region" in error_msg.lower():
+                        logger.warning("Video not available in region")
+                    
+                    return None
+
+                except Exception as e:
+                    logger.error(f"yt-dlp metadata extraction error: {e}")
+                    return None
+
+            # Run yt-dlp in thread to avoid blocking
+            loop = asyncio.get_event_loop()
+            metadata = await loop.run_in_executor(None, extract_metadata)
+            
+            if metadata:
+                logger.info(f"Successfully extracted metadata via yt-dlp for {video_id}")
+                return metadata
+            else:
+                logger.warning(f"Failed to extract metadata via yt-dlp for {video_id}")
+                return None
+
+        except Exception as e:
+            logger.error(f"Failed to extract metadata via yt-dlp for {video_id}: {e}")
+            return None
+
+    async def _search_via_url_parsing(self, query: str) -> List[Dict[str, Any]]:
+        """Handle direct YouTube URLs in search queries by extracting video metadata"""
+        logger.info(f"Attempting URL parsing search for query: {query}")
+        
+        # Check if query contains a YouTube URL
+        video_id = self.extract_video_id(query)
+        if not video_id:
+            logger.debug("No YouTube URL found in query")
+            return []
+        
+        logger.info(f"Extracted video ID from URL: {video_id}")
+        
+        # Try to get metadata via yt-dlp
+        metadata = await self._extract_metadata_via_ytdlp(video_id)
+        if metadata:
+            logger.info(f"Successfully extracted metadata for URL: {query}")
+            return [metadata]
+        else:
+            logger.warning(f"Failed to extract metadata for URL: {query}")
+            return []
+
+    async def _search_with_ytdlp(self, query: str, max_results: int = 10) -> List[Dict[str, Any]]:
+        """Use yt-dlp's ytsearch: feature to search YouTube without API"""
+        import yt_dlp
+        import asyncio
+        
+        logger.info(f"Attempting yt-dlp search for query: {query} (max_results: {max_results})")
+        
+        # First check if it's a URL
+        url_results = await self._search_via_url_parsing(query)
+        if url_results:
+            logger.info("Found URL in query, returning metadata")
+            return url_results
+        
+        try:
+            # Use yt-dlp's search functionality
+            search_query = f"ytsearch{max_results}:{query}"
+            ydl_opts = self._get_ytdlp_config()
+            ydl_opts.update({
+                "extract_flat": False,  # We need full metadata
+                "playlistend": max_results,
+                "quiet": True,
+                "no_warnings": True,  # Reduce noise in logs
+            })
+            
+            def search_videos():
+                try:
+                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                        search_results = ydl.extract_info(search_query, download=False)
+                        
+                        if not search_results or "entries" not in search_results:
+                            logger.warning("yt-dlp search returned no results")
+                            return []
+                        
+                        results = []
+                        entries = search_results["entries"] or []
+                        
+                        for entry in entries[:max_results]:
+                            if not entry:
+                                continue
+                                
+                            # Extract metadata from yt-dlp result
+                            metadata = self._extract_metadata_from_ytdlp_result(entry)
+                            if metadata:
+                                results.append(metadata)
+                                logger.debug(f"Processed yt-dlp search result: {metadata['title']}")
+                        
+                        logger.info(f"yt-dlp search extracted {len(results)} results")
+                        return results
+                        
+                except yt_dlp.DownloadError as e:
+                    logger.error(f"yt-dlp search download error: {e}")
+                    return []
+                except Exception as e:
+                    logger.error(f"yt-dlp search error: {e}")
+                    return []
+            
+            # Run yt-dlp search in thread to avoid blocking
+            loop = asyncio.get_event_loop()
+            results = await loop.run_in_executor(None, search_videos)
+            
+            if results:
+                logger.info(f"yt-dlp search successful, found {len(results)} results")
+                return results
+            else:
+                logger.warning("yt-dlp search returned no results")
+                return []
+                
+        except Exception as e:
+            logger.error(f"yt-dlp search failed: {e}")
+            return []
+    
+    def _extract_metadata_from_ytdlp_result(self, info_dict: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Convert yt-dlp metadata to our standard format"""
+        try:
+            # Extract basic information
+            video_id = info_dict.get("id")
+            if not video_id:
+                logger.debug("No video ID found in yt-dlp result")
+                return None
+            
+            title = info_dict.get("title", "Unknown")
+            channel = info_dict.get("uploader", info_dict.get("channel", "Unknown"))
+            description = info_dict.get("description", "")
+            duration_seconds = info_dict.get("duration")
+            view_count = info_dict.get("view_count", 0)
+            upload_date = info_dict.get("upload_date")
+            
+            # Get best thumbnail
+            thumbnails = info_dict.get("thumbnails", [])
+            thumbnail_url = ""
+            if thumbnails:
+                # Sort by resolution/quality (prefer higher resolution)
+                sorted_thumbnails = sorted(
+                    [t for t in thumbnails if t.get("url")],
+                    key=lambda t: (t.get("width", 0) * t.get("height", 0)),
+                    reverse=True
+                )
+                if sorted_thumbnails:
+                    thumbnail_url = sorted_thumbnails[0].get("url", "")
+            
+            # Format duration from seconds to readable format
+            duration = "Unknown"
+            if duration_seconds and isinstance(duration_seconds, (int, float)):
+                duration_seconds = int(duration_seconds)
+                if duration_seconds >= 3600:
+                    hours = duration_seconds // 3600
+                    minutes = (duration_seconds % 3600) // 60
+                    seconds = duration_seconds % 60
+                    duration = f"{hours}:{minutes:02d}:{seconds:02d}"
+                else:
+                    minutes = duration_seconds // 60
+                    seconds = duration_seconds % 60
+                    duration = f"{minutes}:{seconds:02d}"
+            
+            # Format view count
+            view_count_formatted = self._format_view_count(str(view_count))
+            
+            # Format publish date
+            published_formatted = "Unknown"
+            if upload_date:
+                try:
+                    from datetime import datetime
+                    # upload_date is in format YYYYMMDD
+                    dt = datetime.strptime(upload_date, "%Y%m%d")
+                    now = datetime.now()
+                    diff = now - dt
+                    days = diff.days
+                    
+                    if days == 0:
+                        published_formatted = "Today"
+                    elif days == 1:
+                        published_formatted = "Yesterday"
+                    elif days < 7:
+                        published_formatted = f"{days} days ago"
+                    elif days < 30:
+                        weeks = days // 7
+                        published_formatted = f"{weeks} week{'s' if weeks != 1 else ''} ago"
+                    elif days < 365:
+                        months = days // 30
+                        published_formatted = f"{months} month{'s' if months != 1 else ''} ago"
+                    else:
+                        years = days // 365
+                        published_formatted = f"{years} year{'s' if years != 1 else ''} ago"
+                except Exception as e:
+                    logger.debug(f"Error formatting publish date: {e}")
+                    published_formatted = "Unknown"
+            
+            # Create URL
+            url = f"https://www.youtube.com/watch?v={video_id}"
+            
+            # Truncate description if too long
+            if len(description) > 200:
+                description = description[:200] + "..."
+            
+            logger.debug(
+                f"Extracted yt-dlp metadata: video_id={video_id}, title={title}, duration={duration}, views={view_count_formatted}"
+            )
+            
+            return {
+                "id": video_id,
+                "title": title,
+                "channel": channel,
+                "thumbnail": thumbnail_url,
+                "url": url,
+                "platform": "youtube",
+                "description": description,
+                "duration": duration,
+                "views": view_count_formatted,
+                "published": published_formatted,
+                "view_count_raw": int(view_count) if isinstance(view_count, (int, float)) else 0,
+            }
+            
+        except Exception as e:
+            logger.error(f"Error extracting metadata from yt-dlp result: {e}")
+            return None
+    
+    async def _fallback_search(self, query: str, max_results: int = 10) -> List[Dict[str, Any]]:
+        """Fallback search method when API quota is exceeded - now uses yt-dlp"""
+        logger.info(f"Attempting fallback search for query: {query}")
+        return await self._search_with_ytdlp(query, max_results)
+
+    def _load_cookies_with_fallback(self) -> Dict[str, Any]:
+        """Load cookies with comprehensive fallback and validation
+        
+        Returns:
+            Dict containing success status, cookie file path, error info, and metadata
+        """
+        import time
+        
+        # Define cookie search paths in order of preference
+        base_paths = [
+            Path("/app/cookies"),
+            Path("data/cookies"), 
+            Path("./cookies"),
+            Path("cookies"),  # Simple relative path
+            Path.home() / ".config" / "robustty" / "cookies",  # User config
+        ]
+        
+        # Add additional paths from environment or config
+        env_cookie_path = os.getenv("ROBUSTTY_COOKIE_PATH")
+        if env_cookie_path:
+            base_paths.insert(0, Path(env_cookie_path))
+        
+        result = {
+            "success": False,
+            "cookie_file": None,
+            "error": "No cookie paths found",
+            "cookie_count": 0,
+            "age_info": "unknown",
+            "paths_tried": []
+        }
+        
+        for base_path in base_paths:
+            json_cookie_file = base_path / "youtube_cookies.json"
+            result["paths_tried"].append(str(json_cookie_file))
+            
+            if not json_cookie_file.exists():
+                continue
+                
+            try:
+                # Check file age and size
+                file_stat = json_cookie_file.stat()
+                if file_stat.st_size == 0:
+                    logger.debug(f"Skipping empty cookie file: {json_cookie_file}")
+                    continue
+                    
+                file_age_hours = (time.time() - file_stat.st_mtime) / 3600
+                age_info = f"{file_age_hours:.1f}h old"
+                
+                # Attempt cookie conversion with validation
+                netscape_cookie_file = base_path / "youtube_cookies.txt"
+                
+                if self._convert_cookies_to_netscape(
+                    str(json_cookie_file), str(netscape_cookie_file)
+                ):
+                    # Count cookies for reporting
+                    cookie_count = self._count_netscape_cookies(str(netscape_cookie_file))
+                    
+                    # Verify cookie file health
+                    health_check = self._verify_cookie_health(str(json_cookie_file))
+                    
+                    result.update({
+                        "success": True,
+                        "cookie_file": str(netscape_cookie_file),
+                        "error": None,
+                        "cookie_count": cookie_count,
+                        "age_info": age_info,
+                        "health_status": health_check,
+                        "source_file": str(json_cookie_file)
+                    })
+                    
+                    # Log health warnings if any
+                    if health_check.get("warnings"):
+                        for warning in health_check["warnings"]:
+                            logger.warning(f"Cookie health warning: {warning}")
+                    
+                    return result
+                else:
+                    logger.debug(f"Cookie conversion failed for: {json_cookie_file}")
+                    
+            except Exception as e:
+                logger.debug(f"Error processing cookie file {json_cookie_file}: {e}")
+                continue
+        
+        result["error"] = f"No valid cookies found in {len(base_paths)} paths"
+        return result
+
+    def _count_netscape_cookies(self, netscape_file: str) -> int:
+        """Count cookies in Netscape format file"""
+        try:
+            with open(netscape_file, 'r') as f:
+                return sum(1 for line in f if line.strip() and not line.startswith('#'))
+        except Exception:
+            return 0
+    
+    def _verify_cookie_health(self, json_cookie_file: str) -> Dict[str, Any]:
+        """Verify cookie health and detect issues
+        
+        Returns health status with warnings and recommendations
+        """
+        import json
+        import time
+        
+        health = {
+            "healthy": True,
+            "warnings": [],
+            "recommendations": [],
+            "expires_soon": [],
+            "total_cookies": 0,
+            "expired_cookies": 0
+        }
+        
+        try:
+            with open(json_cookie_file, 'r') as f:
+                cookies_data = json.load(f)
+                cookies = self._normalize_cookie_format(cookies_data)
+                
+            current_time = int(time.time())
+            health["total_cookies"] = len(cookies)
+            
+            # Check for critical authentication cookies
+            auth_cookies = set()
+            expires_within_24h = []
+            expired_count = 0
+            
+            for cookie in cookies:
+                name = cookie.get("name", "")
+                expires = cookie.get("expires")
+                
+                # Track important authentication cookies
+                if name.lower() in ['session_token', 'sapisid', 'hsid', 'ssid', 'apisid', 'login_info']:
+                    auth_cookies.add(name)
+                
+                # Check expiration
+                if expires and isinstance(expires, (int, float)) and expires > 0:
+                    if expires < current_time:
+                        expired_count += 1
+                    elif expires < current_time + 24 * 3600:  # Expires within 24 hours
+                        hours_until_expiry = (expires - current_time) / 3600
+                        expires_within_24h.append((name, hours_until_expiry))
+            
+            health["expired_cookies"] = expired_count
+            health["expires_soon"] = expires_within_24h
+            
+            # Generate warnings and recommendations
+            if expired_count > 0:
+                health["warnings"].append(f"{expired_count} cookies have expired")
+                health["recommendations"].append("Refresh browser cookies")
+                
+            if len(expires_within_24h) > 0:
+                health["warnings"].append(
+                    f"{len(expires_within_24h)} cookies expire within 24 hours"
+                )
+                health["recommendations"].append("Consider refreshing cookies soon")
+            
+            # Check for essential authentication cookies
+            essential_cookies = {'sapisid', 'hsid', 'ssid'}
+            missing_essential = essential_cookies - {c.lower() for c in auth_cookies}
+            if missing_essential:
+                health["warnings"].append(
+                    f"Missing important auth cookies: {', '.join(missing_essential)}"
+                )
+                health["recommendations"].append(
+                    "Re-authenticate in browser to get fresh cookies"
+                )
+            
+            # Check file age
+            file_age_hours = (time.time() - Path(json_cookie_file).stat().st_mtime) / 3600
+            if file_age_hours > 48:  # Older than 2 days
+                health["warnings"].append(f"Cookie file is {file_age_hours:.1f} hours old")
+                health["recommendations"].append("Extract fresh cookies from browser")
+            
+            if health["warnings"]:
+                health["healthy"] = False
+                
+        except Exception as e:
+            health["healthy"] = False
+            health["warnings"].append(f"Cookie health check failed: {str(e)}")
+        
+        return health
+    
+    def _should_refresh_cookies(self) -> bool:
+        """Determine if cookies should be refreshed based on health status"""
+        if self.cookie_health_monitor:
+            return self.cookie_health_monitor.should_use_fallback("youtube")
+        
+        # Fallback: check cookie file age
+        cookie_paths = [
+            Path("/app/cookies/youtube_cookies.json"),
+            Path("data/cookies/youtube_cookies.json"),
+            Path("./cookies/youtube_cookies.json"),
+        ]
+        
+        for cookie_file in cookie_paths:
+            if cookie_file.exists():
+                try:
+                    import time
+                    file_age_hours = (time.time() - cookie_file.stat().st_mtime) / 3600
+                    return file_age_hours > 12  # Refresh if older than 12 hours
+                except Exception:
+                    return True  # Refresh on error
+        
+        return True  # Refresh if no cookies found
