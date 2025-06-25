@@ -13,6 +13,10 @@ fi
 # Start cron daemon
 service cron start
 
+# Ensure all cookie files exist
+echo "Ensuring all platform cookie files exist..."
+cd /app && python3 scripts/ensure-cookie-files.py
+
 # Run initial cookie extraction
 echo "Running initial cookie extraction..."
 cd /app && python3 scripts/extract-brave-cookies.py

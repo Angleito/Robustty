@@ -241,6 +241,14 @@ class TestCacheManager:
         key = cache_manager._generate_cache_key("prefix", "id", "suffix")
         assert key == "prefix:id:suffix"
         
+        # Test with tier
+        key = cache_manager._generate_cache_key("prefix", "id", None, "medium")
+        assert key == "prefix:id:medium"
+        
+        # Test with both suffix and tier
+        key = cache_manager._generate_cache_key("prefix", "id", "suffix", "long")
+        assert key == "prefix:id:suffix:long"
+        
         # Test query hash generation
         hash1 = cache_manager._generate_query_hash("test query")
         hash2 = cache_manager._generate_query_hash("test query")
@@ -249,3 +257,109 @@ class TestCacheManager:
         assert hash1 == hash2  # Same query produces same hash
         assert hash1 != hash3  # Different queries produce different hashes
         assert len(hash1) == 16  # Hash is truncated to 16 chars
+    
+    @pytest.mark.asyncio
+    async def test_extended_ttl_caching(self, cache_manager):
+        """Test caching with extended TTL for fallback scenarios."""
+        # Test short-term cache
+        await cache_manager.set_short_term("short_key", "short_value", "api")
+        value = await cache_manager.get("short_key")
+        assert value["_cache_value"] == "short_value"
+        assert value["_cache_metadata"]["source"] == "api"
+        assert value["_cache_metadata"]["tier"] == cache_manager.TIER_SHORT
+        
+        # Test medium-term cache
+        await cache_manager.set_medium_term("medium_key", {"data": "medium_value"}, "ytdlp")
+        value = await cache_manager.get("medium_key")
+        assert value["data"] == "medium_value"
+        assert value["_cache_metadata"]["source"] == "ytdlp"
+        assert value["_cache_metadata"]["tier"] == cache_manager.TIER_MEDIUM
+        
+        # Test long-term cache
+        await cache_manager.set_long_term("long_key", {"data": "long_value"}, "emergency")
+        value = await cache_manager.get("long_key")
+        assert value["data"] == "long_value"
+        assert value["_cache_metadata"]["source"] == "emergency"
+        assert value["_cache_metadata"]["tier"] == cache_manager.TIER_LONG
+    
+    @pytest.mark.asyncio
+    async def test_stale_cache_retrieval(self, cache_manager):
+        """Test retrieving stale cache entries."""
+        # Set a value with very short TTL
+        await cache_manager.set("stale_test", {"data": "stale_value"}, ttl=1)
+        
+        # Verify it's retrievable normally
+        value = await cache_manager.get("stale_test")
+        assert value["data"] == "stale_value"
+        
+        # Wait for expiration
+        await asyncio.sleep(1.5)
+        
+        # Should not be retrievable with normal get
+        value = await cache_manager.get("stale_test")
+        assert value is None
+        
+        # Should be retrievable with get_stale_ok
+        value = await cache_manager.get_stale_ok("stale_test")
+        assert value["data"] == "stale_value"
+        assert cache_manager.metrics["stale_hits"] == 1
+    
+    @pytest.mark.asyncio
+    async def test_cache_metadata_update(self, cache_manager):
+        """Test updating cache metadata."""
+        # Set initial value with metadata
+        await cache_manager.set("meta_test", {"data": "value"}, metadata={"version": 1})
+        
+        # Update metadata
+        await cache_manager.update_cache_metadata("meta_test", {"version": 2, "updated": True})
+        
+        # Retrieve and verify
+        value = await cache_manager.get("meta_test")
+        assert value["_cache_metadata"]["version"] == 2
+        assert value["_cache_metadata"]["updated"] is True
+    
+    @pytest.mark.asyncio
+    async def test_cache_statistics(self, cache_manager):
+        """Test cache statistics collection."""
+        # Perform various cache operations
+        await cache_manager.set_short_term("stat1", "value1", "api")
+        await cache_manager.set_medium_term("stat2", "value2", "ytdlp")
+        await cache_manager.set_long_term("stat3", "value3", "emergency")
+        
+        # Access some entries multiple times
+        for _ in range(3):
+            await cache_manager.get("stat1")
+        for _ in range(2):
+            await cache_manager.get("stat2")
+        
+        # Get statistics
+        stats = await cache_manager.get_cache_statistics()
+        
+        assert stats["total_entries"] == 3
+        assert stats["total_accesses"] == 5  # 3 + 2
+        assert stats["by_tier"]["short"] == 1
+        assert stats["by_tier"]["medium"] == 1
+        assert stats["by_tier"]["long"] == 1
+        assert stats["by_source"]["api"] == 1
+        assert stats["by_source"]["ytdlp"] == 1
+        assert stats["by_source"]["emergency"] == 1
+    
+    @pytest.mark.asyncio
+    async def test_backward_compatibility(self, cache_manager):
+        """Test that existing cache methods still work as expected."""
+        # Test original set/get methods
+        await cache_manager.set("compat_test", "simple_value")
+        value = await cache_manager.get("compat_test")
+        assert value == "simple_value"
+        
+        # Test platform-specific methods
+        metadata = {"title": "Test Video", "duration": 300}
+        await cache_manager.set_video_metadata("youtube", "vid123", metadata)
+        cached = await cache_manager.get_video_metadata("youtube", "vid123")
+        assert cached == metadata
+        
+        # Metrics should still work
+        metrics = await cache_manager.get_metrics()
+        assert "hits" in metrics
+        assert "misses" in metrics
+        assert "hit_rate" in metrics

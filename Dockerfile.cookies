@@ -18,6 +18,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy cookie extraction scripts and utilities
 COPY scripts/extract-brave-cookies.py /app/scripts/
 COPY scripts/auto-sync-cookies.py /app/scripts/
+COPY scripts/ensure-cookie-files.py /app/scripts/
 COPY scripts/setup-ssh-config.sh /app/scripts/
 COPY src/extractors/ /app/src/extractors/
 COPY src/services/cookie_manager.py /app/src/services/
@@ -28,8 +29,8 @@ COPY src/__init__.py /app/src/
 COPY cookie-service.sh /app/
 RUN chmod +x /app/cookie-service.sh /app/scripts/setup-ssh-config.sh
 
-# Create cron job for cookie extraction
-RUN echo "0 */2 * * * cd /app && python3 scripts/extract-brave-cookies.py >> /var/log/cron.log 2>&1" | crontab -
+# Create cron job for cookie extraction and file management
+RUN echo "0 */2 * * * cd /app && python3 scripts/ensure-cookie-files.py >> /var/log/cron.log 2>&1 && python3 scripts/extract-brave-cookies.py >> /var/log/cron.log 2>&1" | crontab -
 
 # Create log directory
 RUN mkdir -p /var/log && touch /var/log/cron.log

@@ -1,0 +1,474 @@
+# YouTube Fallback Monitoring Configuration
+# This file defines metrics, alerts, and dashboards for monitoring YouTube platform fallback behavior
+
+version: 1
+service: youtube_fallback_monitor
+
+# Metrics to track for YouTube fallback functionality
+metrics:
+  # API success/failure metrics
+  api_metrics:
+    youtube_api_calls_total:
+      type: counter
+      help: "Total number of YouTube API calls made"
+      labels: ["method", "status", "fallback_active"]
+    
+    youtube_api_success_rate:
+      type: gauge
+      help: "YouTube API success rate (rolling 5-minute window)"
+      unit: "ratio"
+    
+    youtube_api_response_time:
+      type: histogram
+      help: "YouTube API response time in seconds"
+      labels: ["method"]
+      buckets: [0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0]
+    
+    youtube_quota_usage:
+      type: gauge
+      help: "Current YouTube API quota usage"
+      unit: "units"
+    
+    youtube_quota_remaining:
+      type: gauge
+      help: "Remaining YouTube API quota"
+      unit: "units"
+    
+    youtube_quota_reset_time:
+      type: gauge
+      help: "Unix timestamp when YouTube quota resets"
+      unit: "timestamp"
+
+  # Fallback activation metrics
+  fallback_metrics:
+    youtube_fallback_activations_total:
+      type: counter
+      help: "Total number of fallback activations"
+      labels: ["reason", "strategy"]
+    
+    youtube_fallback_duration_seconds:
+      type: histogram
+      help: "Duration of fallback mode in seconds"
+      labels: ["strategy"]
+      buckets: [60, 300, 600, 1800, 3600, 7200, 14400]
+    
+    youtube_fallback_active:
+      type: gauge
+      help: "Whether fallback mode is currently active (1=active, 0=inactive)"
+      labels: ["strategy"]
+    
+    youtube_fallback_recovery_attempts:
+      type: counter
+      help: "Number of attempts to recover from fallback mode"
+      labels: ["strategy", "success"]
+
+  # Strategy effectiveness metrics
+  strategy_metrics:
+    youtube_strategy_success_rate:
+      type: gauge
+      help: "Success rate for each fallback strategy"
+      labels: ["strategy"]
+      unit: "ratio"
+    
+    youtube_strategy_usage_total:
+      type: counter
+      help: "Total usage count for each strategy"
+      labels: ["strategy", "operation_type"]
+    
+    youtube_strategy_performance_score:
+      type: gauge
+      help: "Performance score for each strategy (0-100)"
+      labels: ["strategy"]
+      unit: "score"
+    
+    youtube_direct_url_bypasses:
+      type: counter
+      help: "Number of times direct URL processing bypassed API"
+      labels: ["success"]
+
+  # Cache performance metrics
+  cache_metrics:
+    youtube_cache_hits_total:
+      type: counter
+      help: "Total cache hits for YouTube operations"
+      labels: ["cache_type", "operation"]
+    
+    youtube_cache_misses_total:
+      type: counter
+      help: "Total cache misses for YouTube operations"
+      labels: ["cache_type", "operation"]
+    
+    youtube_cache_hit_rate:
+      type: gauge
+      help: "Cache hit rate (rolling 5-minute window)"
+      labels: ["cache_type"]
+      unit: "ratio"
+    
+    youtube_cache_size:
+      type: gauge
+      help: "Current cache size in number of entries"
+      labels: ["cache_type"]
+      unit: "entries"
+    
+    youtube_cache_memory_bytes:
+      type: gauge
+      help: "Cache memory usage in bytes"
+      labels: ["cache_type"]
+      unit: "bytes"
+
+  # Cookie health metrics
+  cookie_metrics:
+    youtube_cookie_health_score:
+      type: gauge
+      help: "Cookie health score (0-100)"
+      unit: "score"
+    
+    youtube_cookie_age_days:
+      type: gauge
+      help: "Age of YouTube cookies in days"
+      unit: "days"
+    
+    youtube_cookie_extraction_success:
+      type: gauge
+      help: "Whether last cookie extraction was successful (1=success, 0=fail)"
+    
+    youtube_cookie_validation_failures:
+      type: counter
+      help: "Number of cookie validation failures"
+      labels: ["failure_type"]
+
+  # Operation-specific metrics
+  operation_metrics:
+    youtube_search_operations_total:
+      type: counter
+      help: "Total search operations performed"
+      labels: ["method", "success", "fallback_used"]
+    
+    youtube_stream_extractions_total:
+      type: counter
+      help: "Total stream URL extractions"
+      labels: ["method", "success", "fallback_used"]
+    
+    youtube_metadata_fetches_total:
+      type: counter
+      help: "Total metadata fetch operations"
+      labels: ["method", "success", "fallback_used"]
+
+# Alert rules for monitoring
+alerts:
+  # Quota-related alerts
+  quota_alerts:
+    - name: youtube_quota_approaching_limit
+      condition: "youtube_quota_remaining < (youtube_quota_usage * 0.2)"
+      severity: warning
+      for: 5m
+      annotations:
+        summary: "YouTube API quota approaching limit"
+        description: "YouTube API quota is at 80% usage. Remaining: {{ $value }} units"
+        recommended_action: "Consider activating fallback mode proactively"
+    
+    - name: youtube_quota_exceeded
+      condition: "youtube_quota_remaining == 0"
+      severity: critical
+      for: 1m
+      annotations:
+        summary: "YouTube API quota exceeded"
+        description: "YouTube API quota has been exhausted"
+        recommended_action: "Fallback mode should be active. Check fallback effectiveness"
+    
+    - name: youtube_quota_rapid_depletion
+      condition: "rate(youtube_quota_usage[5m]) > 100"
+      severity: warning
+      for: 5m
+      annotations:
+        summary: "YouTube quota depleting rapidly"
+        description: "Quota usage rate: {{ $value }} units/5min"
+        recommended_action: "Investigate unusual API usage patterns"
+
+  # Fallback-related alerts
+  fallback_alerts:
+    - name: youtube_high_fallback_usage
+      condition: "rate(youtube_fallback_activations_total[1h]) > 5"
+      severity: warning
+      for: 10m
+      annotations:
+        summary: "High YouTube fallback activation rate"
+        description: "Fallback activated {{ $value }} times in the last hour"
+        recommended_action: "Check API health and quota status"
+    
+    - name: youtube_prolonged_fallback
+      condition: "youtube_fallback_active == 1"
+      severity: warning
+      for: 2h
+      annotations:
+        summary: "YouTube in fallback mode for extended period"
+        description: "Fallback mode active for over 2 hours"
+        recommended_action: "Manual intervention may be required"
+    
+    - name: youtube_fallback_recovery_failures
+      condition: "rate(youtube_fallback_recovery_attempts{success='false'}[30m]) > 3"
+      severity: error
+      for: 15m
+      annotations:
+        summary: "YouTube fallback recovery failing repeatedly"
+        description: "{{ $value }} failed recovery attempts in 30 minutes"
+        recommended_action: "Check API credentials and network connectivity"
+
+  # Performance alerts
+  performance_alerts:
+    - name: youtube_api_high_latency
+      condition: "histogram_quantile(0.95, youtube_api_response_time) > 5"
+      severity: warning
+      for: 10m
+      annotations:
+        summary: "YouTube API experiencing high latency"
+        description: "95th percentile latency: {{ $value }}s"
+        recommended_action: "Consider activating performance-based fallback"
+    
+    - name: youtube_api_failure_rate_high
+      condition: "(1 - youtube_api_success_rate) > 0.1"
+      severity: error
+      for: 5m
+      annotations:
+        summary: "YouTube API failure rate exceeds 10%"
+        description: "Current failure rate: {{ $value | humanizePercentage }}"
+        recommended_action: "Activate fallback mode if not already active"
+    
+    - name: youtube_cache_degradation
+      condition: "youtube_cache_hit_rate < 0.3"
+      severity: warning
+      for: 15m
+      annotations:
+        summary: "YouTube cache hit rate below 30%"
+        description: "Cache hit rate: {{ $value | humanizePercentage }}"
+        recommended_action: "Check cache configuration and memory usage"
+
+  # Cookie health alerts
+  cookie_alerts:
+    - name: youtube_cookie_expiring_soon
+      condition: "youtube_cookie_age_days > 25"
+      severity: warning
+      for: 1h
+      annotations:
+        summary: "YouTube cookies expiring soon"
+        description: "Cookies are {{ $value }} days old"
+        recommended_action: "Schedule cookie refresh"
+    
+    - name: youtube_cookie_extraction_failed
+      condition: "youtube_cookie_extraction_success == 0"
+      severity: error
+      for: 5m
+      annotations:
+        summary: "YouTube cookie extraction failed"
+        description: "Last cookie extraction attempt failed"
+        recommended_action: "Check browser integration and permissions"
+    
+    - name: youtube_cookie_health_low
+      condition: "youtube_cookie_health_score < 50"
+      severity: warning
+      for: 30m
+      annotations:
+        summary: "YouTube cookie health score low"
+        description: "Cookie health score: {{ $value }}/100"
+        recommended_action: "Investigate cookie validation failures"
+
+# Dashboard configuration
+dashboards:
+  youtube_fallback_overview:
+    title: "YouTube Fallback System Overview"
+    refresh: "30s"
+    time_range: "6h"
+    
+    panels:
+      - title: "Current Fallback Status"
+        type: "stat"
+        gridPos: { h: 4, w: 6, x: 0, y: 0 }
+        targets:
+          - expr: "youtube_fallback_active"
+            legend: "Fallback Active"
+        thresholds:
+          - value: 0
+            color: "green"
+          - value: 1
+            color: "orange"
+      
+      - title: "API Success Rate"
+        type: "gauge"
+        gridPos: { h: 4, w: 6, x: 6, y: 0 }
+        targets:
+          - expr: "youtube_api_success_rate"
+        thresholds:
+          - value: 0.95
+            color: "green"
+          - value: 0.90
+            color: "yellow"
+          - value: 0
+            color: "red"
+      
+      - title: "Quota Usage"
+        type: "gauge"
+        gridPos: { h: 4, w: 6, x: 12, y: 0 }
+        targets:
+          - expr: "youtube_quota_usage / (youtube_quota_usage + youtube_quota_remaining)"
+        thresholds:
+          - value: 0.5
+            color: "green"
+          - value: 0.8
+            color: "yellow"
+          - value: 0.95
+            color: "red"
+      
+      - title: "Strategy Performance"
+        type: "bar"
+        gridPos: { h: 6, w: 12, x: 0, y: 4 }
+        targets:
+          - expr: "youtube_strategy_success_rate"
+            legend: "{{ strategy }}"
+      
+      - title: "Fallback Activation History"
+        type: "graph"
+        gridPos: { h: 6, w: 12, x: 12, y: 4 }
+        targets:
+          - expr: "rate(youtube_fallback_activations_total[5m])"
+            legend: "{{ reason }}"
+      
+      - title: "Cache Performance"
+        type: "timeseries"
+        gridPos: { h: 6, w: 12, x: 0, y: 10 }
+        targets:
+          - expr: "youtube_cache_hit_rate"
+            legend: "{{ cache_type }} hit rate"
+      
+      - title: "API Response Times"
+        type: "heatmap"
+        gridPos: { h: 6, w: 12, x: 12, y: 10 }
+        targets:
+          - expr: "youtube_api_response_time"
+            format: "heatmap"
+
+  youtube_fallback_detailed:
+    title: "YouTube Fallback Detailed Analysis"
+    refresh: "1m"
+    time_range: "24h"
+    
+    panels:
+      - title: "Fallback Strategy Usage"
+        type: "piechart"
+        gridPos: { h: 8, w: 8, x: 0, y: 0 }
+        targets:
+          - expr: "sum by (strategy) (increase(youtube_strategy_usage_total[24h]))"
+      
+      - title: "Fallback Reasons"
+        type: "piechart"
+        gridPos: { h: 8, w: 8, x: 8, y: 0 }
+        targets:
+          - expr: "sum by (reason) (increase(youtube_fallback_activations_total[24h]))"
+      
+      - title: "Recovery Success Rate"
+        type: "stat"
+        gridPos: { h: 8, w: 8, x: 16, y: 0 }
+        targets:
+          - expr: |
+              sum(increase(youtube_fallback_recovery_attempts{success="true"}[24h])) /
+              sum(increase(youtube_fallback_recovery_attempts[24h]))
+        unit: "percentunit"
+      
+      - title: "Operation Success by Method"
+        type: "table"
+        gridPos: { h: 8, w: 24, x: 0, y: 8 }
+        targets:
+          - expr: |
+              sum by (method, fallback_used) (
+                rate(youtube_search_operations_total{success="true"}[1h])
+              ) / sum by (method, fallback_used) (
+                rate(youtube_search_operations_total[1h])
+              )
+            format: "table"
+
+# Prometheus recording rules for performance
+recording_rules:
+  - name: youtube_fallback_rules
+    interval: 30s
+    rules:
+      - record: youtube:api_success_rate_5m
+        expr: |
+          sum(rate(youtube_api_calls_total{status="success"}[5m])) /
+          sum(rate(youtube_api_calls_total[5m]))
+      
+      - record: youtube:cache_hit_rate_5m
+        expr: |
+          sum by (cache_type) (rate(youtube_cache_hits_total[5m])) /
+          (sum by (cache_type) (rate(youtube_cache_hits_total[5m])) +
+           sum by (cache_type) (rate(youtube_cache_misses_total[5m])))
+      
+      - record: youtube:fallback_activation_rate_1h
+        expr: |
+          sum by (reason) (rate(youtube_fallback_activations_total[1h]))
+      
+      - record: youtube:strategy_effectiveness_score
+        expr: |
+          sum by (strategy) (youtube_strategy_success_rate * youtube_strategy_usage_total) /
+          sum by (strategy) (youtube_strategy_usage_total)
+
+# Grafana dashboard JSON (simplified version)
+grafana_dashboard:
+  uid: "youtube-fallback-monitor"
+  title: "YouTube Fallback Monitoring"
+  tags: ["youtube", "fallback", "monitoring"]
+  timezone: "browser"
+  editable: true
+  graphTooltip: 1
+  refresh: "30s"
+  schemaVersion: 30
+  version: 1
+  
+  templating:
+    list:
+      - name: "strategy"
+        type: "query"
+        query: "label_values(youtube_strategy_success_rate, strategy)"
+        multi: true
+        includeAll: true
+      
+      - name: "cache_type"
+        type: "query"
+        query: "label_values(youtube_cache_hit_rate, cache_type)"
+        multi: true
+        includeAll: true
+
+# Integration with alertmanager
+alertmanager_config:
+  route:
+    group_by: ["alertname", "severity"]
+    group_wait: 30s
+    group_interval: 5m
+    repeat_interval: 12h
+    receiver: "youtube-fallback-alerts"
+    
+    routes:
+      - match:
+          severity: critical
+        receiver: "youtube-critical"
+        continue: true
+      
+      - match:
+          alertname: youtube_quota_exceeded
+        receiver: "youtube-quota-alerts"
+        repeat_interval: 1h
+
+  receivers:
+    - name: "youtube-fallback-alerts"
+      webhook_configs:
+        - url: "http://localhost:9093/api/v1/alerts"
+          send_resolved: true
+    
+    - name: "youtube-critical"
+      email_configs:
+        - to: "admin@example.com"
+          subject: "Critical YouTube Fallback Alert"
+    
+    - name: "youtube-quota-alerts"
+      slack_configs:
+        - api_url: "${SLACK_WEBHOOK_URL}"
+          channel: "#youtube-alerts"
+          title: "YouTube Quota Alert"

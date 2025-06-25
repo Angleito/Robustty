@@ -28,16 +28,18 @@ class HealthEndpoints:
         self.fallback_manager = None  
         self.cookie_manager = None
         self.platform_registry = None
+        self.quota_monitor = None
         
         self._setup_routes()
     
     def set_services(self, cookie_health_monitor=None, fallback_manager=None, 
-                    cookie_manager=None, platform_registry=None):
+                    cookie_manager=None, platform_registry=None, quota_monitor=None):
         """Set service dependencies"""
         self.cookie_health_monitor = cookie_health_monitor
         self.fallback_manager = fallback_manager
         self.cookie_manager = cookie_manager
         self.platform_registry = platform_registry
+        self.quota_monitor = quota_monitor
     
     def _setup_routes(self):
         """Setup HTTP routes"""
@@ -54,6 +56,9 @@ class HealthEndpoints:
         # Platform and fallback status
         self.app.router.add_get('/health/platforms', self.platform_status)
         self.app.router.add_get('/health/fallback', self.fallback_status)
+        
+        # Quota monitoring endpoint
+        self.app.router.add_get('/health/quota/youtube', self.youtube_quota_status)
     
     async def start(self):
         """Start the health check web server"""
@@ -102,7 +107,8 @@ class HealthEndpoints:
                     'cookie_health_monitor': bool(self.cookie_health_monitor),
                     'fallback_manager': bool(self.fallback_manager),
                     'cookie_manager': bool(self.cookie_manager),
-                    'platform_registry': bool(self.platform_registry)
+                    'platform_registry': bool(self.platform_registry),
+                    'quota_monitor': bool(self.quota_monitor)
                 }
             }
             
@@ -376,6 +382,41 @@ class HealthEndpoints:
             
         except Exception as e:
             logger.error(f"Force validation error: {e}")
+            return web.json_response(
+                {'error': str(e)},
+                status=500
+            )
+    
+    async def youtube_quota_status(self, request):
+        """Get YouTube API quota status"""
+        try:
+            if not self.quota_monitor:
+                return web.json_response(
+                    {'error': 'Quota monitor not available'},
+                    status=503
+                )
+            
+            # Get comprehensive quota status
+            quota_status = self.quota_monitor.get_quota_status()
+            
+            # Add conservation recommendations
+            recommendations = self.quota_monitor.get_conservation_recommendations()
+            quota_status['conservation'] = recommendations
+            
+            # Add health indicator
+            if quota_status['percentage_remaining'] > 50:
+                quota_status['health'] = 'healthy'
+            elif quota_status['percentage_remaining'] > 20:
+                quota_status['health'] = 'caution'
+            elif quota_status['percentage_remaining'] > 10:
+                quota_status['health'] = 'critical'
+            else:
+                quota_status['health'] = 'exhausted'
+            
+            return web.json_response(quota_status)
+            
+        except Exception as e:
+            logger.error(f"YouTube quota status error: {e}")
             return web.json_response(
                 {'error': str(e)},
                 status=500

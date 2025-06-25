@@ -3,7 +3,7 @@ import os
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from googleapiclient.discovery import build  # type: ignore
 from googleapiclient.errors import HttpError  # type: ignore
@@ -32,6 +32,7 @@ from ..services.status_reporting import (
     report_no_api_key,
     report_platform_error,
 )
+from ..services.platform_fallback_manager import FallbackMode
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +48,7 @@ class YouTubePlatform(VideoPlatform):
         # Fallback configuration
         self.fallback_manager = None  # Will be set by bot initialization
         self.cookie_health_monitor = None  # Will be set by bot initialization
+        self.quota_monitor = None  # Will be set by bot initialization
         self.enable_fallbacks = config.get("enable_fallbacks", True)
         
         # Performance optimization caches
@@ -57,7 +59,7 @@ class YouTubePlatform(VideoPlatform):
         
         # Search optimization settings
         self.enable_search_caching = config.get("enable_search_caching", True)
-        self.enable_concurrent_strategies = config.get("enable_concurrent_strategies", False)
+        self.enable_concurrent_strategies = config.get("enable_concurrent_strategies", True)  # Changed default to True
         self.search_timeout_per_strategy = config.get("search_timeout_per_strategy", 15)
         self.max_concurrent_strategies = config.get("max_concurrent_strategies", 3)
 
@@ -83,6 +85,14 @@ class YouTubePlatform(VideoPlatform):
     async def initialize(self):
         """Initialize YouTube API client with fallback awareness"""
         await super().initialize()
+        
+        # Load fallback configuration
+        self._setup_fallback_config()
+        
+        # Initialize quota monitoring
+        self._quota_exhausted = False
+        self._quota_reset_time = None
+        
         if self.api_key:
             self.youtube = build("youtube", "v3", developerKey=self.api_key)
             logger.info("YouTube API client initialized successfully")
@@ -100,6 +110,10 @@ class YouTubePlatform(VideoPlatform):
     def set_cookie_health_monitor(self, cookie_health_monitor):
         """Set the cookie health monitor for this platform"""
         self.cookie_health_monitor = cookie_health_monitor
+    
+    def set_quota_monitor(self, quota_monitor):
+        """Set the quota monitor for this platform"""
+        self.quota_monitor = quota_monitor
 
     def _get_search_params(self, query: str) -> Dict[str, str]:
         """Get search parameters including language and region settings with English defaults"""
@@ -117,7 +131,6 @@ class YouTubePlatform(VideoPlatform):
         
         params = {
             "regionCode": self.default_region,
-            "hl": self.interface_language,  # Always set interface language for English UI
         }
         
         # Add relevance language if determined
@@ -125,7 +138,7 @@ class YouTubePlatform(VideoPlatform):
             params["relevanceLanguage"] = relevance_language
         
         logger.debug(f"Search params for query '{query[:50]}...': region={params['regionCode']}, "
-                    f"language={params['relevanceLanguage']}, hl={params.get('hl', 'not set')}")
+                    f"language={params.get('relevanceLanguage', 'not set')}")
         
         return params
 
@@ -234,7 +247,7 @@ class YouTubePlatform(VideoPlatform):
     async def search_videos(
         self, query: str, max_results: int = 10
     ) -> List[Dict[str, Any]]:
-        """Search YouTube videos with enhanced error handling and detailed metadata"""
+        """Search YouTube videos with enhanced error handling and progressive fallback"""
         # Check cache first
         cached_results = await self.get_cached_search_results(query)
         if cached_results:
@@ -253,6 +266,22 @@ class YouTubePlatform(VideoPlatform):
             # Cache URL results
             await self.cache_search_results(query, url_results)
             return url_results
+        
+        # Check quota status before making API calls
+        if self.quota_monitor and self.quota_monitor.should_activate_conservation():
+            logger.warning("YouTube quota conservation active, using fallback search")
+            recommendations = self.quota_monitor.get_conservation_recommendations()
+            report_api_quota_exceeded(
+                "YouTube",
+                recommendations.get('message', 'Quota conservation active')
+            )
+            return await self._search_with_progressive_fallback(query, max_results)
+        
+        # Check with fallback manager before attempting API calls
+        if self.fallback_manager and not self._should_use_api():
+            strategy = self._get_fallback_strategy()
+            logger.info(f"Using fallback strategy: {strategy}")
+            return await self._search_with_progressive_fallback(query, max_results)
         
         # If no API key, try yt-dlp fallback search
         if not self.youtube:
@@ -298,6 +327,14 @@ class YouTubePlatform(VideoPlatform):
             language_params = self._get_search_params(query)
             search_params.update(language_params)
             
+            # Track quota usage for search operation
+            if self.quota_monitor:
+                from ..services.quota_monitor import YouTubeAPIQuotaCost
+                await self.quota_monitor.track_api_call(
+                    YouTubeAPIQuotaCost.SEARCH,
+                    f"search for '{query[:50]}...'"
+                )
+            
             # First, get search results
             search_request = self.youtube.search().list(**search_params)
             search_response = search_request.execute()
@@ -318,6 +355,14 @@ class YouTubePlatform(VideoPlatform):
             if not video_ids:
                 return []
 
+            # Track quota usage for video details operation
+            if self.quota_monitor:
+                from ..services.quota_monitor import YouTubeAPIQuotaCost
+                await self.quota_monitor.track_api_call(
+                    YouTubeAPIQuotaCost.VIDEO_LIST * len(video_ids),
+                    f"video details for {len(video_ids)} videos"
+                )
+            
             # Get detailed video information including duration, view count, etc.
             videos_request = self.youtube.videos().list(
                 part="snippet,contentDetails,statistics", id=",".join(video_ids)
@@ -390,10 +435,25 @@ class YouTubePlatform(VideoPlatform):
             # Check for quota exceeded and attempt fallback
             if e.resp.status == 403 and "quotaExceeded" in str(e):
                 logger.warning("YouTube API quota exceeded, attempting yt-dlp fallback search")
+                self._quota_exhausted = True
+                self._quota_reset_time = datetime.now() + timedelta(hours=24)
+                
+                # Update quota monitor if available
+                if self.quota_monitor:
+                    # Force exhaustion state
+                    await self.quota_monitor.track_api_call(
+                        self.quota_monitor.daily_quota_limit,
+                        "quota exceeded error"
+                    )
+                
                 report_api_quota_exceeded(
                     "YouTube",
                     "YouTube API quota exceeded - attempting yt-dlp fallback search"
                 )
+                
+                # Report to metrics if available
+                if hasattr(self, '_report_to_metrics'):
+                    self._report_to_metrics('youtube_api_quota_exceeded', 1)
                 
                 try:
                     fallback_results = await self._search_with_ytdlp(query, max_results)
@@ -1394,7 +1454,13 @@ class YouTubePlatform(VideoPlatform):
             return results
                 
         except Exception as e:
-            logger.error(f"yt-dlp search failed: {e}")
+            error_category = self._categorize_search_error(e)
+            logger.error(f"yt-dlp search failed ({error_category}): {e}")
+            
+            # Report error to metrics
+            if hasattr(self, '_report_to_metrics'):
+                self._report_to_metrics(f'youtube_search_error_{error_category}', 1)
+            
             return []
     
     async def _execute_sequential_search_strategies(
@@ -1660,6 +1726,27 @@ class YouTubePlatform(VideoPlatform):
         
         return strategies
     
+    def _categorize_search_error(self, error: Exception) -> str:
+        """Categorize search errors for better handling and metrics"""
+        error_str = str(error).lower()
+        
+        if "429" in error_str or "rate limit" in error_str:
+            return "rate_limit"
+        elif "403" in error_str or "forbidden" in error_str:
+            return "forbidden"
+        elif "401" in error_str or "unauthorized" in error_str:
+            return "unauthorized"
+        elif "timeout" in error_str:
+            return "timeout"
+        elif "network" in error_str or "connection" in error_str:
+            return "network"
+        elif "extract" in error_str:
+            return "extraction"
+        elif "cookie" in error_str:
+            return "cookie"
+        else:
+            return "unknown"
+    
     async def _execute_ytdlp_search_strategy(
         self, search_query: str, strategy_opts: Dict, strategy_name: str
     ) -> List[Dict[str, Any]]:
@@ -1712,96 +1799,141 @@ class YouTubePlatform(VideoPlatform):
     def _filter_and_rank_results(
         self, results: List[Dict[str, Any]], query: str, max_results: int
     ) -> List[Dict[str, Any]]:
-        """Filter and rank search results for quality and relevance"""
+        """Enhanced filtering and ranking with improved scoring algorithm"""
         if not results:
-            return results
+            return []
         
-        # Filter out low-quality results
-        filtered_results = []
+        # Convert query to lowercase for case-insensitive comparison
         query_lower = query.lower()
+        query_words = set(query_lower.split())
         
+        scored_results = []
         for result in results:
-            # Quality filters
-            title = result.get("title", "").lower()
-            duration = result.get("duration", "Unknown")
-            views_raw = result.get("view_count_raw", 0)
-            
-            # Skip results that are too short (likely not full content)
-            if duration != "Unknown" and ":" in duration:
-                try:
-                    time_parts = duration.split(":")
-                    if len(time_parts) == 2:  # MM:SS format
-                        total_seconds = int(time_parts[0]) * 60 + int(time_parts[1])
-                        if total_seconds < 30:  # Skip videos shorter than 30 seconds
-                            logger.debug(f"Filtered out short video: {title} ({duration})")
-                            continue
-                except (ValueError, IndexError):
-                    pass  # Keep if duration parsing fails
-            
-            # Skip results with very low view counts (potential spam/low quality)
-            if isinstance(views_raw, int) and views_raw < 100:
-                logger.debug(f"Filtered out low-view video: {title} ({views_raw} views)")
+            # Skip results without essential fields
+            if not result.get('title') or not result.get('id'):
                 continue
             
-            # Relevance scoring
-            relevance_score = self._calculate_relevance_score(result, query_lower)
-            result["relevance_score"] = relevance_score
+            # Calculate relevance score with multiple factors
+            score = self._calculate_result_score(result, query_lower, query_words)
             
-            filtered_results.append(result)
+            result['_relevance_score'] = score
+            scored_results.append(result)
         
-        # Sort by relevance score (descending) and take top results
-        filtered_results.sort(key=lambda x: x.get("relevance_score", 0), reverse=True)
+        # Sort by relevance score
+        scored_results.sort(key=lambda x: x.get('_relevance_score', 0), reverse=True)
         
-        # Remove relevance score before returning (internal use only)
-        for result in filtered_results:
-            result.pop("relevance_score", None)
-            result.pop("search_strategy", None)  # Remove strategy info
+        # Remove score from results and limit
+        final_results = []
+        for result in scored_results[:max_results]:
+            result.pop('_relevance_score', None)
+            result.pop('search_strategy', None)  # Remove strategy info
+            final_results.append(result)
         
-        return filtered_results[:max_results]
+        return final_results
+    
+    def _calculate_result_score(self, result: Dict[str, Any], query_lower: str, query_words: set) -> float:
+        """Calculate comprehensive relevance score for a search result"""
+        score = 0.0
+        title_lower = result.get('title', '').lower()
+        channel_lower = result.get('channel', '').lower()
+        description_lower = result.get('description', '').lower()
+        
+        # Title relevance (highest weight)
+        if query_lower in title_lower:
+            score += 100  # Exact match
+        else:
+            # Word-by-word matching
+            title_words = set(title_lower.split())
+            matching_words = query_words & title_words
+            score += len(matching_words) * 25
+            
+            # Order preservation bonus
+            if self._preserves_word_order(query_lower, title_lower):
+                score += 20
+        
+        # Channel relevance
+        if any(word in channel_lower for word in query_words):
+            score += 15
+        
+        # Description relevance
+        desc_matches = sum(1 for word in query_words if word in description_lower)
+        score += min(desc_matches * 5, 20)  # Cap at 20 points
+        
+        # Quality indicators
+        view_count = result.get('view_count_raw', 0)
+        if view_count > 1000000:
+            score += 20
+        elif view_count > 100000:
+            score += 15
+        elif view_count > 10000:
+            score += 10
+        elif view_count > 1000:
+            score += 5
+        
+        # Duration validity
+        duration = result.get('duration', 'Unknown')
+        if duration and duration != 'Unknown':
+            score += 10
+            # Prefer medium-length videos (3-20 minutes)
+            if ':' in duration:
+                try:
+                    parts = duration.split(':')
+                    total_seconds = int(parts[-1]) + int(parts[-2]) * 60
+                    if len(parts) > 2:
+                        total_seconds += int(parts[-3]) * 3600
+                    
+                    if 180 <= total_seconds <= 1200:  # 3-20 minutes
+                        score += 10
+                except:
+                    pass
+        
+        # Metadata completeness
+        if result.get('channel'):
+            score += 5
+        if result.get('thumbnail'):
+            score += 3
+        if result.get('published'):
+            score += 2
+        
+        # Negative indicators (spam/low quality)
+        spam_indicators = ['reaction', 'reacts to', 'compilation', 'tiktok']
+        for indicator in spam_indicators:
+            if indicator in title_lower:
+                score -= 25
+        
+        # Very short titles are often low quality
+        if len(result.get('title', '')) < 10:
+            score -= 30
+        
+        # Boost official/verified content (if available)
+        if result.get('verified') or result.get('official'):
+            score += 30
+        
+        # Channel quality indicators
+        official_indicators = ["official", "vevo", "records", "music"]
+        if any(indicator in channel_lower for indicator in official_indicators):
+            score += 15
+        
+        return max(score, 0)  # Ensure non-negative
+    
+    def _preserves_word_order(self, query: str, text: str) -> bool:
+        """Check if query words appear in order within the text"""
+        query_words = query.split()
+        text_lower = text.lower()
+        
+        last_pos = -1
+        for word in query_words:
+            pos = text_lower.find(word, last_pos + 1)
+            if pos == -1:
+                return False
+            last_pos = pos
+        
+        return True
     
     def _calculate_relevance_score(self, result: Dict[str, Any], query_lower: str) -> float:
-        """Calculate relevance score for search result ranking"""
-        score = 0.0
-        title = result.get("title", "").lower()
-        channel = result.get("channel", "").lower()
-        views_raw = result.get("view_count_raw", 0)
-        
-        # Title relevance (most important factor)
+        """Legacy method - redirects to new scoring system"""
         query_words = set(query_lower.split())
-        title_words = set(title.split())
-        
-        # Exact phrase match gets highest score
-        if query_lower in title:
-            score += 10.0
-        
-        # Word overlap scoring
-        word_overlap = len(query_words.intersection(title_words)) / len(query_words) if query_words else 0
-        score += word_overlap * 5.0
-        
-        # Official channel indicators
-        official_indicators = ["official", "vevo", "records", "music"]
-        if any(indicator in channel for indicator in official_indicators):
-            score += 2.0
-        
-        # Quality indicators in title
-        quality_indicators = ["official", "hd", "hq", "4k", "music video", "original"]
-        for indicator in quality_indicators:
-            if indicator in title:
-                score += 1.0
-        
-        # View count factor (logarithmic scaling to prevent overwhelming other factors)
-        if isinstance(views_raw, int) and views_raw > 0:
-            import math
-            view_score = math.log10(views_raw) / 10.0  # Scale down log10 of views
-            score += min(view_score, 2.0)  # Cap view influence
-        
-        # Penalty for spam indicators
-        spam_indicators = ["click here", "subscribe", "like and", "don't forget"]
-        for indicator in spam_indicators:
-            if indicator in title:
-                score -= 1.0
-        
-        return max(score, 0.0)  # Ensure non-negative score
+        return self._calculate_result_score(result, query_lower, query_words)
     
     def _extract_metadata_from_ytdlp_result(self, info_dict: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Convert yt-dlp metadata to our standard format"""
@@ -2507,3 +2639,210 @@ class YouTubePlatform(VideoPlatform):
             logger.debug(f"Building search query for detected language: {detected_lang}")
         
         return search_query
+    
+    def _setup_fallback_config(self):
+        """Setup fallback configuration from config"""
+        fallback_config = self.config.get('fallback', {})
+        self.fallback_strategies = fallback_config.get('strategies', ['ytdlp', 'api_limited', 'disabled'])
+        self.fallback_timeout = fallback_config.get('timeout', 30)
+        self.quota_check_interval = fallback_config.get('quota_check_interval', 3600)  # 1 hour
+        self.max_retries_per_strategy = fallback_config.get('max_retries', 2)
+    
+    def _should_use_api(self) -> bool:
+        """Check if API should be used based on quota and health"""
+        # No API key means no API usage
+        if not self.youtube:
+            return False
+        
+        # Check if quota is exhausted
+        if hasattr(self, '_quota_exhausted') and self._quota_exhausted:
+            if hasattr(self, '_quota_reset_time') and self._quota_reset_time:
+                if datetime.now() < self._quota_reset_time:
+                    logger.debug(f"API quota exhausted until {self._quota_reset_time}")
+                    return False
+                else:
+                    # Reset quota status
+                    self._quota_exhausted = False
+                    self._quota_reset_time = None
+        
+        # Check with fallback manager if available
+        if self.fallback_manager:
+            active_fallback = self.fallback_manager.get_active_fallback('youtube')
+            if active_fallback and active_fallback.mode == FallbackMode.API_ONLY:
+                return True
+            elif active_fallback and active_fallback.mode in [FallbackMode.LIMITED_SEARCH, FallbackMode.DISABLED]:
+                return False
+        
+        # Default to using API if available
+        return True
+    
+    def _get_fallback_strategy(self) -> str:
+        """Determine which fallback strategy to use"""
+        if self.fallback_manager:
+            active_fallback = self.fallback_manager.get_active_fallback('youtube')
+            if active_fallback:
+                if active_fallback.mode == FallbackMode.LIMITED_SEARCH:
+                    return "ytdlp_progressive"
+                elif active_fallback.mode == FallbackMode.API_ONLY:
+                    return "api_limited"
+                elif active_fallback.mode == FallbackMode.DISABLED:
+                    return "disabled"
+        
+        # Default fallback strategy based on available resources
+        if hasattr(self, '_quota_exhausted') and self._quota_exhausted:
+            return "ytdlp_progressive"
+        
+        return "ytdlp_basic"
+    
+    async def _search_with_progressive_fallback(self, query: str, max_results: int = 10) -> List[Dict[str, Any]]:
+        """Implement progressive fallback chain for search"""
+        strategies = []
+        
+        # Determine available strategies based on current state
+        fallback_strategy = self._get_fallback_strategy()
+        
+        if fallback_strategy == "api_limited":
+            # Try API with reduced calls
+            strategies.append(("api_limited", self._search_with_limited_api))
+        
+        if fallback_strategy in ["ytdlp_progressive", "ytdlp_basic"]:
+            # Add yt-dlp strategies
+            strategies.append(("ytdlp_concurrent", self._search_with_ytdlp))
+            strategies.append(("ytdlp_basic", self._search_with_basic_ytdlp))
+        
+        # Execute strategies in order
+        for strategy_name, strategy_func in strategies:
+            try:
+                logger.info(f"Attempting fallback strategy: {strategy_name}")
+                
+                # Report fallback usage to metrics
+                if hasattr(self, '_report_to_metrics'):
+                    self._report_to_metrics(f'youtube_fallback_{strategy_name}_attempt', 1)
+                
+                results = await strategy_func(query, max_results)
+                
+                if results:
+                    logger.info(f"Fallback strategy {strategy_name} successful with {len(results)} results")
+                    
+                    # Report success
+                    report_fallback_success(
+                        "YouTube",
+                        SearchMethod.YTDLP_SEARCH if "ytdlp" in strategy_name else SearchMethod.API_SEARCH,
+                        f"Progressive fallback successful with {strategy_name}",
+                        details={'strategy': strategy_name, 'results_count': len(results)}
+                    )
+                    
+                    # Report to metrics
+                    if hasattr(self, '_report_to_metrics'):
+                        self._report_to_metrics(f'youtube_fallback_{strategy_name}_success', 1)
+                    
+                    return results
+                    
+            except Exception as e:
+                logger.error(f"Fallback strategy {strategy_name} failed: {e}")
+                if hasattr(self, '_report_to_metrics'):
+                    self._report_to_metrics(f'youtube_fallback_{strategy_name}_error', 1)
+                continue
+        
+        # All strategies failed
+        logger.error("All fallback strategies failed")
+        return []
+    
+    async def _search_with_limited_api(self, query: str, max_results: int = 10) -> List[Dict[str, Any]]:
+        """Search with limited API calls to conserve quota"""
+        if not self.youtube:
+            return []
+        
+        try:
+            # Reduce max results to conserve quota
+            limited_results = min(max_results, 5)
+            
+            # Use minimal parts to reduce quota usage
+            search_params = {
+                "part": "snippet",  # Only essential data
+                "q": query,
+                "type": "video",
+                "maxResults": limited_results
+            }
+            
+            search_request = self.youtube.search().list(**search_params)
+            search_response = search_request.execute()
+            
+            results = []
+            for item in search_response.get("items", []):
+                video_id = item.get("id", {}).get("videoId")
+                if not video_id:
+                    continue
+                
+                snippet = item.get("snippet", {})
+                
+                # Build result with limited data (no additional API calls)
+                results.append({
+                    "id": video_id,
+                    "title": snippet.get("title", "Unknown"),
+                    "channel": snippet.get("channelTitle", "Unknown"),
+                    "thumbnail": self._get_best_thumbnail(snippet.get("thumbnails", {})),
+                    "url": f"https://www.youtube.com/watch?v={video_id}",
+                    "platform": "youtube",
+                    "description": snippet.get("description", "")[:200],
+                    "duration": "Unknown",  # Would require additional API call
+                    "views": "Unknown",     # Would require additional API call
+                    "published": self._format_publish_date(snippet.get("publishedAt", "")),
+                    "view_count_raw": 0,
+                })
+            
+            return results
+            
+        except Exception as e:
+            logger.error(f"Limited API search failed: {e}")
+            return []
+    
+    async def _search_with_basic_ytdlp(self, query: str, max_results: int = 10) -> List[Dict[str, Any]]:
+        """Basic yt-dlp search without concurrent strategies"""
+        import yt_dlp
+        
+        try:
+            # Basic search configuration
+            ydl_opts = {
+                'quiet': True,
+                'no_warnings': True,
+                'extract_flat': True,
+                'force_generic_extractor': False,
+                'default_search': 'ytsearch',
+            }
+            
+            # Load cookies if available
+            cookie_info = self._load_cookies_with_fallback()
+            if cookie_info.get('success') and cookie_info.get('cookie_file'):
+                ydl_opts['cookiefile'] = cookie_info['cookie_file']
+            
+            search_query = f"ytsearch{max_results}:{query}"
+            
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                search_results = ydl.extract_info(search_query, download=False)
+                
+                if not search_results or 'entries' not in search_results:
+                    return []
+                
+                results = []
+                for entry in search_results['entries'][:max_results]:
+                    if not entry:
+                        continue
+                    
+                    result = self._extract_metadata_from_ytdlp(entry)
+                    if result:
+                        results.append(result)
+                
+                return results
+                
+        except Exception as e:
+            logger.error(f"Basic yt-dlp search failed: {e}")
+            return []
+    
+    def _report_to_metrics(self, metric_name: str, value: float):
+        """Report metrics if metrics collector is available"""
+        try:
+            # This will be implemented when metrics collector is integrated
+            logger.debug(f"Metric reported: {metric_name}={value}")
+        except Exception as e:
+            logger.debug(f"Failed to report metric: {e}")

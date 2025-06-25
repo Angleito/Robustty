@@ -12,6 +12,7 @@ from src.services.cookie_health_monitor import CookieHealthMonitor
 from src.services.platform_fallback_manager import PlatformFallbackManager
 from src.services.health_endpoints import HealthEndpoints
 from src.services.searcher import MultiPlatformSearcher
+from src.services.quota_monitor import QuotaMonitor, create_quota_monitor
 from src.utils.config_loader import ConfigType
 from src.services.metrics_collector import get_metrics_collector
 from src.services.health_monitor import HealthMonitor
@@ -42,6 +43,7 @@ class RobusttyBot(commands.Bot):
         self.cookie_health_monitor: Optional[CookieHealthMonitor] = None
         self.fallback_manager: Optional[PlatformFallbackManager] = None
         self.health_endpoints: Optional[HealthEndpoints] = None
+        self.quota_monitor: Optional[QuotaMonitor] = None
         self.audio_players: Dict[int, AudioPlayer] = {}
         self.metrics = get_metrics_collector()
         self.health_monitor: Optional[HealthMonitor] = None
@@ -58,6 +60,12 @@ class RobusttyBot(commands.Bot):
 
         self.cache_manager = CacheManager(self.config)
         await self.cache_manager.initialize()
+        
+        # Initialize quota monitor for YouTube API
+        self.quota_monitor = await create_quota_monitor(
+            self.config,
+            self.cache_manager.redis_client if hasattr(self.cache_manager, 'redis_client') else None
+        )
 
         # Initialize platform registry with cache manager
         self.platform_registry = PlatformRegistry(self.cache_manager)
@@ -103,6 +111,9 @@ class RobusttyBot(commands.Bot):
                     platform.set_fallback_manager(self.fallback_manager)
                 if platform and hasattr(platform, "set_cookie_health_monitor"):
                     platform.set_cookie_health_monitor(self.cookie_health_monitor)
+                # Set quota monitor for YouTube
+                if platform_name == "youtube" and platform and hasattr(platform, "set_quota_monitor"):
+                    platform.set_quota_monitor(self.quota_monitor)
             except Exception as e:
                 logger.warning(f"Failed to set managers on {platform_name}: {e}")
 
@@ -117,6 +128,7 @@ class RobusttyBot(commands.Bot):
             fallback_manager=self.fallback_manager,
             cookie_manager=self.enhanced_cookie_manager,
             platform_registry=self.platform_registry,
+            quota_monitor=self.quota_monitor,
         )
         await self.health_endpoints.start()
 
@@ -228,6 +240,10 @@ class RobusttyBot(commands.Bot):
         # Cleanup cache manager
         if hasattr(self, "cache_manager") and self.cache_manager:
             await self.cache_manager.close()
+        
+        # Cleanup quota monitor
+        if self.quota_monitor:
+            await self.quota_monitor.cleanup()
 
         # Cleanup cookie managers
         if self.cookie_manager:

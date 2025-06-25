@@ -10,6 +10,7 @@ from .health_monitor import HealthMonitor
 from .metrics_collector import MetricsCollector, get_metrics_collector
 from .metrics_server import MetricsServer
 from .queue_manager import QueueManager
+from .quota_monitor import QuotaMonitor, create_quota_monitor
 from .searcher import MultiPlatformSearcher
 
 __all__ = [
@@ -22,5 +23,7 @@ __all__ = [
     "get_metrics_collector",
     "MetricsServer",
     "QueueManager",
+    "QuotaMonitor",
+    "create_quota_monitor",
     "MultiPlatformSearcher",
 ]

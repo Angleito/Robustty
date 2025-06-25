@@ -22,6 +22,7 @@ class SearchMethod(Enum):
     DIRECT_URL = "direct_url"
     YTDLP_SEARCH = "ytdlp_search"
     MIRROR_SEARCH = "mirror_search"
+    CACHE_HIT = "cache_hit"
 
 
 class PlatformStatus(Enum):

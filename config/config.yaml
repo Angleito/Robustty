@@ -15,6 +15,12 @@ platforms:
     prefer_english_results: ${YOUTUBE_PREFER_ENGLISH_RESULTS:true}  # Prefer English results by default
     auto_detect_language: ${YOUTUBE_AUTO_DETECT_LANGUAGE:false}  # Auto-detect query language (false = use defaults)
     force_english_for_english_queries: ${YOUTUBE_FORCE_ENGLISH_FOR_ENGLISH_QUERIES:true}  # Force English settings for detected English queries
+    
+    # Enhanced fallback configuration
+    fallback_timeout_seconds: 15  # Timeout for each fallback strategy
+    concurrent_fallbacks: false  # Run fallback strategies concurrently (experimental)
+    max_fallback_strategies: 3  # Maximum number of fallback strategies to try
+    serve_stale_on_error: true  # Serve stale cache on YouTube-specific errors
 
   peertube:
     enabled: true
@@ -48,6 +54,7 @@ features:
   auto_disconnect_timeout: 300
   save_queue: true
   announce_songs: true
+  show_fallback_indicators: ${SHOW_FALLBACK_INDICATORS:true}  # Show status indicators for fallback methods
 
 cache:
   redis:
@@ -64,6 +71,13 @@ cache:
     search: 1800      # 30 minutes for search results
   
   max_memory_size: 1000  # Maximum number of items in memory cache
+  
+  # Enhanced cache behavior configuration
+  cache_first_search: true  # Always check cache before making API calls
+  stale_cache_threshold_minutes: 60  # How old cache can be to still be considered "stale but usable"
+  serve_stale_on_failure: true  # Serve stale cache when all strategies fail
+  enrich_cached_results: true  # Add metadata to cached results (from_cache, is_stale, etc.)
+  background_refresh_cache: true  # Refresh cache in background when serving from cache
 
 # Cross-platform deduplication settings
 deduplication:
@@ -171,16 +185,33 @@ network:
   # Connectivity check caching
   check_cache_timeout: ${NETWORK_CHECK_CACHE_TIMEOUT:300}  # 5 minutes
 
-# Dynamic platform prioritization
-prioritization:
-  enabled: ${PRIORITIZATION_ENABLED:true}
-  strategy: ${PRIORITIZATION_STRATEGY:balanced}  # balanced, speed_first, reliability_first, success_rate_first, adaptive
-  update_interval: ${PRIORITIZATION_UPDATE_INTERVAL:60}  # seconds
-  min_samples: ${PRIORITIZATION_MIN_SAMPLES:5}  # minimum samples needed for scoring
-  failure_penalty_duration: ${PRIORITIZATION_FAILURE_PENALTY_DURATION:300}  # seconds (5 minutes)
-  response_time_threshold: ${PRIORITIZATION_RESPONSE_TIME_THRESHOLD:5.0}  # seconds
-  default_order: 
-    - youtube
-    - odysee
-    - peertube
-    - rumble
+# Fallback configuration for platform resilience
+fallbacks:
+  enabled: ${ENABLE_FALLBACKS:true}
+  max_fallback_duration_hours: ${MAX_FALLBACK_DURATION_HOURS:24}
+  retry_interval_minutes: ${RETRY_INTERVAL_MINUTES:30}
+  
+  youtube:
+    enable_fallbacks: ${YOUTUBE_ENABLE_FALLBACKS:true}
+    enable_search_caching: ${YOUTUBE_ENABLE_SEARCH_CACHING:true}
+    cache_ttl_seconds: ${YOUTUBE_CACHE_TTL_SECONDS:300}
+    max_cache_size: ${YOUTUBE_MAX_CACHE_SIZE:100}
+    enable_concurrent_strategies: ${YOUTUBE_ENABLE_CONCURRENT_STRATEGIES:true}
+    search_timeout_per_strategy: ${YOUTUBE_SEARCH_TIMEOUT_PER_STRATEGY:15}
+    max_concurrent_strategies: ${YOUTUBE_MAX_CONCURRENT_STRATEGIES:3}
+    quota_warning_threshold: ${YOUTUBE_QUOTA_WARNING_THRESHOLD:100}
+    enable_progressive_degradation: ${YOUTUBE_ENABLE_PROGRESSIVE_DEGRADATION:true}
+    
+    fallback_chain:
+      - name: api_primary
+        enabled: true
+        priority: 1
+      - name: ytdlp_authenticated
+        enabled: true
+        priority: 2
+      - name: ytdlp_public
+        enabled: true
+        priority: 3
+      - name: cached_results
+        enabled: true
+        priority: 4

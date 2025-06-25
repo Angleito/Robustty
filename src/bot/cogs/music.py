@@ -11,6 +11,7 @@ from ..utils.embeds import (
     create_embed, 
     create_error_embed, 
     create_warning_embed,
+    create_music_embed,
     create_multi_platform_status_embed,
     create_quota_exceeded_embed,
     create_fallback_success_embed,
@@ -722,36 +723,31 @@ class Music(commands.Cog):
                     processing_method = "Mirror Search"
                     method_footer = "Found on platform while searching for mirrors"
         
-        embed = create_embed(
-            title="Added to Queue",
-            description=f"[{selected_video['title']}]({selected_video['url']})",
-            color=discord.Color.green(),
-        )
-        embed.add_field(
-            name="Platform", value=selected_video["platform"].title(), inline=True
-        )
-        embed.add_field(
-            name="Channel", value=selected_video.get("channel", "Unknown"), inline=True
-        )
+        # Determine search method for the embed
+        search_method = None
+        if search_status_multi and not used_direct_url:
+            platform_name = selected_video["platform"]
+            platform_report = search_status_multi.platform_reports.get(platform_name)
+            if platform_report:
+                search_method = platform_report.method
+        elif used_direct_url:
+            search_method = SearchMethod.DIRECT_URL
+        
+        # Use the enhanced music embed with fallback indicators
+        embed = create_music_embed(selected_video, queued=True, search_method=search_method)
+        
+        # Add method field for transparency
         embed.add_field(
             name="Method", value=processing_method, inline=True
         )
-
-        # Add duration and views if available (YouTube)
-        duration = selected_video.get("duration")
+        
+        # Add views if available (YouTube)
         views = selected_video.get("views")
-        if duration and duration != "Unknown":
-            embed.add_field(name="Duration", value=duration, inline=True)
         if views and views != "Unknown views":
             embed.add_field(name="Views", value=views, inline=True)
-
-        # Add thumbnail if available
-        thumbnail = selected_video.get("thumbnail")
-        if thumbnail:
-            embed.set_thumbnail(url=thumbnail)
-
-        # Add method footer if we have one
-        if method_footer:
+        
+        # Override footer if we have a specific method footer
+        if method_footer and not embed.footer:
             embed.set_footer(text=method_footer)
 
         # Send or edit the appropriate message

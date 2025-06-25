@@ -401,6 +401,7 @@ class Admin(Cog):
             "global_stats": {},
             "searcher_status": {},
             "audio_players": {},
+            "youtube_quota": {},
         }
 
         try:
@@ -465,6 +466,25 @@ class Admin(Cog):
                 "active": active_players,
                 "healthy": healthy_players,
             }
+            
+            # Check YouTube quota status
+            if hasattr(self.bot, "quota_monitor") and self.bot.quota_monitor:
+                try:
+                    quota_status = self.bot.quota_monitor.get_quota_status()
+                    conservation = self.bot.quota_monitor.get_conservation_recommendations()
+                    
+                    health_status["youtube_quota"] = {
+                        "usage": f"{quota_status['current_usage']}/{quota_status['daily_limit']}",
+                        "percentage_remaining": quota_status['percentage_remaining'],
+                        "level": quota_status['level'],
+                        "conservation_active": quota_status['conservation_active'],
+                        "hours_to_reset": quota_status.get('hours_to_reset', 'unknown'),
+                        "predicted_exhaustion_hours": quota_status.get('predicted_exhaustion_hours'),
+                        "message": conservation.get('message', ''),
+                    }
+                except Exception as e:
+                    logger.warning(f"Error checking YouTube quota: {e}")
+                    health_status["youtube_quota"] = {"error": str(e)}
 
             # Determine overall health
             success_rate = health_status["global_stats"].get("success_rate", 100)

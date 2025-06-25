@@ -11,6 +11,26 @@ from ...services.status_reporting import (
     PlatformStatus,
     OperationResult,
 )
+from ...utils.config_loader import load_config
+
+# Load configuration
+_config = None
+
+def _get_config():
+    """Lazy load configuration"""
+    global _config
+    if _config is None:
+        try:
+            _config = load_config("config/config.yaml")
+        except Exception:
+            # Fallback to default if config loading fails
+            _config = {"features": {"show_fallback_indicators": True}}
+    return _config
+
+def _show_fallback_indicators() -> bool:
+    """Check if fallback indicators should be shown"""
+    config = _get_config()
+    return config.get("features", {}).get("show_fallback_indicators", True)
 
 
 def create_embed(
@@ -57,8 +77,8 @@ def create_warning_embed(
     )
 
 
-def create_music_embed(song_info: dict[str, Any], queued: bool = False) -> Embed:
-    """Create an embed for music information"""
+def create_music_embed(song_info: dict[str, Any], queued: bool = False, search_method: Optional[SearchMethod] = None) -> Embed:
+    """Create an embed for music information with optional fallback indicators"""
     title = "Now Playing" if not queued else "Added to Queue"
     embed = create_embed(
         title=title,
@@ -76,6 +96,12 @@ def create_music_embed(song_info: dict[str, Any], queued: bool = False) -> Embed
 
     if song_info.get("thumbnail"):
         embed.set_thumbnail(url=song_info["thumbnail"])
+    
+    # Add fallback indicator if configured and applicable
+    if _show_fallback_indicators() and search_method:
+        footer_text = _get_method_indicator(search_method)
+        if footer_text:
+            embed.set_footer(text=footer_text)
 
     return embed
 
@@ -153,8 +179,8 @@ def create_status_report_embed(status_report: StatusReport) -> Embed:
     return embed
 
 
-def create_multi_platform_status_embed(multi_status: MultiPlatformStatus) -> Embed:
-    """Create an embed for multi-platform search status"""
+def create_multi_platform_status_embed(multi_status: MultiPlatformStatus, show_details: bool = True) -> Embed:
+    """Create an embed for multi-platform search status with optional detail level"""
     # Determine color based on overall success
     if not multi_status.successful_platforms:
         color = discord.Color.red()
@@ -177,25 +203,35 @@ def create_multi_platform_status_embed(multi_status: MultiPlatformStatus) -> Emb
         inline=False
     )
     
-    # Add platform status
-    if multi_status.successful_platforms:
-        success_text = "\n".join([f"🟢 {platform.title()}" for platform in multi_status.successful_platforms])
+    # Only show detailed platform status if configured
+    if show_details or not _show_fallback_indicators():
+        # Add platform status
+        if multi_status.successful_platforms:
+            success_text = "\n".join([f"🟢 {platform.title()}" for platform in multi_status.successful_platforms])
+            embed.add_field(
+                name=f"Successful Platforms ({len(multi_status.successful_platforms)})",
+                value=success_text,
+                inline=True
+            )
+        
+        if multi_status.failed_platforms:
+            failed_text = "\n".join([f"🔴 {platform.title()}" for platform in multi_status.failed_platforms])
+            embed.add_field(
+                name=f"Failed Platforms ({len(multi_status.failed_platforms)})",
+                value=failed_text,
+                inline=True
+            )
+    else:
+        # Show simplified status
+        status_indicator = _get_overall_status_indicator(multi_status)
         embed.add_field(
-            name=f"Successful Platforms ({len(multi_status.successful_platforms)})",
-            value=success_text,
-            inline=True
+            name="Status",
+            value=status_indicator,
+            inline=False
         )
     
-    if multi_status.failed_platforms:
-        failed_text = "\n".join([f"🔴 {platform.title()}" for platform in multi_status.failed_platforms])
-        embed.add_field(
-            name=f"Failed Platforms ({len(multi_status.failed_platforms)})",
-            value=failed_text,
-            inline=True
-        )
-    
-    # Add fallback information if relevant
-    if multi_status.has_fallbacks():
+    # Add fallback information if relevant and configured
+    if _show_fallback_indicators() and multi_status.has_fallbacks():
         fallback_platforms = multi_status.get_fallback_platforms()
         quota_platforms = multi_status.get_quota_exceeded_platforms()
         
@@ -203,39 +239,71 @@ def create_multi_platform_status_embed(multi_status: MultiPlatformStatus) -> Emb
         if quota_platforms:
             fallback_info.append(f"🔴 Quota exceeded: {', '.join(quota_platforms)}")
         if fallback_platforms:
-            fallback_info.append(f"🟡 Using fallbacks: {', '.join(fallback_platforms)}")
+            fallback_info.append(f"🟡 Using alternative methods: {', '.join(fallback_platforms)}")
         
         if fallback_info:
             embed.add_field(
-                name="Fallback Methods",
+                name="Search Method Info",
                 value="\n".join(fallback_info),
                 inline=False
             )
     
-    # Add method summary
-    method_text = []
-    if multi_status.primary_method == SearchMethod.DIRECT_URL:
-        method_text.append("🔗 Direct URL processing")
-    elif multi_status.primary_method == SearchMethod.API_SEARCH:
-        method_text.append("🔍 API search")
+    # Add method summary only if showing details
+    if show_details:
+        method_text = []
+        if multi_status.primary_method == SearchMethod.DIRECT_URL:
+            method_text.append("🔗 Direct URL processing")
+        elif multi_status.primary_method == SearchMethod.API_SEARCH:
+            method_text.append("🔍 API search")
+        
+        if multi_status.fallback_methods_used:
+            method_names = {
+                SearchMethod.FALLBACK_SEARCH: "alternative search",
+                SearchMethod.YTDLP_SEARCH: "direct extraction", 
+                SearchMethod.MIRROR_SEARCH: "mirror search"
+            }
+            fallback_names = [method_names.get(method, method.value) for method in multi_status.fallback_methods_used]
+            method_text.append(f"🔄 Also tried: {', '.join(fallback_names)}")
+        
+        if method_text:
+            embed.add_field(
+                name="Methods Used",
+                value="\n".join(method_text),
+                inline=False
+            )
     
-    if multi_status.fallback_methods_used:
-        method_names = {
-            SearchMethod.FALLBACK_SEARCH: "fallback search",
-            SearchMethod.YTDLP_SEARCH: "yt-dlp search", 
-            SearchMethod.MIRROR_SEARCH: "mirror search"
-        }
-        fallback_names = [method_names.get(method, method.value) for method in multi_status.fallback_methods_used]
-        method_text.append(f"🔄 Fallbacks: {', '.join(fallback_names)}")
-    
-    if method_text:
-        embed.add_field(
-            name="Methods Used",
-            value="\n".join(method_text),
-            inline=False
-        )
+    # Add footer with indicator if configured
+    if _show_fallback_indicators():
+        footer_text = _get_search_quality_indicator(multi_status)
+        if footer_text:
+            embed.set_footer(text=footer_text)
     
     return embed
+
+
+def _get_overall_status_indicator(multi_status: MultiPlatformStatus) -> str:
+    """Get a simple overall status indicator"""
+    total = multi_status.total_platforms
+    successful = len(multi_status.successful_platforms)
+    
+    if successful == total and not multi_status.has_fallbacks():
+        return "🟢 All platforms searched successfully"
+    elif successful == total and multi_status.has_fallbacks():
+        return "🟡 Results found using alternative methods"
+    elif successful > 0:
+        return f"🟡 Found results from {successful}/{total} platforms"
+    else:
+        return "🔴 No results found"
+
+
+def _get_search_quality_indicator(multi_status: MultiPlatformStatus) -> str:
+    """Get a footer indicator for search quality"""
+    if not multi_status.has_fallbacks():
+        return "🟢 Standard search"
+    elif multi_status.get_quota_exceeded_platforms():
+        return "🟡 Some limits reached - using alternatives"
+    else:
+        return "🟡 Mixed search methods"
 
 
 def create_quota_exceeded_embed(platform: str, fallback_available: bool = True) -> Embed:
@@ -363,5 +431,181 @@ def create_service_status_embed(service_status: dict[str, Any]) -> Embed:
     stats_text += f"Total Calls: {total_calls:,}"
 
     embed.add_field(name="Performance", value=stats_text, inline=True)
+    
+    # Add YouTube quota status if available
+    youtube_quota = service_status.get("youtube_quota", {})
+    if youtube_quota and "error" not in youtube_quota:
+        quota_emoji = "🟢"
+        if youtube_quota.get("level") == "caution":
+            quota_emoji = "🟡"
+        elif youtube_quota.get("level") in ["critical", "exhausted"]:
+            quota_emoji = "🔴"
+        
+        quota_text = f"{quota_emoji} Usage: {youtube_quota.get('usage', 'N/A')}\n"
+        quota_text += f"Remaining: {youtube_quota.get('percentage_remaining', 0):.0f}%\n"
+        
+        if youtube_quota.get("conservation_active"):
+            quota_text += "⚠️ Conservation mode active\n"
+        
+        if youtube_quota.get("predicted_exhaustion_hours"):
+            quota_text += f"Est. exhaustion: {youtube_quota['predicted_exhaustion_hours']:.1f}h\n"
+        
+        quota_text += f"Reset in: {youtube_quota.get('hours_to_reset', 'N/A')}h"
+        
+        embed.add_field(name="YouTube Quota", value=quota_text, inline=True)
 
     return embed
+
+
+def create_fallback_status_embed(platform: str, current_method: SearchMethod, is_active: bool = True) -> Embed:
+    """Create an embed showing current fallback mode status"""
+    if is_active:
+        color = discord.Color.orange()
+        emoji = "🟡"
+        status = "Active"
+    else:
+        color = discord.Color.green()
+        emoji = "🟢"
+        status = "Inactive"
+    
+    method_names = {
+        SearchMethod.API_SEARCH: "API Search",
+        SearchMethod.FALLBACK_SEARCH: "Alternative Search",
+        SearchMethod.YTDLP_SEARCH: "Direct Extraction",
+        SearchMethod.DIRECT_URL: "URL Processing",
+        SearchMethod.MIRROR_SEARCH: "Mirror Search"
+    }
+    
+    method_name = method_names.get(current_method, current_method.value)
+    
+    description = f"{emoji} **Fallback Mode**: {status}\n\n"
+    description += f"**Current Method**: {method_name}\n"
+    description += f"**Platform**: {platform.title()}\n\n"
+    
+    if is_active:
+        description += "ℹ️ Using alternative search methods to provide results.\n"
+        description += "Results may differ from standard searches."
+    else:
+        description += "✅ Standard API search is functioning normally."
+    
+    return create_embed(
+        title="Search Method Status",
+        description=description,
+        color=color
+    )
+
+
+def create_search_status_embed(
+    query: str, 
+    results_count: int,
+    platform: str,
+    method: SearchMethod,
+    from_cache: bool = False
+) -> Embed:
+    """Create an embed showing which search strategy provided results"""
+    # Determine color and indicator based on method
+    if method == SearchMethod.API_SEARCH and not from_cache:
+        color = discord.Color.green()
+        indicator = "🟢 API"
+        method_text = "Standard API search"
+    elif from_cache:
+        color = discord.Color.blue()
+        indicator = "🔵 Cache"
+        method_text = "Cached results"
+    elif method in [SearchMethod.FALLBACK_SEARCH, SearchMethod.YTDLP_SEARCH]:
+        color = discord.Color.orange()
+        indicator = "🟡 Fallback"
+        method_text = "Alternative search method"
+    else:
+        color = discord.Color.blue()
+        indicator = "🔍 Search"
+        method_text = method.value.replace('_', ' ').title()
+    
+    title = f"Search Results - {indicator}"
+    
+    description = f"**Query**: `{query}`\n"
+    description += f"**Platform**: {platform.title()}\n"
+    description += f"**Results**: {results_count} found\n"
+    description += f"**Method**: {method_text}\n"
+    
+    if from_cache:
+        description += "\n💾 *These are cached results from a previous search*"
+    elif method != SearchMethod.API_SEARCH:
+        description += "\n🔄 *Using alternative search due to API limitations*"
+    
+    embed = create_embed(
+        title=title,
+        description=description,
+        color=color
+    )
+    
+    # Add subtle footer indicator if configured
+    if _show_fallback_indicators():
+        footer_text = _get_method_indicator(method, from_cache)
+        if footer_text:
+            embed.set_footer(text=footer_text)
+    
+    return embed
+
+
+def create_quota_warning_embed(
+    platform: str,
+    quota_info: Optional[dict[str, Any]] = None,
+    retry_after: Optional[int] = None
+) -> Embed:
+    """Create a user-friendly embed warning about low/exceeded quota"""
+    title = "⚠️ API Limit Reached"
+    
+    description = f"The {platform.title()} search limit has been reached.\n\n"
+    
+    if quota_info:
+        remaining = quota_info.get("remaining", 0)
+        limit = quota_info.get("limit", "unknown")
+        resets_at = quota_info.get("resets_at", "unknown")
+        
+        if remaining == 0:
+            description += "📊 **Status**: No searches remaining\n"
+        else:
+            description += f"📊 **Status**: {remaining}/{limit} searches remaining\n"
+        
+        if resets_at != "unknown":
+            description += f"⏰ **Resets**: {resets_at}\n"
+    
+    if retry_after:
+        minutes = retry_after // 60
+        seconds = retry_after % 60
+        if minutes > 0:
+            description += f"⏳ **Try again in**: {minutes}m {seconds}s\n"
+        else:
+            description += f"⏳ **Try again in**: {seconds}s\n"
+    
+    description += "\n**What's happening?**\n"
+    description += "• Switching to alternative search methods\n"
+    description += "• You can still use direct video URLs\n"
+    description += "• Results may be limited temporarily\n\n"
+    description += "💡 *This is temporary - normal service will resume soon*"
+    
+    return create_embed(
+        title=title,
+        description=description,
+        color=discord.Color.orange()
+    )
+
+
+def _get_method_indicator(method: SearchMethod, from_cache: bool = False) -> str:
+    """Get a subtle indicator text for the search method"""
+    if not _show_fallback_indicators():
+        return ""
+    
+    if from_cache:
+        return "📦 Cached Result"
+    
+    indicators = {
+        SearchMethod.API_SEARCH: "🟢 Standard Search",
+        SearchMethod.FALLBACK_SEARCH: "🟡 Alternative Search",
+        SearchMethod.YTDLP_SEARCH: "🟡 Direct Extraction",
+        SearchMethod.DIRECT_URL: "🔗 Direct URL",
+        SearchMethod.MIRROR_SEARCH: "🟡 Mirror Search"
+    }
+    
+    return indicators.get(method, "")

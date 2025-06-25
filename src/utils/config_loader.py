@@ -58,6 +58,7 @@ class FeaturesConfig(TypedDict):
     auto_disconnect_timeout: int
     save_queue: bool
     announce_songs: bool
+    show_fallback_indicators: bool
 
 
 class ConfigType(TypedDict):
