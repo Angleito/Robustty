@@ -15,7 +15,7 @@ from src.services.searcher import MultiPlatformSearcher
 from src.utils.config_loader import ConfigType
 from src.services.metrics_collector import get_metrics_collector
 from src.services.health_monitor import HealthMonitor
-from src.utils.resilient_discord_client import add_resilient_connection_to_bot
+# from src.utils.resilient_discord_client import add_resilient_connection_to_bot
 from src.utils.network_connectivity import get_connectivity_manager
 
 logger = logging.getLogger(__name__)
@@ -47,8 +47,9 @@ class RobusttyBot(commands.Bot):
         self.health_monitor: Optional[HealthMonitor] = None
         self.connectivity_manager = get_connectivity_manager(config)
 
-        # Add resilient connection capabilities
-        self.resilient_client = add_resilient_connection_to_bot(self, config)
+        # Temporarily disable resilient connection to fix infinite loop
+        # self.resilient_client = add_resilient_connection_to_bot(self, config)
+        self.resilient_client = None
 
     async def setup_hook(self) -> None:
         """Initialize bot components"""
