@@ -195,6 +195,20 @@ def main():
         elapsed = time.time() - start_time
         logger.info(f"Cookie extraction completed successfully in {elapsed:.2f}s")
         
+        # Auto-sync to VPS if enabled
+        if os.getenv('AUTO_SYNC_VPS', 'false').lower() == 'true':
+            try:
+                import subprocess
+                logger.info("Starting auto-sync to VPS...")
+                result = subprocess.run(['python3', '/app/scripts/auto-sync-cookies.py'], 
+                                      capture_output=True, text=True)
+                if result.returncode == 0:
+                    logger.info("Auto-sync to VPS completed")
+                else:
+                    logger.warning(f"Auto-sync to VPS failed: {result.stderr}")
+            except Exception as e:
+                logger.error(f"Failed to run auto-sync: {e}")
+        
     except Exception as e:
         logger.error(f"Cookie extraction failed with unexpected error: {e}")
         import traceback

@@ -8,6 +8,10 @@ services:
     restart: unless-stopped
     environment:
       - COOKIE_REFRESH_INTERVAL=7200  # 2 hours in seconds
+      - AUTO_SYNC_VPS=${AUTO_SYNC_VPS:-false}  # Enable auto-sync to VPS
+      - VPS_HOST=${VPS_HOST:-}  # VPS IP address
+      - VPS_USER=${VPS_USER:-root}  # VPS username
+      - VPS_PATH=${VPS_PATH:-~/robustty-bot/cookies}  # VPS cookie path
     volumes:
       # Mount host Brave browser data for cookie extraction
       - "${HOME}/Library/Application Support/BraveSoftware/Brave-Browser:/host-brave:ro"
@@ -15,6 +19,8 @@ services:
       - robustty-cookies:/app/cookies
       # Logs
       - ./logs:/app/logs
+      # SSH key for VPS sync (read-only)
+      - ${SSH_KEY_PATH:-~/.ssh/yeet}:/root/.ssh/id_rsa:ro
     command: /app/cookie-service.sh
 
 volumes:

@@ -4,17 +4,21 @@ FROM python:3.11-slim
 RUN apt-get update && apt-get install -y \
     cron \
     sqlite3 \
+    rsync \
+    openssh-client \
     && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
 WORKDIR /app
 
 # Copy requirements and install Python dependencies (minimal)
-COPY requirements.cookies.txt requirements.txt
+COPY requirements-cookies.txt requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy cookie extraction scripts and utilities
 COPY scripts/extract-brave-cookies.py /app/scripts/
+COPY scripts/auto-sync-cookies.py /app/scripts/
+COPY scripts/setup-ssh-config.sh /app/scripts/
 COPY src/extractors/ /app/src/extractors/
 COPY src/services/cookie_manager.py /app/src/services/
 COPY src/utils/ /app/src/utils/
@@ -22,7 +26,7 @@ COPY src/__init__.py /app/src/
 
 # Create cookie service script
 COPY cookie-service.sh /app/
-RUN chmod +x /app/cookie-service.sh
+RUN chmod +x /app/cookie-service.sh /app/scripts/setup-ssh-config.sh
 
 # Create cron job for cookie extraction
 RUN echo "0 */2 * * * cd /app && python3 scripts/extract-brave-cookies.py >> /var/log/cron.log 2>&1" | crontab -

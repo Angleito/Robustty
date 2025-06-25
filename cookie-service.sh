@@ -3,6 +3,13 @@
 echo "Starting Robustty Cookie Extraction Service..."
 echo "Cookie refresh interval: ${COOKIE_REFRESH_INTERVAL:-7200} seconds"
 
+# Setup SSH configuration if VPS sync is enabled
+if [ "$AUTO_SYNC_VPS" = "true" ]; then
+    echo "Setting up SSH configuration for VPS sync..."
+    /app/scripts/setup-ssh-config.sh
+    echo "VPS sync enabled to $VPS_USER@$VPS_HOST"
+fi
+
 # Start cron daemon
 service cron start
 
