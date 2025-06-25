@@ -8,7 +8,6 @@ from googleapiclient.errors import HttpError  # type: ignore
 
 from .base import VideoPlatform
 from .errors import (
-    PlatformNotAvailableError,
     PlatformAPIError,
     PlatformRateLimitError,
     PlatformAuthenticationError,
@@ -16,13 +15,10 @@ from .errors import (
 )
 from ..utils.network_resilience import (
     with_retry,
-    with_circuit_breaker,
     PLATFORM_RETRY_CONFIG,
     PLATFORM_CIRCUIT_BREAKER_CONFIG,
     NetworkResilienceError,
     CircuitBreakerOpenError,
-    NetworkTimeoutError,
-    MaxRetriesExceededError,
 )
 
 logger = logging.getLogger(__name__)
@@ -83,7 +79,7 @@ class YouTubePlatform(VideoPlatform):
     async def search_videos(
         self, query: str, max_results: int = 10
     ) -> List[Dict[str, Any]]:
-        """Search YouTube videos with enhanced error handling"""
+        """Search YouTube videos with enhanced error handling and detailed metadata"""
         if not self.youtube:
             raise PlatformAuthenticationError(
                 "YouTube API key is required for search. Please configure 'api_key' in config.",
@@ -91,14 +87,15 @@ class YouTubePlatform(VideoPlatform):
             )
 
         try:
-            request = self.youtube.search().list(
+            # First, get search results
+            search_request = self.youtube.search().list(
                 part="snippet", q=query, type="video", maxResults=max_results
             )
-            response = request.execute()
+            search_response = search_request.execute()
 
-            results: List[Dict[str, Any]] = []
-            for item in response.get("items", []):
-                # Handle different response structures
+            # Extract video IDs for detailed lookup
+            video_ids = []
+            for item in search_response.get("items", []):
                 if "id" in item and isinstance(item["id"], dict):
                     video_id = item["id"].get("videoId")
                 elif "id" in item and isinstance(item["id"], str):
@@ -106,32 +103,65 @@ class YouTubePlatform(VideoPlatform):
                 else:
                     continue
 
+                if video_id:
+                    video_ids.append(video_id)
+
+            if not video_ids:
+                return []
+
+            # Get detailed video information including duration, view count, etc.
+            videos_request = self.youtube.videos().list(
+                part="snippet,contentDetails,statistics", id=",".join(video_ids)
+            )
+            videos_response = videos_request.execute()
+
+            results: List[Dict[str, Any]] = []
+            for item in videos_response.get("items", []):
+                video_id = item.get("id")
                 if not video_id:
                     continue
 
                 snippet = item.get("snippet", {})
+                content_details = item.get("contentDetails", {})
+                statistics = item.get("statistics", {})
+
+                # Parse duration from ISO 8601 format (PT4M13S -> 4:13)
+                duration = self._parse_duration(content_details.get("duration", ""))
+
+                # Format view count
+                view_count = statistics.get("viewCount", "0")
+                view_count_formatted = self._format_view_count(view_count)
+
+                # Get best thumbnail
+                thumbnail_url = self._get_best_thumbnail(snippet.get("thumbnails", {}))
+
+                # Format publish date
+                published_at = snippet.get("publishedAt", "")
+                published_formatted = self._format_publish_date(published_at)
 
                 logger.info(
-                    f"YouTube search result: video_id={video_id}, title={snippet.get('title', 'Unknown')}"
+                    f"YouTube search result: video_id={video_id}, title={snippet.get('title', 'Unknown')}, duration={duration}, views={view_count_formatted}"
                 )
+
                 results.append(
                     {
                         "id": video_id,
                         "title": snippet.get("title", "Unknown"),
                         "channel": snippet.get("channelTitle", "Unknown"),
-                        "thumbnail": (
-                            snippet.get("thumbnails", {})
-                            .get("high", {})
-                            .get(
-                                "url",
-                                snippet.get("thumbnails", {})
-                                .get("default", {})
-                                .get("url", ""),
-                            )
-                        ),
+                        "thumbnail": thumbnail_url,
                         "url": f"https://www.youtube.com/watch?v={video_id}",
                         "platform": "youtube",
-                        "description": snippet.get("description", ""),
+                        "description": (
+                            snippet.get("description", "")[:200] + "..."
+                            if len(snippet.get("description", "")) > 200
+                            else snippet.get("description", "")
+                        ),
+                        "duration": duration,
+                        "views": view_count_formatted,
+                        "published": published_formatted,
+                        "view_count_raw": (
+                            int(view_count) if view_count.isdigit() else 0
+                        ),
                     }
                 )
 
@@ -158,6 +188,99 @@ class YouTubePlatform(VideoPlatform):
                 f"Search failed: {str(e)}", platform="YouTube", original_error=e
             )
 
+    def _parse_duration(self, duration: str) -> str:
+        """Parse ISO 8601 duration (PT4M13S) to readable format (4:13)"""
+        if not duration:
+            return "Unknown"
+
+        try:
+            import re
+
+            # Match PT[hours]H[minutes]M[seconds]S with stricter validation
+            # Pattern correctly handles ISO 8601 duration format
+            pattern = (
+                r"^PT(?:(?P<hours>\d+)H)?(?:(?P<minutes>\d+)M)?(?:(?P<seconds>\d+)S)?$"
+            )
+            match = re.match(pattern, duration.strip())
+
+            if not match:
+                logger.debug(f"Duration format not recognized: {duration}")
+                return "Unknown"
+
+            # Extract time components with proper defaults
+            hours = int(match.group("hours") or 0)
+            minutes = int(match.group("minutes") or 0)
+            seconds = int(match.group("seconds") or 0)
+
+            # Handle edge case where all components are zero
+            if hours == 0 and minutes == 0 and seconds == 0:
+                return "0:00"
+
+            # Format duration based on presence of hours
+            if hours > 0:
+                return f"{hours}:{minutes:02d}:{seconds:02d}"
+            else:
+                return f"{minutes}:{seconds:02d}"
+
+        except Exception as e:
+            logger.debug(f"Error parsing duration '{duration}': {e}")
+            return "Unknown"
+
+    def _format_view_count(self, view_count: str) -> str:
+        """Format view count to readable format (1.2M, 45K, etc.)"""
+        try:
+            count = int(view_count)
+            if count >= 1_000_000:
+                return f"{count / 1_000_000:.1f}M views"
+            elif count >= 1_000:
+                return f"{count / 1_000:.1f}K views"
+            else:
+                return f"{count} views"
+        except (ValueError, TypeError):
+            return "Unknown views"
+
+    def _get_best_thumbnail(self, thumbnails: Dict[str, Any]) -> str:
+        """Get the best available thumbnail URL"""
+        # Priority: maxres > high > medium > default
+        for quality in ["maxres", "high", "medium", "default"]:
+            if quality in thumbnails and "url" in thumbnails[quality]:
+                return thumbnails[quality]["url"]
+        return ""
+
+    def _format_publish_date(self, published_at: str) -> str:
+        """Format publish date to readable format"""
+        if not published_at:
+            return "Unknown"
+
+        try:
+            from datetime import datetime
+
+            # Parse ISO format: 2023-01-15T10:30:00Z
+            dt = datetime.fromisoformat(published_at.replace("Z", "+00:00"))
+            now = datetime.now(dt.tzinfo)
+
+            # Calculate time difference
+            diff = now - dt
+            days = diff.days
+
+            if days == 0:
+                return "Today"
+            elif days == 1:
+                return "Yesterday"
+            elif days < 7:
+                return f"{days} days ago"
+            elif days < 30:
+                weeks = days // 7
+                return f"{weeks} week{'s' if weeks != 1 else ''} ago"
+            elif days < 365:
+                months = days // 30
+                return f"{months} month{'s' if months != 1 else ''} ago"
+            else:
+                years = days // 365
+                return f"{years} year{'s' if years != 1 else ''} ago"
+        except Exception:
+            return "Unknown"
+
     async def get_video_details(self, video_id: str) -> Optional[Dict[str, Any]]:
         """Get detailed information about a video"""
         if not self.youtube:
@@ -175,16 +298,31 @@ class YouTubePlatform(VideoPlatform):
             item = response["items"][0]
             snippet = item["snippet"]
 
+            # Format the detailed video information
+            duration = self._parse_duration(item["contentDetails"].get("duration", ""))
+            view_count = item["statistics"].get("viewCount", "0")
+            view_count_formatted = self._format_view_count(view_count)
+            thumbnail_url = self._get_best_thumbnail(snippet.get("thumbnails", {}))
+            published_formatted = self._format_publish_date(
+                snippet.get("publishedAt", "")
+            )
+
             return {
                 "id": video_id,
                 "title": snippet["title"],
                 "channel": snippet["channelTitle"],
-                "thumbnail": snippet["thumbnails"]["high"]["url"],
+                "thumbnail": thumbnail_url,
                 "url": f"https://www.youtube.com/watch?v={video_id}",
                 "platform": "youtube",
-                "description": snippet.get("description", ""),
-                "duration": item["contentDetails"]["duration"],
-                "views": item["statistics"].get("viewCount", 0),
+                "description": (
+                    snippet.get("description", "")[:200] + "..."
+                    if len(snippet.get("description", "")) > 200
+                    else snippet.get("description", "")
+                ),
+                "duration": duration,
+                "views": view_count_formatted,
+                "published": published_formatted,
+                "view_count_raw": int(view_count) if view_count.isdigit() else 0,
             }
         except Exception as e:
             logger.error(f"YouTube video details error: {e}")

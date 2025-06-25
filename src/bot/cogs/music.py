@@ -7,12 +7,6 @@ from discord.ext import commands
 
 from ..utils.checks import is_in_voice_channel, is_same_voice_channel
 from ..utils.embeds import create_embed, create_error_embed, create_warning_embed  # type: ignore
-from ...platforms.errors import (
-    PlatformError,
-    PlatformNotAvailableError,
-    PlatformRateLimitError,
-    PlatformAuthenticationError,
-)
 from ...utils.network_resilience import (
     CircuitBreakerOpenError,
     MaxRetriesExceededError,
@@ -368,13 +362,30 @@ class Music(commands.Cog):
         all_results: List[Dict[str, Any]] = []
         for platform, platform_results in results.items():
             if platform_results:
-                # Add platform field
-                platform_text = "\n".join(
-                    [
-                        f"{i+1}. [{r['title']}]({r['url']})"
-                        for i, r in enumerate(platform_results[:3])
-                    ]
-                )
+                # Enhanced platform field with more metadata
+                platform_lines = []
+                for i, r in enumerate(platform_results[:3]):
+                    title = r["title"]
+                    channel = r.get("channel", "Unknown")
+                    duration = r.get("duration", "")
+                    views = r.get("views", "")
+
+                    # Create a rich description line
+                    desc_parts = [f"**{channel}**"]
+                    if duration and duration != "Unknown":
+                        desc_parts.append(f"({duration}")
+                        if views and views != "Unknown views":
+                            desc_parts.append(f" • {views})")
+                        else:
+                            desc_parts.append(")")
+                    elif views and views != "Unknown views":
+                        desc_parts.append(f"({views})")
+
+                    platform_lines.append(
+                        f"{i+1}. [{title}]({r['url']})\n    {' '.join(desc_parts)}"
+                    )
+
+                platform_text = "\n".join(platform_lines)
                 embed.add_field(
                     name=f"{platform.title()} Results",
                     value=platform_text,
@@ -450,8 +461,25 @@ class Music(commands.Cog):
             description=f"[{selected['title']}]({selected['url']})",
             color=discord.Color.green(),
         )
-        embed.add_field(name="Platform", value=selected["platform"].title())
-        embed.add_field(name="Channel", value=selected.get("channel", "Unknown"))
+        embed.add_field(
+            name="Platform", value=selected["platform"].title(), inline=True
+        )
+        embed.add_field(
+            name="Channel", value=selected.get("channel", "Unknown"), inline=True
+        )
+
+        # Add duration and views if available (YouTube)
+        duration = selected.get("duration")
+        views = selected.get("views")
+        if duration and duration != "Unknown":
+            embed.add_field(name="Duration", value=duration, inline=True)
+        if views and views != "Unknown views":
+            embed.add_field(name="Views", value=views, inline=True)
+
+        # Add thumbnail if available
+        thumbnail = selected.get("thumbnail")
+        if thumbnail:
+            embed.set_thumbnail(url=thumbnail)
 
         await search_msg.edit(embed=embed)
 
@@ -535,12 +563,26 @@ class Music(commands.Cog):
 
         # Add queue items
         if queue:
-            queue_text = "\n".join(
-                [
-                    f"{i+1}. [{item['title']}]({item['url']})"
-                    for i, item in enumerate(queue[:10])
-                ]
-            )
+            queue_lines = []
+            for i, item in enumerate(queue[:10]):
+                title = item["title"]
+                url = item["url"]
+                channel = item.get("channel", "Unknown")
+                duration = item.get("duration", "")
+
+                # Create enhanced queue line
+                line = f"{i+1}. [{title}]({url})"
+                if channel != "Unknown" or (duration and duration != "Unknown"):
+                    details = []
+                    if channel != "Unknown":
+                        details.append(f"**{channel}**")
+                    if duration and duration != "Unknown":
+                        details.append(f"({duration})")
+                    line += f"\n    {' '.join(details)}"
+
+                queue_lines.append(line)
+
+            queue_text = "\n".join(queue_lines)
 
             if len(queue) > 10:
                 queue_text += f"\n\n... and {len(queue) - 10} more"
