@@ -1,12 +1,13 @@
 services:
-  # Main Discord bot with integrated cookie extraction
+  # Discord bot - platform-agnostic configuration
   robustty:
     build:
       context: .
       dockerfile: Dockerfile
     container_name: robustty-bot
     restart: unless-stopped
-    network_mode: host  # OrbStack optimization - use host networking
+    ports:
+      - "8080:8080"  # Health check and metrics port
     environment:
       - DISCORD_TOKEN=${DISCORD_TOKEN}
       - YOUTUBE_API_KEY=${YOUTUBE_API_KEY}
@@ -15,7 +16,7 @@ services:
       - SEARCH_TIMEOUT=${SEARCH_TIMEOUT:-30}
       - STREAM_TIMEOUT=${STREAM_TIMEOUT:-300}
       - MAX_QUEUE_SIZE=${MAX_QUEUE_SIZE:-100}
-      - REDIS_URL=${REDIS_URL:-redis://localhost:6379}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379}
       - COOKIE_REFRESH_INTERVAL=7200  # 2 hours in seconds
       # Platform enable/disable flags
       - YOUTUBE_ENABLED=${YOUTUBE_ENABLED:-true}
@@ -23,19 +24,64 @@ services:
       - ODYSEE_ENABLED=${ODYSEE_ENABLED:-true}
       - PEERTUBE_ENABLED=${PEERTUBE_ENABLED:-true}
     volumes:
-      # Mount host Brave browser data for cookie extraction
-      - "${HOME}/Library/Application Support/BraveSoftware/Brave-Browser:/host-brave:ro"
       # App data persistence
       - ./config:/app/config:ro
       - ./logs:/app/logs
       - ./data:/app/data
       - robustty-cookies:/app/cookies
+      # Conditional mount for macOS Brave browser data (only if path exists)
+      # On Ubuntu VPS, this volume will be empty but won't cause errors
+      - type: bind
+        source: ${BRAVE_BROWSER_PATH:-./empty-cookies}
+        target: /host-brave
+        read_only: true
+        bind:
+          create_host_path: true
+    networks:
+      - robustty-network
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+      - 1.1.1.1
     healthcheck:
       test: ["CMD", "python3", "/app/scripts/health-check.py", "basic"]
       interval: 30s
       timeout: 15s
       retries: 3
       start_period: 60s
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  # Redis for caching
+  redis:
+    image: redis:7-alpine
+    container_name: robustty-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - robustty-redis-data:/data
+    networks:
+      - robustty-network
+    command: |
+      redis-server 
+      --appendonly yes 
+      --port 6379
+      --tcp-keepalive 300
+      --timeout 0
+      --tcp-backlog 511
+      --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+networks:
+  robustty-network:
+    driver: bridge
 
 volumes:
   robustty-cookies:

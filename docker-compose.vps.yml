@@ -1,13 +1,11 @@
 services:
-  # Discord bot for VPS deployment (without cookie extraction)
+  # Main Discord bot for VPS deployment (no cookie extraction)
   robustty:
     build:
       context: .
-      dockerfile: Dockerfile.vps
+      dockerfile: Dockerfile
     container_name: robustty-bot
     restart: unless-stopped
-    ports:
-      - "8080:8080"  # Health check and metrics port
     environment:
       - DISCORD_TOKEN=${DISCORD_TOKEN}
       - YOUTUBE_API_KEY=${YOUTUBE_API_KEY}
@@ -17,87 +15,43 @@ services:
       - STREAM_TIMEOUT=${STREAM_TIMEOUT:-300}
       - MAX_QUEUE_SIZE=${MAX_QUEUE_SIZE:-100}
       - REDIS_URL=${REDIS_URL:-redis://redis:6379}
-      - COOKIE_SOURCE=remote  # Use remote cookies instead of local extraction
+      # Platform enable/disable flags
+      - YOUTUBE_ENABLED=${YOUTUBE_ENABLED:-true}
+      - RUMBLE_ENABLED=${RUMBLE_ENABLED:-true}
+      - ODYSEE_ENABLED=${ODYSEE_ENABLED:-true}
+      - PEERTUBE_ENABLED=${PEERTUBE_ENABLED:-true}
     volumes:
-      # App data persistence
+      # App data persistence (no Brave browser mount for VPS)
       - ./config:/app/config:ro
       - ./logs:/app/logs
       - ./data:/app/data
-      # Mount external cookie directory (synced from cookie machine)
-      - ./cookies:/app/cookies:ro
-    networks:
-      - robustty-network
-    dns:
-      - 8.8.8.8
-      - 8.8.4.4
-      - 1.1.1.1
-    dns_search:
-      - .
-    dns_opt:
-      - ndots:1
-      - timeout:5
-      - attempts:3
-    ulimits:
-      nofile:
-        soft: 65536
-        hard: 65536
-      nproc:
-        soft: 65536
-        hard: 65536
-    sysctls:
-      - net.core.somaxconn=65535
-      - net.ipv4.tcp_keepalive_time=600
+      - robustty-cookies:/app/cookies
+    depends_on:
+      - redis
     healthcheck:
       test: ["CMD", "python3", "/app/scripts/health-check.py", "basic"]
       interval: 30s
       timeout: 15s
       retries: 3
       start_period: 60s
-    depends_on:
-      redis:
-        condition: service_healthy
 
-  # Redis for caching
+  # Redis cache service for VPS
   redis:
     image: redis:7-alpine
     container_name: robustty-redis
     restart: unless-stopped
-    ports:
-      - "6379:6379"
     volumes:
       - robustty-redis-data:/data
-    networks:
-      - robustty-network
-    sysctls:
-      - net.core.somaxconn=65535
-    command: |
-      redis-server 
-      --appendonly yes 
-      --port 6379
-      --tcp-keepalive 300
-      --timeout 0
-      --tcp-backlog 511
-      --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
-      interval: 30s
-      timeout: 5s
+      interval: 10s
+      timeout: 3s
       retries: 3
-      start_period: 10s
-
-networks:
-  robustty-network:
-    driver: bridge
-    driver_opts:
-      com.docker.network.driver.mtu: 1500
-      com.docker.network.bridge.enable_ip_masquerade: 'true'
-      com.docker.network.bridge.enable_icc: 'true'
-    ipam:
-      driver: default
-      config:
-        - subnet: 172.20.0.0/16
-          gateway: 172.20.0.1
 
 volumes:
+  robustty-cookies:
+    driver: local
   robustty-redis-data:
     driver: local
