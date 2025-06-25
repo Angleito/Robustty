@@ -35,7 +35,7 @@ class RobusttyBot(commands.Bot):
         )
 
         self.config = config
-        self.platform_registry = PlatformRegistry()
+        self.platform_registry: Optional[PlatformRegistry] = None
         self.searcher: Optional[MultiPlatformSearcher] = None
         self.cookie_manager: Optional[CookieManager] = None
         self.enhanced_cookie_manager: Optional[EnhancedCookieManager] = None
@@ -53,6 +53,15 @@ class RobusttyBot(commands.Bot):
 
     async def setup_hook(self) -> None:
         """Initialize bot components"""
+        # Initialize cache manager first
+        from src.services.cache_manager import CacheManager
+
+        self.cache_manager = CacheManager(self.config)
+        await self.cache_manager.initialize()
+
+        # Initialize platform registry with cache manager
+        self.platform_registry = PlatformRegistry(self.cache_manager)
+
         # Load platforms dynamically
         try:
             # Import platform modules
@@ -112,20 +121,18 @@ class RobusttyBot(commands.Bot):
         await self.health_endpoints.start()
 
         # Initialize services
-        self.searcher = MultiPlatformSearcher(self.platform_registry)
+        self.searcher = MultiPlatformSearcher(self.platform_registry, self.config)
 
         # Load cookies
         await self.cookie_manager.load_cookies()
         await self.enhanced_cookie_manager.load_cookies()
 
-        # Initialize cache manager if needed
-        from src.services.cache_manager import CacheManager
-
-        self.cache_manager = CacheManager(self.config)
-        await self.cache_manager.initialize()
-
         # Initialize health monitor
         self.health_monitor = HealthMonitor(self, self.config)
+        
+        # Initialize platform prioritization manager
+        from src.services.platform_prioritization import initialize_prioritization_manager
+        initialize_prioritization_manager(self.config)
 
         # Setup connection monitoring callbacks (stub implementation since resilient client is disabled)
         # self.add_connection_callback(
@@ -213,6 +220,10 @@ class RobusttyBot(commands.Bot):
 
         # Cleanup platforms
         await self.platform_registry.cleanup_all()
+
+        # Shutdown prioritization manager
+        from src.services.platform_prioritization import shutdown_prioritization_manager
+        shutdown_prioritization_manager()
 
         # Cleanup cache manager
         if hasattr(self, "cache_manager") and self.cache_manager:

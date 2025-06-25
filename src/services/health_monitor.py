@@ -503,6 +503,17 @@ class HealthMonitor:
         self.consecutive_failures_gauge.labels(service=service_name).set(
             health.consecutive_failures
         )
+        
+        # Update platform prioritization if this is a platform health check
+        if service_name.startswith("platform_"):
+            platform_name = service_name.replace("platform_", "")
+            try:
+                from src.services.platform_prioritization import get_prioritization_manager
+                prioritization_manager = get_prioritization_manager()
+                if prioritization_manager:
+                    prioritization_manager.update_platform_health(platform_name, result.status)
+            except ImportError:
+                pass  # Prioritization manager not available
 
         # Log health status changes
         if result.status != ConnectionStatus.HEALTHY:
@@ -516,6 +527,17 @@ class HealthMonitor:
                 f"Health check failed for {service_name}: {result.error} "
                 f"(consecutive failures: {health.consecutive_failures})",
             )
+
+        # Update platform prioritization manager with health status
+        if service_name.startswith("platform_"):
+            platform_name = service_name.replace("platform_", "")
+            try:
+                from .platform_prioritization import get_prioritization_manager
+                prioritization_manager = get_prioritization_manager()
+                if prioritization_manager:
+                    prioritization_manager.update_platform_health(platform_name, result.status)
+            except ImportError:
+                pass  # Platform prioritization not available
 
         # Trigger recovery if needed
         if (

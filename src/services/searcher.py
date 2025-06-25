@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import time
 from typing import Any, Coroutine, Dict, List, Optional, Tuple
 
 from src.platforms.base import VideoPlatform
@@ -28,6 +29,14 @@ from src.services.status_reporting import (
     report_platform_error,
     report_direct_url_success,
 )
+from src.services.platform_prioritization import get_prioritization_manager
+
+try:
+    from src.services.deduplication import CrossPlatformDeduplicator
+    DEDUPLICATION_AVAILABLE = True
+except ImportError:
+    DEDUPLICATION_AVAILABLE = False
+    logger.warning("Deduplication module not available")
 
 logger = logging.getLogger(__name__)
 
@@ -35,10 +44,19 @@ logger = logging.getLogger(__name__)
 class MultiPlatformSearcher:
     """Searches across multiple video platforms"""
 
-    def __init__(self, platform_registry: PlatformRegistry):
+    def __init__(self, platform_registry: PlatformRegistry, config: Optional[Dict[str, Any]] = None):
         self.platform_registry = platform_registry
         self.status_reporter = get_status_reporter()
         self._last_search_status: Optional[MultiPlatformStatus] = None
+        # Cache manager will be accessible through the platform registry
+        
+        # Initialize deduplication if available
+        self.deduplicator = None
+        if DEDUPLICATION_AVAILABLE and config:
+            dedup_config = config.get('deduplication', {})
+            if dedup_config.get('enabled', False):
+                self.deduplicator = CrossPlatformDeduplicator(dedup_config)
+                logger.info("Cross-platform deduplication enabled")
 
     async def search_all_platforms(
         self, query: str, max_results: int = 10
@@ -123,11 +141,83 @@ class MultiPlatformSearcher:
         # Store the multi-platform status for later retrieval
         self._last_search_status = multi_status
 
+        # Apply deduplication if enabled
+        if self.deduplicator and total_results > 1:
+            try:
+                dedup_result = self.deduplicator.deduplicate_search_results(results)
+                
+                # Reorganize deduplicated results back into platform format
+                deduplicated_by_platform = {}
+                for video in dedup_result.deduplicated_videos:
+                    platform = video.get('platform', 'unknown')
+                    if platform not in deduplicated_by_platform:
+                        deduplicated_by_platform[platform] = []
+                    
+                    # Remove platform tag and quality metadata before returning
+                    clean_video = {k: v for k, v in video.items() 
+                                 if not k.startswith('_') and k != 'platform'}
+                    deduplicated_by_platform[platform].append(clean_video)
+                
+                # Log deduplication summary
+                dedup_summary = self.deduplicator.get_deduplication_summary(dedup_result)
+                logger.info(f"Deduplication applied: {dedup_summary}")
+                
+                return deduplicated_by_platform
+                
+            except Exception as e:
+                logger.warning(f"Deduplication failed, returning original results: {e}")
+                return results
+
         return results
     
     def get_last_search_status(self) -> Optional[MultiPlatformStatus]:
         """Get the status of the last search operation"""
         return self._last_search_status
+    
+    async def search_all_platforms_with_deduplication(
+        self, query: str, max_results: int = 10, enable_deduplication: bool = True
+    ) -> Tuple[Dict[str, List[Dict[str, Any]]], Optional[Dict[str, Any]]]:
+        """Search with explicit deduplication control, returning results and deduplication info"""
+        # Temporarily override deduplication setting
+        original_deduplicator = self.deduplicator
+        if not enable_deduplication:
+            self.deduplicator = None
+        
+        try:
+            results = await self.search_all_platforms(query, max_results)
+            
+            # If deduplication was applied, get the summary
+            dedup_info = None
+            if self.deduplicator and enable_deduplication:
+                # Run deduplication again to get detailed info
+                dedup_result = self.deduplicator.deduplicate_search_results(results)
+                dedup_info = {
+                    'summary': self.deduplicator.get_deduplication_summary(dedup_result),
+                    'stats': dedup_result.deduplication_stats,
+                    'duplicate_groups_count': len(dedup_result.duplicate_groups),
+                    'removed_count': len(dedup_result.removed_duplicates)
+                }
+            
+            return results, dedup_info
+            
+        finally:
+            # Restore original deduplicator
+            self.deduplicator = original_deduplicator
+    
+    def configure_deduplication(self, config: Dict[str, Any]):
+        """Update deduplication configuration"""
+        if self.deduplicator:
+            self.deduplicator.update_config(config)
+            logger.info("Deduplication configuration updated")
+        elif DEDUPLICATION_AVAILABLE and config.get('enabled', False):
+            self.deduplicator = CrossPlatformDeduplicator(config)
+            logger.info("Deduplication enabled with new configuration")
+    
+    def get_deduplication_config(self) -> Optional[Dict[str, Any]]:
+        """Get current deduplication configuration"""
+        if self.deduplicator:
+            return self.deduplicator.get_current_config()
+        return None
 
     @with_retry(
         retry_config=PLATFORM_RETRY_CONFIG,
@@ -140,41 +230,94 @@ class MultiPlatformSearcher:
         self, platform: VideoPlatform, query: str, max_results: int
     ) -> List[Dict[str, Any]]:
         """Search on a specific platform with enhanced error handling"""
+        start_time = time.time()
+        prioritization_manager = get_prioritization_manager()
+        
         try:
             logger.debug(f"Searching {platform.name} for: {query}")
             results = await platform.search_videos(query, max_results)
-            logger.debug(f"{platform.name} returned {len(results)} results")
+            response_time = time.time() - start_time
+            
+            logger.debug(f"{platform.name} returned {len(results)} results in {response_time:.2f}s")
+            
+            # Record successful operation for prioritization
+            if prioritization_manager:
+                prioritization_manager.record_platform_operation(
+                    platform.name, success=True, response_time=response_time
+                )
+            
             return results
 
         except PlatformRateLimitError as e:
+            response_time = time.time() - start_time
             logger.warning(f"Rate limit hit on {platform.name}: {e.user_message}")
+            
+            # Record failure for prioritization
+            if prioritization_manager:
+                prioritization_manager.record_platform_operation(
+                    platform.name, success=False, response_time=response_time, error_type="rate_limit"
+                )
+            
             # Don't retry rate limits, return empty results
             return []
 
         except CircuitBreakerOpenError as e:
+            response_time = time.time() - start_time
             logger.warning(f"Circuit breaker open for {platform.name}: {e}")
+            
+            # Record failure for prioritization
+            if prioritization_manager:
+                prioritization_manager.record_platform_operation(
+                    platform.name, success=False, response_time=response_time, error_type="circuit_breaker"
+                )
+            
             # Service temporarily unavailable
             return []
 
         except PlatformNotAvailableError as e:
+            response_time = time.time() - start_time
             logger.warning(
                 f"Platform {platform.name} temporarily unavailable: {e.user_message}"
             )
+            
+            # Record failure for prioritization
+            if prioritization_manager:
+                prioritization_manager.record_platform_operation(
+                    platform.name, success=False, response_time=response_time, error_type="unavailable"
+                )
+            
             # Platform is down, log but don't fail entire search
             return []
 
         except PlatformError as e:
+            response_time = time.time() - start_time
             logger.error(f"Platform error on {platform.name}: {e.user_message}")
+            
             # Platform-specific error, log details for debugging
             if hasattr(e, "original_error") and e.original_error:
                 logger.debug(f"Original error: {e.original_error}")
+            
+            # Record failure for prioritization
+            if prioritization_manager:
+                prioritization_manager.record_platform_operation(
+                    platform.name, success=False, response_time=response_time, error_type="platform_error"
+                )
+            
             return []
 
         except Exception as e:
+            response_time = time.time() - start_time
             logger.error(f"Unexpected error searching {platform.name}: {e}")
             import traceback
 
             logger.debug(f"Full traceback: {traceback.format_exc()}")
+            
+            # Record failure for prioritization
+            if prioritization_manager:
+                prioritization_manager.record_platform_operation(
+                    platform.name, success=False, response_time=response_time, error_type="unexpected_error"
+                )
+            
             return []
 
     def _extract_video_info(self, url: str) -> Optional[Dict[str, Any]]:
@@ -206,16 +349,25 @@ class MultiPlatformSearcher:
         results: Dict[str, List[Dict[str, Any]]] = {}
         platform_reports: Dict[str, StatusReport] = {}
 
-        # Prioritize platforms by reliability (you can adjust this based on your experience)
-        platform_priority = ["youtube", "odysee", "peertube", "rumble"]
-        sorted_platforms = sorted(
-            platforms.items(),
-            key=lambda x: (
-                platform_priority.index(x[0])
-                if x[0] in platform_priority
-                else len(platform_priority)
-            ),
-        )
+        # Use dynamic prioritization if available, otherwise fall back to static
+        prioritization_manager = get_prioritization_manager()
+        if prioritization_manager and prioritization_manager.enabled:
+            # Get dynamically prioritized platform order
+            priority_order = prioritization_manager.get_platform_priority_order(platforms)
+            logger.debug(f"Using dynamic platform prioritization: {priority_order}")
+            sorted_platforms = [(name, platforms[name]) for name in priority_order if name in platforms]
+        else:
+            # Fall back to static prioritization
+            platform_priority = ["youtube", "odysee", "peertube", "rumble"]
+            sorted_platforms = sorted(
+                platforms.items(),
+                key=lambda x: (
+                    platform_priority.index(x[0])
+                    if x[0] in platform_priority
+                    else len(platform_priority)
+                ),
+            )
+            logger.debug(f"Using static platform prioritization: {[name for name, _ in sorted_platforms]}")
 
         # Execute searches with controlled concurrency
         semaphore = asyncio.Semaphore(3)  # Limit concurrent platform searches

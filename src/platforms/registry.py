@@ -1,7 +1,10 @@
 import logging
-from typing import Any, Dict, Optional, Type
+from typing import Any, Dict, Optional, Type, TYPE_CHECKING
 
 from .base import VideoPlatform
+
+if TYPE_CHECKING:
+    from ..services.cache_manager import CacheManager
 
 logger = logging.getLogger(__name__)
 
@@ -12,8 +15,9 @@ class PlatformRegistry:
     # Platform mapping will be populated as platforms are imported
     PLATFORMS: Dict[str, Type[VideoPlatform]] = {}
 
-    def __init__(self):
+    def __init__(self, cache_manager: Optional['CacheManager'] = None):
         self.platforms: Dict[str, VideoPlatform] = {}
+        self.cache_manager = cache_manager
 
     def register_platform(self, name: str, platform_class: Type[VideoPlatform]) -> None:
         """Register a new platform type"""
@@ -26,11 +30,11 @@ class PlatformRegistry:
             if platform_config.get("enabled", False):
                 if name in self.PLATFORMS:
                     try:
-                        # Pass name and config to the constructor
-                        platform = self.PLATFORMS[name](name, platform_config)
+                        # Pass name, config, and cache manager to the constructor
+                        platform = self.PLATFORMS[name](name, platform_config, self.cache_manager)
                         await platform.initialize()
                         self.platforms[name] = platform
-                        logger.info(f"Loaded platform: {name}")
+                        logger.info(f"Loaded platform: {name} (cache: {'enabled' if self.cache_manager else 'disabled'})")
                     except Exception as e:
                         logger.error(f"Failed to load platform {name}: {e}")
                 else:

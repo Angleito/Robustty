@@ -65,6 +65,55 @@ cache:
   
   max_memory_size: 1000  # Maximum number of items in memory cache
 
+# Cross-platform deduplication settings
+deduplication:
+  enabled: ${DEDUPLICATION_ENABLED:true}
+  preserve_platform_diversity: true
+  max_duplicates_per_group: 5
+  min_similarity_threshold: 0.80
+  max_comparison_pairs: 1000
+  enable_fingerprint_optimization: true
+  
+  # Similarity matching configuration
+  similarity:
+    title_threshold: 0.85
+    duration_threshold: 0.90
+    channel_threshold: 0.80
+    overall_threshold: 0.80
+    title_weight: 0.50
+    duration_weight: 0.30
+    channel_weight: 0.20
+    duration_tolerance_seconds: 10
+  
+  # Quality scoring configuration
+  quality_scoring:
+    platform_weights:
+      youtube: 1.0
+      odysee: 0.8
+      peertube: 0.7
+      rumble: 0.6
+    scoring_weights:
+      platform: 0.25
+      metadata: 0.20
+      content: 0.20
+      channel: 0.15
+      engagement: 0.15
+      freshness: 0.05
+
+# Dynamic platform prioritization
+prioritization:
+  enabled: ${PRIORITIZATION_ENABLED:true}
+  strategy: ${PRIORITIZATION_STRATEGY:balanced}  # balanced, speed_first, reliability_first, success_rate_first, adaptive
+  update_interval: 60  # seconds
+  min_samples: 5  # minimum samples needed for scoring
+  failure_penalty_duration: 300  # seconds (5 minutes)
+  response_time_threshold: 5.0  # seconds
+  default_order: 
+    - youtube
+    - odysee
+    - peertube
+    - rumble
+
 health_monitor:
   enabled: ${HEALTH_MONITOR_ENABLED:true}
   check_interval: ${HEALTH_CHECK_INTERVAL:30}  # seconds
@@ -121,3 +170,17 @@ network:
   
   # Connectivity check caching
   check_cache_timeout: ${NETWORK_CHECK_CACHE_TIMEOUT:300}  # 5 minutes
+
+# Dynamic platform prioritization
+prioritization:
+  enabled: ${PRIORITIZATION_ENABLED:true}
+  strategy: ${PRIORITIZATION_STRATEGY:balanced}  # balanced, speed_first, reliability_first, success_rate_first, adaptive
+  update_interval: ${PRIORITIZATION_UPDATE_INTERVAL:60}  # seconds
+  min_samples: ${PRIORITIZATION_MIN_SAMPLES:5}  # minimum samples needed for scoring
+  failure_penalty_duration: ${PRIORITIZATION_FAILURE_PENALTY_DURATION:300}  # seconds (5 minutes)
+  response_time_threshold: ${PRIORITIZATION_RESPONSE_TIME_THRESHOLD:5.0}  # seconds
+  default_order: 
+    - youtube
+    - odysee
+    - peertube
+    - rumble
