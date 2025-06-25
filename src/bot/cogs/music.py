@@ -382,34 +382,27 @@ class Music(commands.Cog):
                 )
                 all_results.extend(platform_results[:3])
 
-        # Send search results
+        # Send search results and wait for user selection
+        embed.set_footer(text="Type the number of the song you want to play (1-9)")
         search_msg = await ctx.send(embed=embed)
 
-        # If only one result, play it automatically
-        if len(all_results) == 1:
-            selected: Dict[str, Any] = all_results[0]
-        else:
-            # Wait for user selection
-            embed.set_footer(text="Type the number of the song you want to play (1-9)")
+        def check(m: "Message") -> bool:
+            return (
+                m.author == ctx.author
+                and m.channel == ctx.channel
+                and m.content.isdigit()
+                and 1 <= int(m.content) <= len(all_results)
+            )
+
+        try:
+            msg = await self.bot.wait_for("message", timeout=30.0, check=check)
+            selected = all_results[int(msg.content) - 1]
+        except asyncio.TimeoutError:
+            embed = create_error_embed(
+                "Selection timeout", "No selection made within 30 seconds"
+            )
             await search_msg.edit(embed=embed)
-
-            def check(m: "Message") -> bool:
-                return (
-                    m.author == ctx.author
-                    and m.channel == ctx.channel
-                    and m.content.isdigit()
-                    and 1 <= int(m.content) <= len(all_results)
-                )
-
-            try:
-                msg = await self.bot.wait_for("message", timeout=30.0, check=check)
-                selected = all_results[int(msg.content) - 1]
-            except asyncio.TimeoutError:
-                embed = create_error_embed(
-                    "Selection timeout", "No selection made within 30 seconds"
-                )
-                await search_msg.edit(embed=embed)
-                return
+            return
 
         # Get audio player
         if not ctx.guild:
