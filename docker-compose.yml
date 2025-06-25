@@ -36,25 +36,6 @@ services:
       timeout: 15s
       retries: 3
       start_period: 60s
-    depends_on:
-      redis:
-        condition: service_healthy
-
-  # Redis for caching (OrbStack optimized)
-  redis:
-    image: redis:7-alpine
-    container_name: robustty-redis
-    restart: unless-stopped
-    network_mode: host  # OrbStack optimization
-    volumes:
-      - robustty-redis-data:/data
-    command: redis-server --appendonly yes --port 6379
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
 
 volumes:
   robustty-cookies:

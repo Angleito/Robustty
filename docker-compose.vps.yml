@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # Discord bot for VPS deployment (without cookie extraction)
   robustty:

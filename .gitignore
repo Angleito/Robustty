@@ -78,9 +78,7 @@ crash/
 core.*
 
 # Bot data & Browser data
-data/
-cookies/
-*cookies*
+data/cookies/
 cache/
 queues/
 *.db
