@@ -870,5 +870,199 @@ class Admin(Cog):
             await ctx.send(embed=embed)
 
 
+    @commands.group(name="prioritization", aliases=["priority", "prio"])
+    @is_admin()
+    async def prioritization(self, ctx: Context[RobottyBot]) -> None:
+        """Platform prioritization management commands"""
+        if ctx.invoked_subcommand is None:
+            await ctx.send_help(ctx.command)
+
+    @prioritization.command(name="status")
+    async def prioritization_status(self, ctx: Context[RobottyBot]) -> None:
+        """Show current platform prioritization status"""
+        await ctx.trigger_typing()
+
+        try:
+            from ...services.platform_prioritization import get_prioritization_manager, PrioritizationStrategy
+            
+            prioritization_manager = get_prioritization_manager()
+            if not prioritization_manager:
+                embed = create_warning_embed(
+                    title="Prioritization Not Available",
+                    description="Platform prioritization manager is not initialized",
+                )
+                await ctx.send(embed=embed)
+                return
+
+            # Get platform metrics summary
+            metrics_summary = prioritization_manager.get_platform_metrics_summary()
+            platforms = self.bot.platform_registry.get_enabled_platforms()
+            priority_order = prioritization_manager.get_platform_priority_order(platforms)
+
+            embed = create_embed(
+                title="🎯 Platform Prioritization Status",
+                description=f"**Strategy:** {prioritization_manager.strategy.value}\n"
+                           f"**Enabled:** {'✅' if prioritization_manager.enabled else '❌'}\n"
+                           f"**Priority Order:** {' → '.join(priority_order)}",
+            )
+
+            # Add metrics for each platform
+            for i, platform_name in enumerate(priority_order):
+                if platform_name in metrics_summary:
+                    metrics = metrics_summary[platform_name]
+                    
+                    # Create status indicator
+                    health_indicators = {
+                        "healthy": "🟢",
+                        "degraded": "🟡", 
+                        "unhealthy": "🔴",
+                        "unknown": "⚪"
+                    }
+                    health_icon = health_indicators.get(metrics["current_health"], "⚪")
+                    
+                    value = (
+                        f"{health_icon} **Score:** {metrics['overall_score']:.3f}\n"
+                        f"📈 **Success Rate:** {metrics['success_rate']:.1%}\n"
+                        f"⚡ **Avg Response:** {metrics['avg_response_time']:.2f}s\n"
+                        f"📊 **Requests:** {metrics['total_requests']}\n"
+                        f"❌ **Consecutive Failures:** {metrics['consecutive_failures']}"
+                    )
+                    
+                    embed.add_field(
+                        name=f"#{i+1} {platform_name.title()}",
+                        value=value,
+                        inline=True
+                    )
+
+            await ctx.send(embed=embed)
+
+        except Exception as e:
+            logger.error(f"Error getting prioritization status: {e}")
+            embed = create_error_embed(
+                title="Status Error",
+                description=f"Could not get prioritization status: {str(e)[:100]}...",
+            )
+            await ctx.send(embed=embed)
+
+    @prioritization.command(name="strategy")
+    async def set_strategy(self, ctx: Context[RobottyBot], strategy: str) -> None:
+        """Set the prioritization strategy
+        
+        Available strategies:
+        - balanced: Balance response time, reliability, and success rate
+        - speed_first: Prioritize fastest response times
+        - reliability_first: Prioritize most reliable platforms  
+        - success_rate_first: Prioritize highest success rates
+        - adaptive: Dynamically adjust based on current conditions
+        """
+        await ctx.trigger_typing()
+
+        try:
+            from ...services.platform_prioritization import get_prioritization_manager, PrioritizationStrategy
+            
+            prioritization_manager = get_prioritization_manager()
+            if not prioritization_manager:
+                embed = create_warning_embed(
+                    title="Prioritization Not Available",
+                    description="Platform prioritization manager is not initialized",
+                )
+                await ctx.send(embed=embed)
+                return
+
+            # Validate strategy
+            valid_strategies = [s.value for s in PrioritizationStrategy]
+            if strategy.lower() not in valid_strategies:
+                embed = create_error_embed(
+                    title="Invalid Strategy",
+                    description=f"Valid strategies: {', '.join(valid_strategies)}",
+                )
+                await ctx.send(embed=embed)
+                return
+
+            # Set new strategy
+            new_strategy = PrioritizationStrategy(strategy.lower())
+            prioritization_manager.set_strategy(new_strategy)
+
+            embed = create_success_embed(
+                title="Strategy Updated",
+                description=f"Prioritization strategy set to: **{new_strategy.value}**",
+            )
+            await ctx.send(embed=embed)
+
+        except Exception as e:
+            logger.error(f"Error setting prioritization strategy: {e}")
+            embed = create_error_embed(
+                title="Strategy Error",
+                description=f"Could not set strategy: {str(e)[:100]}...",
+            )
+            await ctx.send(embed=embed)
+
+    @prioritization.command(name="enable")
+    async def enable_prioritization(self, ctx: Context[RobottyBot]) -> None:
+        """Enable dynamic platform prioritization"""
+        await ctx.trigger_typing()
+
+        try:
+            from ...services.platform_prioritization import get_prioritization_manager
+            
+            prioritization_manager = get_prioritization_manager()
+            if not prioritization_manager:
+                embed = create_warning_embed(
+                    title="Prioritization Not Available",
+                    description="Platform prioritization manager is not initialized",
+                )
+                await ctx.send(embed=embed)
+                return
+
+            prioritization_manager.enabled = True
+            
+            embed = create_success_embed(
+                title="Prioritization Enabled",
+                description="Dynamic platform prioritization is now **enabled**",
+            )
+            await ctx.send(embed=embed)
+
+        except Exception as e:
+            logger.error(f"Error enabling prioritization: {e}")
+            embed = create_error_embed(
+                title="Enable Error",
+                description=f"Could not enable prioritization: {str(e)[:100]}...",
+            )
+            await ctx.send(embed=embed)
+
+    @prioritization.command(name="disable")
+    async def disable_prioritization(self, ctx: Context[RobottyBot]) -> None:
+        """Disable dynamic platform prioritization (fallback to static order)"""
+        await ctx.trigger_typing()
+
+        try:
+            from ...services.platform_prioritization import get_prioritization_manager
+            
+            prioritization_manager = get_prioritization_manager()
+            if not prioritization_manager:
+                embed = create_warning_embed(
+                    title="Prioritization Not Available", 
+                    description="Platform prioritization manager is not initialized",
+                )
+                await ctx.send(embed=embed)
+                return
+
+            prioritization_manager.enabled = False
+            
+            embed = create_success_embed(
+                title="Prioritization Disabled",
+                description="Dynamic platform prioritization is now **disabled**\nUsing static priority order",
+            )
+            await ctx.send(embed=embed)
+
+        except Exception as e:
+            logger.error(f"Error disabling prioritization: {e}")
+            embed = create_error_embed(
+                title="Disable Error",
+                description=f"Could not disable prioritization: {str(e)[:100]}...",
+            )
+            await ctx.send(embed=embed)
+
+
 async def setup(bot: RobottyBot) -> None:
     await bot.add_cog(Admin(bot))

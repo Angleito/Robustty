@@ -31,8 +31,8 @@ logger = logging.getLogger(__name__)
 class OdyseePlatform(VideoPlatform):
     """Odysee/LBRY platform implementation"""
 
-    def __init__(self, name: str, config: Dict[str, Any]) -> None:
-        super().__init__(name, config)
+    def __init__(self, name: str, config: Dict[str, Any], cache_manager=None) -> None:
+        super().__init__(name, config, cache_manager)
         self.api_url = config.get("api_url", "https://api.lbry.tv/api/v1")
         self.stream_url = config.get("stream_url", "https://api.lbry.tv")
 
@@ -54,6 +54,12 @@ class OdyseePlatform(VideoPlatform):
         self, query: str, max_results: int = 10
     ) -> List[Dict[str, Any]]:
         """Search for videos on Odysee with enhanced error handling"""
+        # Check cache first
+        cached_results = await self.get_cached_search_results(query)
+        if cached_results:
+            logger.info(f"Using cached Odysee search results for: {query}")
+            return cached_results
+
         if not self.session:
             logger.error("Session not initialized for Odysee search")
             raise PlatformNotAvailableError(
@@ -158,6 +164,8 @@ class OdyseePlatform(VideoPlatform):
             logger.info(
                 f"Odysee search returned {len(results)} valid results for: {query}"
             )
+            # Cache the results
+            await self.cache_search_results(query, results)
             return results
 
         except NetworkResilienceError:
@@ -196,10 +204,16 @@ class OdyseePlatform(VideoPlatform):
     )
     async def get_video_details(self, video_id: str) -> Optional[Dict[str, Any]]:
         """Get details for a specific video with enhanced error handling"""
+        # Check cache first
+        cached_metadata = await self.get_cached_video_metadata(video_id)
+        if cached_metadata:
+            logger.info(f"Using cached video metadata for Odysee video: {video_id}")
+            return cached_metadata
+
         if not self.session:
             logger.warning("Session not initialized for Odysee video details")
             # Return basic info as fallback
-            return {
+            basic_info = {
                 "id": video_id,
                 "title": f"Odysee Video {video_id}",
                 "channel": "Unknown",
@@ -208,6 +222,9 @@ class OdyseePlatform(VideoPlatform):
                 "platform": "odysee",
                 "description": "Video details unavailable - session not initialized",
             }
+            # Cache basic info (short TTL)
+            await self.cache_video_metadata(video_id, basic_info, ttl=300)  # 5 minutes
+            return basic_info
 
         try:
             logger.debug(f"Getting details for Odysee video: {video_id}")

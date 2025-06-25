@@ -39,8 +39,8 @@ logger = logging.getLogger(__name__)
 class YouTubePlatform(VideoPlatform):
     """YouTube platform implementation"""
 
-    def __init__(self, name: str, config: Dict[str, Any]):
-        super().__init__(name, config)
+    def __init__(self, name: str, config: Dict[str, Any], cache_manager=None):
+        super().__init__(name, config, cache_manager)
         self.api_key: Optional[str] = config.get("api_key")
         self.youtube: Optional[Any] = None
 
@@ -48,6 +48,18 @@ class YouTubePlatform(VideoPlatform):
         self.fallback_manager = None  # Will be set by bot initialization
         self.cookie_health_monitor = None  # Will be set by bot initialization
         self.enable_fallbacks = config.get("enable_fallbacks", True)
+        
+        # Performance optimization caches
+        self._search_cache: Dict[str, Tuple[List[Dict[str, Any]], float]] = {}
+        self._metadata_cache: Dict[str, Tuple[Dict[str, Any], float]] = {}
+        self._cache_ttl = config.get("cache_ttl_seconds", 300)  # 5 minute default
+        self._max_cache_size = config.get("max_cache_size", 100)
+        
+        # Search optimization settings
+        self.enable_search_caching = config.get("enable_search_caching", True)
+        self.enable_concurrent_strategies = config.get("enable_concurrent_strategies", False)
+        self.search_timeout_per_strategy = config.get("search_timeout_per_strategy", 15)
+        self.max_concurrent_strategies = config.get("max_concurrent_strategies", 3)
 
         # Language configuration options - defaults to English for search results
         self.default_region: str = config.get("default_region", "US")
@@ -223,6 +235,12 @@ class YouTubePlatform(VideoPlatform):
         self, query: str, max_results: int = 10
     ) -> List[Dict[str, Any]]:
         """Search YouTube videos with enhanced error handling and detailed metadata"""
+        # Check cache first
+        cached_results = await self.get_cached_search_results(query)
+        if cached_results:
+            logger.info(f"Using cached YouTube search results for: {query}")
+            return cached_results
+
         # First try URL parsing if query contains a YouTube URL
         url_results = await self._search_via_url_parsing(query)
         if url_results:
@@ -232,6 +250,8 @@ class YouTubePlatform(VideoPlatform):
                 f"Processed direct YouTube URL successfully",
                 details={'results_count': len(url_results)}
             )
+            # Cache URL results
+            await self.cache_search_results(query, url_results)
             return url_results
         
         # If no API key, try yt-dlp fallback search
@@ -250,6 +270,8 @@ class YouTubePlatform(VideoPlatform):
                     f"yt-dlp fallback search successful",
                     details={'results_count': len(fallback_results)}
                 )
+                # Cache fallback results
+                await self.cache_search_results(query, fallback_results)
                 return fallback_results
             else:
                 report_platform_error(
@@ -359,6 +381,8 @@ class YouTubePlatform(VideoPlatform):
                 len(results),
                 f"API search successful - found {len(results)} results"
             )
+            # Cache the results
+            await self.cache_search_results(query, results)
             return results
         except HttpError as e:
             logger.error(f"YouTube API error: {e}")
@@ -381,6 +405,8 @@ class YouTubePlatform(VideoPlatform):
                             f"yt-dlp fallback search successful after quota exceeded",
                             details={'results_count': len(fallback_results)}
                         )
+                        # Cache fallback results
+                        await self.cache_search_results(query, fallback_results)
                         return fallback_results
                     else:
                         logger.warning("yt-dlp fallback search returned no results")
@@ -506,6 +532,12 @@ class YouTubePlatform(VideoPlatform):
 
     async def get_video_details(self, video_id: str) -> Optional[Dict[str, Any]]:
         """Get detailed information about a video with fallback to yt-dlp"""
+        # Check cache first
+        cached_metadata = await self.get_cached_video_metadata(video_id)
+        if cached_metadata:
+            logger.info(f"Using cached video metadata for YouTube video: {video_id}")
+            return cached_metadata
+
         # Try API first if available
         if self.youtube:
             try:
@@ -527,7 +559,7 @@ class YouTubePlatform(VideoPlatform):
                         snippet.get("publishedAt", "")
                     )
 
-                    return {
+                    metadata = {
                         "id": video_id,
                         "title": snippet["title"],
                         "channel": snippet["channelTitle"],
@@ -544,6 +576,9 @@ class YouTubePlatform(VideoPlatform):
                         "published": published_formatted,
                         "view_count_raw": int(view_count) if view_count.isdigit() else 0,
                     }
+                    # Cache the metadata
+                    await self.cache_video_metadata(video_id, metadata)
+                    return metadata
             except HttpError as e:
                 # Check for quota exceeded
                 if e.resp.status == 403 and "quotaExceeded" in str(e):
@@ -555,7 +590,11 @@ class YouTubePlatform(VideoPlatform):
 
         # Fallback to yt-dlp if API failed or not available
         logger.info(f"Using yt-dlp fallback for video details: {video_id}")
-        return await self._extract_metadata_via_ytdlp(video_id)
+        fallback_metadata = await self._extract_metadata_via_ytdlp(video_id)
+        if fallback_metadata:
+            # Cache the fallback metadata
+            await self.cache_video_metadata(video_id, fallback_metadata)
+        return fallback_metadata
 
     def extract_video_id(self, url: str) -> Optional[str]:
         """Extract video ID from YouTube URL"""
@@ -681,6 +720,12 @@ class YouTubePlatform(VideoPlatform):
 
         logger.info(f"Getting stream URL for YouTube video: {video_id}")
 
+        # Check cache first
+        cached_stream_url = await self.get_cached_stream_url(video_id)
+        if cached_stream_url:
+            logger.info(f"Using cached stream URL for YouTube video: {video_id}")
+            return cached_stream_url
+
         # Validate video ID format
         if not video_id or len(video_id) != 11:
             logger.error(
@@ -721,8 +766,11 @@ class YouTubePlatform(VideoPlatform):
                 "writeautomaticsub": False,
             }
 
-            # Enhanced cookie loading with comprehensive fallback paths
-            cookie_result = self._load_cookies_with_fallback()
+            # Enhanced cookie loading with rotation and comprehensive fallback paths
+            cookie_result = self._load_cookies_with_rotation()
+            # Fallback to simple loading if rotation fails
+            if not cookie_result["success"]:
+                cookie_result = self._load_cookies_with_fallback()
             if cookie_result["success"]:
                 ydl_opts["cookiefile"] = cookie_result["cookie_file"]
                 logger.info(
@@ -838,6 +886,8 @@ class YouTubePlatform(VideoPlatform):
                 logger.info(
                     f"Successfully extracted stream URL for {video_id}: {stream_url[:100]}..."
                 )
+                # Cache the stream URL
+                await self.cache_stream_url(video_id, stream_url)
                 return stream_url
             else:
                 logger.error(f"No stream URL extracted for video {video_id}")
@@ -940,8 +990,11 @@ class YouTubePlatform(VideoPlatform):
             "extractor_args": self._get_language_preferences(query),
         }
 
-        # Enhanced cookie loading for metadata extraction
-        cookie_result = self._load_cookies_with_fallback()
+        # Enhanced cookie loading for metadata extraction with rotation
+        cookie_result = self._load_cookies_with_rotation()
+        # Fallback to simple loading if rotation fails
+        if not cookie_result["success"]:
+            cookie_result = self._load_cookies_with_fallback()
         if cookie_result["success"]:
             ydl_opts["cookiefile"] = cookie_result["cookie_file"]
             logger.debug(
@@ -1122,6 +1175,13 @@ class YouTubePlatform(VideoPlatform):
 
         logger.info(f"Extracting metadata via yt-dlp for video: {video_id}")
 
+        # Check cache first
+        if self.enable_search_caching:
+            cached_metadata = self._get_cached_metadata(video_id)
+            if cached_metadata:
+                logger.info(f"Returning cached metadata for video: {video_id}")
+                return cached_metadata
+
         # Validate video ID format
         if not video_id or len(video_id) != 11:
             logger.error(
@@ -1256,6 +1316,11 @@ class YouTubePlatform(VideoPlatform):
             
             if metadata:
                 logger.info(f"Successfully extracted metadata via yt-dlp for {video_id}")
+                
+                # Cache the metadata if caching is enabled
+                if self.enable_search_caching:
+                    self._cache_metadata(video_id, metadata)
+                
                 return metadata
             else:
                 logger.warning(f"Failed to extract metadata via yt-dlp for {video_id}")
@@ -1287,11 +1352,12 @@ class YouTubePlatform(VideoPlatform):
             return []
 
     async def _search_with_ytdlp(self, query: str, max_results: int = 10) -> List[Dict[str, Any]]:
-        """Use yt-dlp's ytsearch: feature to search YouTube without API with language preferences"""
+        """Use yt-dlp's enhanced search features with multiple strategies, caching, and quality optimization"""
         import yt_dlp
         import asyncio
+        import time
         
-        logger.info(f"Attempting yt-dlp search for query: {query} (max_results: {max_results})")
+        logger.info(f"Attempting enhanced yt-dlp search for query: {query} (max_results: {max_results})")
         
         # First check if it's a URL
         url_results = await self._search_via_url_parsing(query)
@@ -1299,83 +1365,443 @@ class YouTubePlatform(VideoPlatform):
             logger.info("Found URL in query, returning metadata")
             return url_results
         
+        # Check cache if enabled
+        if self.enable_search_caching:
+            cached_results = self._get_cached_search_results(query, max_results)
+            if cached_results:
+                logger.info(f"Returning cached search results for query: {query}")
+                return cached_results
+        
         try:
-            # Get language parameters for consistent behavior
-            language_params = self._get_search_params(query)
-            detected_language = language_params.get("relevanceLanguage", "auto")
+            # Try multiple search strategies with optional concurrency
+            search_strategies = self._get_search_strategies(query, max_results)
             
-            # Use yt-dlp's search functionality
-            search_query = f"ytsearch{max_results}:{query}"
-            ydl_opts = self._get_ytdlp_config()
-            ydl_opts.update({
-                "extract_flat": False,  # We need full metadata
-                "playlistend": max_results,
-                "quiet": True,
-                "no_warnings": True,  # Reduce noise in logs
-                # Add HTTP headers for English language preference
-                "http_headers": {
-                    "Accept-Language": f"{self.default_language}-{self.default_region},{self.default_language};q=0.9",
-                },
-            })
-            
-            # Add language preference for yt-dlp if query is detected as English
-            if detected_language == 'en':
-                # yt-dlp doesn't have direct language preference, but we can add geo-bypass
-                # and prefer English content through user-agent and headers
-                ydl_opts.update({
-                    "geo_bypass": True,
-                    "geo_bypass_country": "US",  # Prefer US content for English queries
-                })
-                logger.debug(f"Applied English preferences to yt-dlp search for query: {query}")
+            if self.enable_concurrent_strategies and len(search_strategies) > 1:
+                # Run strategies concurrently for faster results
+                results = await self._execute_concurrent_search_strategies(
+                    search_strategies, query, max_results
+                )
             else:
-                logger.debug(f"Using default yt-dlp settings for non-English query: {query}")
+                # Run strategies sequentially (default behavior)
+                results = await self._execute_sequential_search_strategies(
+                    search_strategies, query, max_results
+                )
             
-            def search_videos():
-                try:
-                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                        search_results = ydl.extract_info(search_query, download=False)
-                        
-                        if not search_results or "entries" not in search_results:
-                            logger.warning("yt-dlp search returned no results")
-                            return []
-                        
-                        results = []
-                        entries = search_results["entries"] or []
-                        
-                        for entry in entries[:max_results]:
-                            if not entry:
-                                continue
-                                
-                            # Extract metadata from yt-dlp result
-                            metadata = self._extract_metadata_from_ytdlp_result(entry)
-                            if metadata:
-                                results.append(metadata)
-                                logger.debug(f"Processed yt-dlp search result: {metadata['title']}")
-                        
-                        logger.info(f"yt-dlp search extracted {len(results)} results")
-                        return results
-                        
-                except yt_dlp.DownloadError as e:
-                    logger.error(f"yt-dlp search download error: {e}")
-                    return []
-                except Exception as e:
-                    logger.error(f"yt-dlp search error: {e}")
-                    return []
+            # Cache results if enabled and we got results
+            if self.enable_search_caching and results:
+                self._cache_search_results(query, max_results, results)
             
-            # Run yt-dlp search in thread to avoid blocking
-            loop = asyncio.get_event_loop()
-            results = await loop.run_in_executor(None, search_videos)
-            
-            if results:
-                logger.info(f"yt-dlp search successful, found {len(results)} results")
-                return results
-            else:
-                logger.warning("yt-dlp search returned no results")
-                return []
+            return results
                 
         except Exception as e:
             logger.error(f"yt-dlp search failed: {e}")
             return []
+    
+    async def _execute_sequential_search_strategies(
+        self, search_strategies: List[Tuple[str, str, Dict]], query: str, max_results: int
+    ) -> List[Dict[str, Any]]:
+        """Execute search strategies sequentially (original behavior)"""
+        for strategy_name, search_query, strategy_opts in search_strategies:
+            logger.debug(f"Trying search strategy: {strategy_name}")
+            
+            results = await self._execute_ytdlp_search_strategy(
+                search_query, strategy_opts, strategy_name
+            )
+            
+            if results:
+                # Apply result quality filtering and ranking
+                filtered_results = self._filter_and_rank_results(results, query, max_results)
+                
+                if filtered_results:
+                    logger.info(
+                        f"yt-dlp search successful with {strategy_name}, "
+                        f"found {len(filtered_results)} quality results from {len(results)} total"
+                    )
+                    return filtered_results
+                else:
+                    logger.debug(f"Strategy {strategy_name} results filtered out due to quality")
+            else:
+                logger.debug(f"Strategy {strategy_name} returned no results")
+        
+        logger.warning("All yt-dlp search strategies returned no results")
+        return []
+    
+    async def _execute_concurrent_search_strategies(
+        self, search_strategies: List[Tuple[str, str, Dict]], query: str, max_results: int
+    ) -> List[Dict[str, Any]]:
+        """Execute search strategies concurrently for faster results"""
+        import asyncio
+        
+        # Limit concurrent strategies to prevent overwhelming
+        strategies_to_run = search_strategies[:self.max_concurrent_strategies]
+        
+        # Create tasks for each strategy
+        strategy_tasks = []
+        for strategy_name, search_query, strategy_opts in strategies_to_run:
+            task = asyncio.create_task(
+                self._execute_ytdlp_search_strategy(search_query, strategy_opts, strategy_name)
+            )
+            strategy_tasks.append((strategy_name, task))
+        
+        # Wait for first successful result or all to complete
+        best_results = []
+        best_strategy = None
+        
+        try:
+            # Use as_completed to get results as they finish
+            for completed_task in asyncio.as_completed([task for _, task in strategy_tasks]):
+                try:
+                    results = await completed_task
+                    
+                    # Find which strategy this result came from
+                    strategy_name = None
+                    for name, task in strategy_tasks:
+                        if task == completed_task:
+                            strategy_name = name
+                            break
+                    
+                    if results:
+                        # Apply result quality filtering and ranking
+                        filtered_results = self._filter_and_rank_results(results, query, max_results)
+                        
+                        if filtered_results:
+                            # If this is better than our current best, use it
+                            if not best_results or len(filtered_results) > len(best_results):
+                                best_results = filtered_results
+                                best_strategy = strategy_name
+                                
+                                # If we have good results, we can break early
+                                if len(filtered_results) >= min(max_results, 5):
+                                    break
+                except Exception as e:
+                    logger.debug(f"Concurrent strategy failed: {e}")
+                    continue
+        
+        finally:
+            # Cancel any remaining tasks
+            for _, task in strategy_tasks:
+                if not task.done():
+                    task.cancel()
+        
+        if best_results:
+            logger.info(
+                f"Concurrent yt-dlp search successful with {best_strategy}, "
+                f"found {len(best_results)} quality results"
+            )
+        else:
+            logger.warning("All concurrent yt-dlp search strategies returned no results")
+        
+        return best_results
+    
+    def _get_cached_search_results(self, query: str, max_results: int) -> Optional[List[Dict[str, Any]]]:
+        """Get cached search results if available and fresh"""
+        import time
+        
+        cache_key = f"{query}:{max_results}"
+        if cache_key in self._search_cache:
+            results, cached_time = self._search_cache[cache_key]
+            
+            # Check if cache is still fresh
+            if time.time() - cached_time < self._cache_ttl:
+                return results
+            else:
+                # Remove stale cache entry
+                del self._search_cache[cache_key]
+        
+        return None
+    
+    def _cache_search_results(self, query: str, max_results: int, results: List[Dict[str, Any]]):
+        """Cache search results for future use"""
+        import time
+        
+        # Implement cache size limit
+        if len(self._search_cache) >= self._max_cache_size:
+            # Remove oldest entries
+            oldest_key = min(self._search_cache.keys(), 
+                           key=lambda k: self._search_cache[k][1])
+            del self._search_cache[oldest_key]
+        
+        cache_key = f"{query}:{max_results}"
+        self._search_cache[cache_key] = (results, time.time())
+        
+        logger.debug(f"Cached search results for query: {query} ({len(results)} results)")
+    
+    def _get_cached_metadata(self, video_id: str) -> Optional[Dict[str, Any]]:
+        """Get cached video metadata if available and fresh"""
+        import time
+        
+        if video_id in self._metadata_cache:
+            metadata, cached_time = self._metadata_cache[video_id]
+            
+            # Check if cache is still fresh (longer TTL for metadata)
+            if time.time() - cached_time < self._cache_ttl * 2:  # 10 minutes for metadata
+                return metadata
+            else:
+                # Remove stale cache entry
+                del self._metadata_cache[video_id]
+        
+        return None
+    
+    def _cache_metadata(self, video_id: str, metadata: Dict[str, Any]):
+        """Cache video metadata for future use"""
+        import time
+        
+        # Implement cache size limit
+        if len(self._metadata_cache) >= self._max_cache_size:
+            # Remove oldest entries
+            oldest_key = min(self._metadata_cache.keys(), 
+                           key=lambda k: self._metadata_cache[k][1])
+            del self._metadata_cache[oldest_key]
+        
+        self._metadata_cache[video_id] = (metadata, time.time())
+        logger.debug(f"Cached metadata for video: {video_id}")
+    
+    def clear_caches(self):
+        """Clear all caches (useful for debugging or manual refresh)"""
+        self._search_cache.clear()
+        self._metadata_cache.clear()
+        logger.info("Cleared YouTube platform caches")
+    
+    def _get_search_strategies(self, query: str, max_results: int) -> List[Tuple[str, str, Dict]]:
+        """Get multiple search strategies for improved result quality"""
+        language_params = self._get_search_params(query)
+        detected_language = language_params.get("relevanceLanguage", "auto")
+        
+        # Base configuration
+        base_opts = self._get_ytdlp_config()
+        base_opts.update({
+            "extract_flat": False,
+            "playlistend": max_results,
+            "quiet": True,
+            "no_warnings": True,
+        })
+        
+        # Enhanced HTTP headers for better results
+        enhanced_headers = {
+            "Accept-Language": f"{self.default_language}-{self.default_region},{self.default_language};q=0.9",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+            "Accept-Encoding": "gzip, deflate, br",
+            "DNT": "1",
+            "Upgrade-Insecure-Requests": "1",
+        }
+        
+        strategies = []
+        
+        # Strategy 1: Standard relevance search
+        standard_opts = base_opts.copy()
+        standard_opts.update({
+            "http_headers": enhanced_headers,
+            "geo_bypass": True,
+            "geo_bypass_country": "US" if detected_language == 'en' else None,
+        })
+        strategies.append((
+            "standard_relevance",
+            f"ytsearch{max_results}:{query}",
+            standard_opts
+        ))
+        
+        # Strategy 2: Date-sorted search for recent content
+        date_opts = base_opts.copy()
+        date_opts.update({
+            "http_headers": enhanced_headers,
+            "geo_bypass": True,
+            "geo_bypass_country": "US" if detected_language == 'en' else None,
+        })
+        strategies.append((
+            "recent_uploads",
+            f"ytsearchdate{max_results}:{query}",
+            date_opts
+        ))
+        
+        # Strategy 3: View count optimized search (for popular content)
+        view_opts = base_opts.copy()
+        view_opts.update({
+            "http_headers": enhanced_headers,
+            "geo_bypass": True,
+            "geo_bypass_country": "US" if detected_language == 'en' else None,
+        })
+        # Add query modifier for popular content
+        popular_query = f"{query} popular OR official OR HD OR HQ"
+        strategies.append((
+            "popular_content",
+            f"ytsearch{max_results}:{popular_query}",
+            view_opts
+        ))
+        
+        # Strategy 4: Exact match search with quotes (for specific titles)
+        if len(query.split()) > 1:
+            exact_opts = base_opts.copy()
+            exact_opts.update({
+                "http_headers": enhanced_headers,
+                "geo_bypass": True,
+            })
+            quoted_query = f'"{query}"'
+            strategies.append((
+                "exact_match",
+                f"ytsearch{max_results}:{quoted_query}",
+                exact_opts
+            ))
+        
+        # Strategy 5: Alternative language search (if non-English detected)
+        if detected_language != 'en' and self.auto_detect_language:
+            alt_opts = base_opts.copy()
+            alt_opts.update({
+                "http_headers": {
+                    "Accept-Language": "en-US,en;q=0.9,*;q=0.8",
+                    **enhanced_headers
+                },
+                "geo_bypass": False,  # Use default geo for original language
+            })
+            strategies.append((
+                "original_language",
+                f"ytsearch{max_results}:{query}",
+                alt_opts
+            ))
+        
+        return strategies
+    
+    async def _execute_ytdlp_search_strategy(
+        self, search_query: str, strategy_opts: Dict, strategy_name: str
+    ) -> List[Dict[str, Any]]:
+        """Execute a specific yt-dlp search strategy"""
+        import yt_dlp
+        import asyncio
+        
+        def search_with_strategy():
+            try:
+                with yt_dlp.YoutubeDL(strategy_opts) as ydl:
+                    search_results = ydl.extract_info(search_query, download=False)
+                    
+                    if not search_results or "entries" not in search_results:
+                        return []
+                    
+                    results = []
+                    entries = search_results["entries"] or []
+                    
+                    for entry in entries:
+                        if not entry:
+                            continue
+                            
+                        metadata = self._extract_metadata_from_ytdlp_result(entry)
+                        if metadata:
+                            # Add strategy info for debugging
+                            metadata["search_strategy"] = strategy_name
+                            results.append(metadata)
+                    
+                    return results
+                    
+            except yt_dlp.DownloadError as e:
+                logger.debug(f"yt-dlp strategy {strategy_name} download error: {e}")
+                return []
+            except Exception as e:
+                logger.debug(f"yt-dlp strategy {strategy_name} error: {e}")
+                return []
+        
+        # Run with timeout for each strategy
+        try:
+            loop = asyncio.get_event_loop()
+            results = await asyncio.wait_for(
+                loop.run_in_executor(None, search_with_strategy),
+                timeout=15.0  # 15 second timeout per strategy
+            )
+            return results
+        except asyncio.TimeoutError:
+            logger.debug(f"Search strategy {strategy_name} timed out")
+            return []
+    
+    def _filter_and_rank_results(
+        self, results: List[Dict[str, Any]], query: str, max_results: int
+    ) -> List[Dict[str, Any]]:
+        """Filter and rank search results for quality and relevance"""
+        if not results:
+            return results
+        
+        # Filter out low-quality results
+        filtered_results = []
+        query_lower = query.lower()
+        
+        for result in results:
+            # Quality filters
+            title = result.get("title", "").lower()
+            duration = result.get("duration", "Unknown")
+            views_raw = result.get("view_count_raw", 0)
+            
+            # Skip results that are too short (likely not full content)
+            if duration != "Unknown" and ":" in duration:
+                try:
+                    time_parts = duration.split(":")
+                    if len(time_parts) == 2:  # MM:SS format
+                        total_seconds = int(time_parts[0]) * 60 + int(time_parts[1])
+                        if total_seconds < 30:  # Skip videos shorter than 30 seconds
+                            logger.debug(f"Filtered out short video: {title} ({duration})")
+                            continue
+                except (ValueError, IndexError):
+                    pass  # Keep if duration parsing fails
+            
+            # Skip results with very low view counts (potential spam/low quality)
+            if isinstance(views_raw, int) and views_raw < 100:
+                logger.debug(f"Filtered out low-view video: {title} ({views_raw} views)")
+                continue
+            
+            # Relevance scoring
+            relevance_score = self._calculate_relevance_score(result, query_lower)
+            result["relevance_score"] = relevance_score
+            
+            filtered_results.append(result)
+        
+        # Sort by relevance score (descending) and take top results
+        filtered_results.sort(key=lambda x: x.get("relevance_score", 0), reverse=True)
+        
+        # Remove relevance score before returning (internal use only)
+        for result in filtered_results:
+            result.pop("relevance_score", None)
+            result.pop("search_strategy", None)  # Remove strategy info
+        
+        return filtered_results[:max_results]
+    
+    def _calculate_relevance_score(self, result: Dict[str, Any], query_lower: str) -> float:
+        """Calculate relevance score for search result ranking"""
+        score = 0.0
+        title = result.get("title", "").lower()
+        channel = result.get("channel", "").lower()
+        views_raw = result.get("view_count_raw", 0)
+        
+        # Title relevance (most important factor)
+        query_words = set(query_lower.split())
+        title_words = set(title.split())
+        
+        # Exact phrase match gets highest score
+        if query_lower in title:
+            score += 10.0
+        
+        # Word overlap scoring
+        word_overlap = len(query_words.intersection(title_words)) / len(query_words) if query_words else 0
+        score += word_overlap * 5.0
+        
+        # Official channel indicators
+        official_indicators = ["official", "vevo", "records", "music"]
+        if any(indicator in channel for indicator in official_indicators):
+            score += 2.0
+        
+        # Quality indicators in title
+        quality_indicators = ["official", "hd", "hq", "4k", "music video", "original"]
+        for indicator in quality_indicators:
+            if indicator in title:
+                score += 1.0
+        
+        # View count factor (logarithmic scaling to prevent overwhelming other factors)
+        if isinstance(views_raw, int) and views_raw > 0:
+            import math
+            view_score = math.log10(views_raw) / 10.0  # Scale down log10 of views
+            score += min(view_score, 2.0)  # Cap view influence
+        
+        # Penalty for spam indicators
+        spam_indicators = ["click here", "subscribe", "like and", "don't forget"]
+        for indicator in spam_indicators:
+            if indicator in title:
+                score -= 1.0
+        
+        return max(score, 0.0)  # Ensure non-negative score
     
     def _extract_metadata_from_ytdlp_result(self, info_dict: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Convert yt-dlp metadata to our standard format"""
@@ -1572,6 +1998,306 @@ class YouTubePlatform(VideoPlatform):
         
         result["error"] = f"No valid cookies found in {len(base_paths)} paths"
         return result
+
+    def _load_cookies_with_rotation(self) -> Dict[str, Any]:
+        """Enhanced cookie loading with intelligent rotation and multi-profile support"""
+        import time
+        
+        # Define cookie search paths in order of preference
+        base_paths = [
+            Path("/app/cookies"),
+            Path("data/cookies"), 
+            Path("./cookies"),
+            Path("cookies"),  # Simple relative path
+            Path.home() / ".config" / "robustty" / "cookies",  # User config
+        ]
+        
+        # Add additional paths from environment or config
+        env_cookie_path = os.getenv("ROBUSTTY_COOKIE_PATH")
+        if env_cookie_path:
+            base_paths.insert(0, Path(env_cookie_path))
+        
+        result = {
+            "success": False,
+            "cookie_file": None,
+            "error": "No cookie paths found",
+            "cookie_count": 0,
+            "age_info": "unknown",
+            "paths_tried": [],
+            "rotation_applied": False,
+            "selected_profile": None
+        }
+        
+        # Try multiple cookie sources with intelligent rotation
+        cookie_sources = self._discover_cookie_sources(base_paths)
+        
+        if not cookie_sources:
+            result["error"] = f"No valid cookie sources found in {len(base_paths)} paths"
+            return result
+        
+        # Apply intelligent cookie rotation
+        selected_source = self._select_optimal_cookie_source(cookie_sources)
+        
+        if selected_source:
+            json_cookie_file = selected_source["path"]
+            result["paths_tried"].append(str(json_cookie_file))
+            result["selected_profile"] = selected_source.get("profile", "default")
+            
+            try:
+                # Check file age and size
+                file_stat = json_cookie_file.stat()
+                file_age_hours = (time.time() - file_stat.st_mtime) / 3600
+                age_info = f"{file_age_hours:.1f}h old"
+                
+                # Attempt cookie conversion with validation
+                netscape_cookie_file = json_cookie_file.parent / "youtube_cookies.txt"
+                
+                if self._convert_cookies_to_netscape(
+                    str(json_cookie_file), str(netscape_cookie_file)
+                ):
+                    # Count cookies for reporting
+                    cookie_count = self._count_netscape_cookies(str(netscape_cookie_file))
+                    
+                    # Verify cookie health
+                    health_check = self._verify_cookie_health(str(json_cookie_file))
+                    
+                    result.update({
+                        "success": True,
+                        "cookie_file": str(netscape_cookie_file),
+                        "error": None,
+                        "cookie_count": cookie_count,
+                        "age_info": age_info,
+                        "health_status": health_check,
+                        "source_file": str(json_cookie_file),
+                        "rotation_applied": selected_source.get("rotated", False)
+                    })
+                    
+                    # Log health warnings if any
+                    if health_check.get("warnings"):
+                        for warning in health_check["warnings"]:
+                            logger.warning(f"Cookie health warning: {warning}")
+                    
+                    # Log rotation info if applied
+                    if selected_source.get("rotated", False):
+                        logger.info(f"Cookie rotation applied: using {selected_source['profile']} profile")
+                    
+                    return result
+                else:
+                    logger.debug(f"Cookie conversion failed for: {json_cookie_file}")
+                    
+            except Exception as e:
+                logger.debug(f"Error processing cookie file {json_cookie_file}: {e}")
+        
+        result["error"] = f"No valid cookies found after rotation in {len(base_paths)} paths"
+        return result
+    
+    def _discover_cookie_sources(self, base_paths: List[Path]) -> List[Dict[str, Any]]:
+        """Discover all available cookie sources including browser profiles"""
+        import time
+        
+        sources = []
+        
+        for base_path in base_paths:
+            # Standard cookie file
+            standard_file = base_path / "youtube_cookies.json"
+            if standard_file.exists():
+                try:
+                    file_stat = standard_file.stat()
+                    if file_stat.st_size > 0:
+                        file_age_hours = (time.time() - file_stat.st_mtime) / 3600
+                        sources.append({
+                            "path": standard_file,
+                            "profile": "default",
+                            "age_hours": file_age_hours,
+                            "size_bytes": file_stat.st_size,
+                            "priority": 10  # Higher priority for standard files
+                        })
+                except Exception as e:
+                    logger.debug(f"Error checking standard cookie file {standard_file}: {e}")
+            
+            # Browser profile specific cookies
+            profile_sources = self._discover_browser_profile_cookies(base_path)
+            sources.extend(profile_sources)
+            
+            # Timestamped backup cookies
+            backup_sources = self._discover_backup_cookies(base_path)
+            sources.extend(backup_sources)
+        
+        return sources
+    
+    def _discover_browser_profile_cookies(self, base_path: Path) -> List[Dict[str, Any]]:
+        """Discover cookies from different browser profiles"""
+        import time
+        import glob
+        
+        sources = []
+        
+        # Look for profile-specific cookie files
+        profile_patterns = [
+            "youtube_cookies_*.json",  # youtube_cookies_profile1.json
+            "*_youtube_cookies.json",  # chrome_youtube_cookies.json
+            "youtube_*_cookies.json",  # youtube_brave_cookies.json
+        ]
+        
+        for pattern in profile_patterns:
+            try:
+                pattern_path = base_path / pattern
+                matching_files = glob.glob(str(pattern_path))
+                
+                for file_path in matching_files:
+                    file_path = Path(file_path)
+                    if file_path.exists() and file_path.stat().st_size > 0:
+                        file_stat = file_path.stat()
+                        file_age_hours = (time.time() - file_stat.st_mtime) / 3600
+                        
+                        # Extract profile name from filename
+                        filename = file_path.stem
+                        if "_youtube_cookies" in filename:
+                            profile = filename.replace("_youtube_cookies", "")
+                        elif "youtube_cookies_" in filename:
+                            profile = filename.replace("youtube_cookies_", "")
+                        elif "youtube_" in filename and "_cookies" in filename:
+                            profile = filename.replace("youtube_", "").replace("_cookies", "")
+                        else:
+                            profile = "unknown"
+                        
+                        sources.append({
+                            "path": file_path,
+                            "profile": profile,
+                            "age_hours": file_age_hours,
+                            "size_bytes": file_stat.st_size,
+                            "priority": 8  # Medium priority for profile files
+                        })
+            except Exception as e:
+                logger.debug(f"Error discovering profile cookies: {e}")
+        
+        return sources
+    
+    def _discover_backup_cookies(self, base_path: Path) -> List[Dict[str, Any]]:
+        """Discover timestamped backup cookie files"""
+        import time
+        import glob
+        
+        sources = []
+        
+        try:
+            backup_pattern = base_path / "youtube_cookies_backup_*.json"
+            matching_files = glob.glob(str(backup_pattern))
+            
+            for file_path in matching_files:
+                file_path = Path(file_path)
+                if file_path.exists() and file_path.stat().st_size > 0:
+                    file_stat = file_path.stat()
+                    file_age_hours = (time.time() - file_stat.st_mtime) / 3600
+                    
+                    # Only consider recent backups (less than 24 hours old)
+                    if file_age_hours < 24:
+                        sources.append({
+                            "path": file_path,
+                            "profile": "backup",
+                            "age_hours": file_age_hours,
+                            "size_bytes": file_stat.st_size,
+                            "priority": 5  # Lower priority for backup files
+                        })
+        except Exception as e:
+            logger.debug(f"Error discovering backup cookies: {e}")
+        
+        return sources
+    
+    def _select_optimal_cookie_source(self, sources: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        """Select the optimal cookie source using intelligent rotation"""
+        import time
+        
+        if not sources:
+            return None
+        
+        # Get rotation state
+        rotation_state = self._get_cookie_rotation_state()
+        current_time = time.time()
+        
+        # Filter out very old cookies (>24 hours)
+        fresh_sources = [s for s in sources if s["age_hours"] < 24]
+        if not fresh_sources:
+            logger.warning("No fresh cookies found, using oldest available")
+            fresh_sources = sources
+        
+        # Check if we need to rotate cookies
+        should_rotate = self._should_rotate_cookies(rotation_state, current_time)
+        
+        if should_rotate:
+            # Select a different source than the last used one
+            last_used_profile = rotation_state.get("last_profile", "")
+            
+            # Prefer sources not recently used
+            unused_sources = [s for s in fresh_sources if s["profile"] != last_used_profile]
+            if unused_sources:
+                # Sort by priority and freshness
+                unused_sources.sort(key=lambda x: (x["priority"], -x["age_hours"]), reverse=True)
+                selected = unused_sources[0]
+                selected["rotated"] = True
+                
+                # Update rotation state
+                self._update_cookie_rotation_state({
+                    "last_profile": selected["profile"],
+                    "last_rotation": current_time,
+                    "rotation_count": rotation_state.get("rotation_count", 0) + 1
+                })
+                
+                logger.info(f"Cookie rotation: switching to {selected['profile']} profile")
+                return selected
+        
+        # No rotation needed, select best available source
+        fresh_sources.sort(key=lambda x: (x["priority"], -x["age_hours"]), reverse=True)
+        selected = fresh_sources[0]
+        selected["rotated"] = False
+        
+        return selected
+    
+    def _get_cookie_rotation_state(self) -> Dict[str, Any]:
+        """Get current cookie rotation state"""
+        try:
+            state_file = Path("/app/cookies/.rotation_state.json")
+            if state_file.exists():
+                with open(state_file, 'r') as f:
+                    import json
+                    return json.load(f)
+        except Exception as e:
+            logger.debug(f"Could not load rotation state: {e}")
+        
+        return {}
+    
+    def _update_cookie_rotation_state(self, state: Dict[str, Any]):
+        """Update cookie rotation state"""
+        try:
+            state_file = Path("/app/cookies/.rotation_state.json")
+            state_file.parent.mkdir(parents=True, exist_ok=True)
+            
+            with open(state_file, 'w') as f:
+                import json
+                json.dump(state, f, indent=2)
+        except Exception as e:
+            logger.debug(f"Could not save rotation state: {e}")
+    
+    def _should_rotate_cookies(self, rotation_state: Dict[str, Any], current_time: float) -> bool:
+        """Determine if cookies should be rotated"""
+        # Rotate if no previous rotation recorded
+        if not rotation_state.get("last_rotation"):
+            return True
+        
+        # Rotate if it's been more than 2 hours since last rotation
+        last_rotation = rotation_state.get("last_rotation", 0)
+        hours_since_rotation = (current_time - last_rotation) / 3600
+        
+        if hours_since_rotation > 2:
+            return True
+        
+        # Rotate if cookie health monitor indicates issues
+        if self.cookie_health_monitor:
+            if self.cookie_health_monitor.should_use_fallback("youtube"):
+                logger.info("Cookie health monitor recommends rotation")
+                return True
+        
+        return False
 
     def _count_netscape_cookies(self, netscape_file: str) -> int:
         """Count cookies in Netscape format file"""

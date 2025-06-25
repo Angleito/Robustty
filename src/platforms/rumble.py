@@ -36,8 +36,8 @@ logger = logging.getLogger(__name__)
 class RumblePlatform(VideoPlatform):
     """Rumble platform implementation"""
 
-    def __init__(self, name: str, config: Dict[str, Any]):
-        super().__init__(name, config)
+    def __init__(self, name: str, config: Dict[str, Any], cache_manager=None):
+        super().__init__(name, config, cache_manager)
         self.api_token: Optional[str] = config.get("api_token")
 
         # URL patterns for Rumble
@@ -77,6 +77,12 @@ class RumblePlatform(VideoPlatform):
         self, query: str, max_results: int = 10
     ) -> List[Dict[str, Any]]:
         """Search Rumble videos using Apify API with enhanced error handling"""
+        # Check cache first
+        cached_results = await self.get_cached_search_results(query)
+        if cached_results:
+            logger.info(f"Using cached Rumble search results for: {query}")
+            return cached_results
+
         if not self.api_token or not self.extractor:
             logger.error("Rumble API token not configured")
             raise PlatformAuthenticationError(
@@ -134,6 +140,8 @@ class RumblePlatform(VideoPlatform):
             logger.info(
                 f"Rumble search returned {len(results)} valid results for: {query}"
             )
+            # Cache the results
+            await self.cache_search_results(query, results)
             return results
 
         except asyncio.TimeoutError:
@@ -200,10 +208,16 @@ class RumblePlatform(VideoPlatform):
     )
     async def get_video_details(self, video_id: str) -> Optional[Dict[str, Any]]:
         """Get detailed information about a Rumble video with enhanced error handling"""
+        # Check cache first
+        cached_metadata = await self.get_cached_video_metadata(video_id)
+        if cached_metadata:
+            logger.info(f"Using cached video metadata for Rumble video: {video_id}")
+            return cached_metadata
+
         if not self.api_token or not self.extractor:
             logger.warning("Rumble API token not configured for video details")
             # Return basic info instead of failing completely
-            return {
+            basic_info = {
                 "id": video_id,
                 "title": f"Rumble Video {video_id}",
                 "channel": "Unknown",
@@ -214,6 +228,9 @@ class RumblePlatform(VideoPlatform):
                 "duration": 0,
                 "views": 0,
             }
+            # Cache basic info too (short TTL)
+            await self.cache_video_metadata(video_id, basic_info, ttl=300)  # 5 minutes
+            return basic_info
 
         try:
             logger.debug(f"Getting details for Rumble video: {video_id}")
@@ -241,7 +258,7 @@ class RumblePlatform(VideoPlatform):
                 return None
 
             # Convert the metadata to our expected format with validation
-            return {
+            video_metadata = {
                 "id": video_id,
                 "title": metadata.get("title", f"Rumble Video {video_id}"),
                 "channel": metadata.get("uploader", "Unknown"),
@@ -254,6 +271,9 @@ class RumblePlatform(VideoPlatform):
                 "likes": metadata.get("like_count", 0),
                 "uploaded_date": metadata.get("publish_date", ""),
             }
+            # Cache the metadata
+            await self.cache_video_metadata(video_id, video_metadata)
+            return video_metadata
 
         except asyncio.TimeoutError:
             logger.warning(f"Rumble metadata request timed out for video: {video_id}")
@@ -323,6 +343,12 @@ class RumblePlatform(VideoPlatform):
         import asyncio
 
         logger.info(f"Getting stream URL for Rumble video: {video_id}")
+
+        # Check cache first
+        cached_stream_url = await self.get_cached_stream_url(video_id)
+        if cached_stream_url:
+            logger.info(f"Using cached stream URL for Rumble video: {video_id}")
+            return cached_stream_url
 
         # Validate video ID format
         if not video_id or not video_id.startswith("v"):
@@ -459,6 +485,8 @@ class RumblePlatform(VideoPlatform):
                 logger.info(
                     f"Successfully extracted Rumble stream URL for {video_id}: {stream_url[:100]}..."
                 )
+                # Cache the stream URL
+                await self.cache_stream_url(video_id, stream_url)
                 return stream_url
             else:
                 logger.error(f"No stream URL extracted for Rumble video {video_id}")

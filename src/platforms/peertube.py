@@ -20,8 +20,8 @@ logger = logging.getLogger(__name__)
 class PeerTubePlatform(VideoPlatform):
     """PeerTube platform implementation - federated video platform"""
 
-    def __init__(self, name: str, config: Dict[str, Any]) -> None:
-        super().__init__(name, config)
+    def __init__(self, name: str, config: Dict[str, Any], cache_manager=None) -> None:
+        super().__init__(name, config, cache_manager)
         self.instances: List[InstanceURL] = config.get("instances", [])
         self.max_results_per_instance: int = config.get("max_results_per_instance", 5)
 
@@ -34,6 +34,12 @@ class PeerTubePlatform(VideoPlatform):
         self, query: SearchQuery, max_results: int = 10
     ) -> List[Dict[str, Any]]:
         """Search across all configured PeerTube instances"""
+        # Check cache first
+        cached_results = await self.get_cached_search_results(query)
+        if cached_results:
+            logger.info(f"Using cached PeerTube search results for: {query}")
+            return cached_results
+
         if not self.instances:
             logger.warning("No PeerTube instances configured")
             return []
@@ -64,7 +70,10 @@ class PeerTubePlatform(VideoPlatform):
 
         # Sort by relevance/views and limit results
         all_results.sort(key=lambda x: x.get("views", 0), reverse=True)
-        return all_results[:max_results]
+        final_results = all_results[:max_results]
+        # Cache the results
+        await self.cache_search_results(query, final_results)
+        return final_results
 
     async def _search_instance(
         self, instance_url: InstanceURL, query: SearchQuery, max_results: int
@@ -125,6 +134,12 @@ class PeerTubePlatform(VideoPlatform):
 
     async def get_video_details(self, video_id: VideoID) -> Optional[Dict[str, Any]]:
         """Get details for a PeerTube video"""
+        # Check cache first
+        cached_metadata = await self.get_cached_video_metadata(video_id)
+        if cached_metadata:
+            logger.info(f"Using cached video metadata for PeerTube video: {video_id}")
+            return cached_metadata
+
         # Try to find which instance hosts this video
         for instance in self.instances:
             try:
@@ -156,6 +171,8 @@ class PeerTubePlatform(VideoPlatform):
                             "dislikes": video.get("dislikes", 0),
                             "publishedAt": video.get("publishedAt"),
                         }
+                        # Cache the details
+                        await self.cache_video_metadata(video_id, details)
                         return details
             except Exception as e:
                 logger.debug(f"Video {video_id} not found on {instance}: {e}")
@@ -176,6 +193,12 @@ class PeerTubePlatform(VideoPlatform):
 
     async def get_stream_url(self, video_id: VideoID) -> Optional[str]:
         """Get stream URL for a PeerTube video"""
+        # Check cache first
+        cached_stream_url = await self.get_cached_stream_url(video_id)
+        if cached_stream_url:
+            logger.info(f"Using cached stream URL for PeerTube video: {video_id}")
+            return cached_stream_url
+
         # Find which instance hosts this video
         video_details = await self.get_video_details(video_id)
         if not video_details:
@@ -205,8 +228,11 @@ class PeerTubePlatform(VideoPlatform):
                     key=lambda x: x.get("resolution", {}).get("id", 0), reverse=True
                 )
                 best_file: VideoFile = files[0]
+                stream_url = best_file["fileUrl"]
 
-                return best_file["fileUrl"]
+                # Cache the stream URL
+                await self.cache_stream_url(video_id, stream_url)
+                return stream_url
         except Exception as e:
             logger.error(
                 f"Error getting stream URL for PeerTube video " f"{video_id}: {e}"
