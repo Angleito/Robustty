@@ -99,12 +99,15 @@ class RobusttyBot(commands.Bot):
 
         # Initialize health endpoints
         health_config = self.config.get("health_endpoints", {})
-        self.health_endpoints = HealthEndpoints(health_config)
-        self.health_endpoints.set_dependencies(
-            self.cookie_health_monitor,
-            self.fallback_manager,
-            self.enhanced_cookie_manager,
-            self.platform_registry,
+        self.health_endpoints = HealthEndpoints(
+            host=health_config.get("host", "0.0.0.0"),
+            port=health_config.get("port", 8081)
+        )
+        self.health_endpoints.set_services(
+            cookie_health_monitor=self.cookie_health_monitor,
+            fallback_manager=self.fallback_manager,
+            cookie_manager=self.enhanced_cookie_manager,
+            platform_registry=self.platform_registry,
         )
         await self.health_endpoints.start()
 
