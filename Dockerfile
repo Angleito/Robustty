@@ -1,4 +1,4 @@
-# OrbStack-optimized Dockerfile for Robustty Discord Bot
+# VPS-compatible Dockerfile for Robustty Discord Bot
 FROM python:3.11-slim
 
 # Install system dependencies
@@ -9,10 +9,17 @@ RUN apt-get update && apt-get install -y \
     g++ \
     build-essential \
     cron \
+    sudo \
     && rm -rf /var/lib/apt/lists/*
 
-# Create app directory
+# Create non-root user for security and VPS compatibility
+RUN groupadd -g 1000 robustty && \
+    useradd -u 1000 -g 1000 -s /bin/bash -m robustty && \
+    echo 'robustty ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
+
+# Create app directory and set ownership
 WORKDIR /app
+RUN chown -R robustty:robustty /app
 
 # Copy requirements and install Python dependencies
 COPY requirements.txt .
@@ -24,8 +31,9 @@ COPY src/ ./src/
 COPY config/ ./config/
 COPY scripts/ ./scripts/
 
-# Create necessary directories
-RUN mkdir -p logs data cookies
+# Create necessary directories with proper ownership
+RUN mkdir -p logs data cookies && \
+    chown -R robustty:robustty /app logs data cookies
 
 # Set Python path
 ENV PYTHONPATH=/app
@@ -63,9 +71,17 @@ else\n\
     echo "Bot will use API keys and public access for video platforms"\n\
 fi\n\
 \n\
+# Fix cookie directory permissions for VPS compatibility\n\
+echo "Fixing cookie directory permissions..."\n\
+sudo chown -R robustty:robustty /app/cookies /app/data /app/logs || true\n\
+sudo chmod 755 /app/cookies /app/data /app/logs || true\n\
+\n\
 # Start the bot\n\
 echo "Starting Discord bot..."\n\
 exec /usr/local/bin/python -m src.main' > /app/start.sh && chmod +x /app/start.sh
+
+# Switch to non-root user for security
+USER robustty
 
 # Port configuration is handled by docker-compose.yml
 # Local dev: host networking for OrbStack optimization

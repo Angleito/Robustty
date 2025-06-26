@@ -1116,8 +1116,14 @@ class YouTubePlatform(VideoPlatform):
             name = cookie.get("name", "").strip()
             value = cookie.get("value", "")
 
-            # Skip cookies without name (value can be empty)
+            # Skip cookies without name or with empty values
             if not name:
+                invalid_count += 1
+                continue
+                
+            # Skip cookies with empty values (they won't help with authentication)
+            if not value or value.strip() == "":
+                logger.debug(f"Skipping cookie with empty value: {name}")
                 invalid_count += 1
                 continue
 
@@ -1170,6 +1176,21 @@ class YouTubePlatform(VideoPlatform):
     def _write_netscape_cookies(self, cookies: List[Dict], netscape_cookie_file: str) -> bool:
         """Write cookies to Netscape format file with enhanced validation"""
         try:
+            # Test write permissions first
+            cookie_path = Path(netscape_cookie_file)
+            try:
+                # Test write access by creating a temporary file
+                test_file = cookie_path.with_suffix('.test')
+                test_file.touch()
+                test_file.unlink()
+            except (PermissionError, OSError) as e:
+                if "Read-only file system" in str(e):
+                    logger.warning(f"Cannot write to read-only filesystem: {netscape_cookie_file}")
+                    return False
+                else:
+                    logger.error(f"Permission error writing Netscape cookie file: {e}")
+                    return False
+            
             with open(netscape_cookie_file, "w", encoding="utf-8") as f:
                 # Write Netscape cookie file header
                 f.write("# Netscape HTTP Cookie File\n")
@@ -2468,10 +2489,16 @@ class YouTubePlatform(VideoPlatform):
             auth_cookies = set()
             expires_within_24h = []
             expired_count = 0
+            empty_values_count = 0
             
             for cookie in cookies:
                 name = cookie.get("name", "")
+                value = cookie.get("value", "")
                 expires = cookie.get("expires")
+                
+                # Check for empty cookie values
+                if not value or value.strip() == "":
+                    empty_values_count += 1
                 
                 # Track important authentication cookies
                 if name.lower() in ['session_token', 'sapisid', 'hsid', 'ssid', 'apisid', 'login_info']:
@@ -2487,8 +2514,14 @@ class YouTubePlatform(VideoPlatform):
             
             health["expired_cookies"] = expired_count
             health["expires_soon"] = expires_within_24h
+            health["empty_values"] = empty_values_count
             
             # Generate warnings and recommendations
+            if empty_values_count > 0:
+                health["healthy"] = False
+                health["warnings"].append(f"{empty_values_count} cookies have empty values")
+                health["recommendations"].append("Cookie extraction failed - run cookie extraction script")
+                
             if expired_count > 0:
                 health["warnings"].append(f"{expired_count} cookies have expired")
                 health["recommendations"].append("Refresh browser cookies")
@@ -2622,6 +2655,11 @@ class YouTubePlatform(VideoPlatform):
             logger.debug(f"Using auto language preferences for detected language: {detected_lang}")
         
         return {"youtube": youtube_args}
+
+    def _extract_metadata_from_ytdlp(self, info_dict: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Legacy method name compatibility - delegates to correct method"""
+        logger.debug("Using legacy method name _extract_metadata_from_ytdlp - delegating to _extract_metadata_from_ytdlp_result")
+        return self._extract_metadata_from_ytdlp_result(info_dict)
 
     def _build_search_query(self, query: str, max_results: int) -> str:
         """Build optimized search query with language preferences"""
