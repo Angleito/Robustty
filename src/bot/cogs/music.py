@@ -7,6 +7,7 @@ import discord
 from discord.ext import commands
 
 from ..utils.checks import is_in_voice_channel, is_same_voice_channel
+from ...services.voice_connection_manager import VoiceConnectionManager
 from ..utils.embeds import (
     create_embed, 
     create_error_embed, 
@@ -41,6 +42,7 @@ class Music(commands.Cog):
 
     def __init__(self, bot: "RobusttyBot") -> None:
         self.bot: "RobusttyBot" = bot
+        self.voice_manager = VoiceConnectionManager(bot)
         
         # URL patterns for direct platform detection - enhanced to handle parameters
         self.youtube_url_patterns = [
@@ -235,60 +237,56 @@ class Music(commands.Cog):
 
         voice_channel = ctx.author.voice.channel
 
-        # Connect to voice if not already connected
+        # Connect to voice if not already connected with enhanced error handling
         try:
             if not ctx.voice_client:
-                await voice_channel.connect()
-                embed = create_embed("Connected", f"Joined {voice_channel.name}")
-                await ctx.send(embed=embed)
+                # Use enhanced voice connection manager
+                voice_client, status_message = await self.voice_manager.connect_to_voice(voice_channel)
+                if voice_client:
+                    embed = create_embed("Connected", f"Joined {voice_channel.name}")
+                    await ctx.send(embed=embed)
+                else:
+                    embed = create_error_embed(
+                        "Connection Failed",
+                        f"Could not connect to voice channel.\n\n"
+                        f"**Status:** {status_message}\n\n"
+                        "💡 **Try this:**\n"
+                        "• Check bot permissions in voice channel\n"
+                        "• Try a different voice channel\n"
+                        "• Wait a moment and try again"
+                    )
+                    await ctx.send(embed=embed)
+                    return
             elif (
                 hasattr(ctx.voice_client, "channel")
                 and ctx.voice_client.channel != voice_channel
             ):
-                if hasattr(ctx.voice_client, "move_to"):
-                    voice_client: Any = ctx.voice_client
-                    await voice_client.move_to(voice_channel)
-                    embed = create_embed("Moved", f"Moved to {voice_channel.name}")
+                # Use enhanced move functionality
+                success, status_message = await self.voice_manager.move_to_voice(voice_channel, ctx.voice_client)
+                if success:
+                    embed = create_embed("Moved", status_message)
                     await ctx.send(embed=embed)
                 else:
-                    await ctx.voice_client.disconnect(force=True)
-                    await voice_channel.connect()
-                    embed = create_embed("Connected", f"Joined {voice_channel.name}")
+                    embed = create_error_embed(
+                        "Move Failed",
+                        f"Could not move to voice channel.\n\n"
+                        f"**Status:** {status_message}\n\n"
+                        "💡 **Try this:**\n"
+                        "• Use the `leave` command first, then `join` again\n"
+                        "• Check bot permissions in target voice channel"
+                    )
                     await ctx.send(embed=embed)
+                    return
             else:
                 embed = create_embed(
                     "Already connected", f"Already in {voice_channel.name}"
                 )
                 await ctx.send(embed=embed)
-        except discord.ClientException as e:
-            if "already connected" in str(e).lower():
-                embed = create_warning_embed(
-                    "Already Connected", "I'm already connected to a voice channel."
-                )
-            else:
-                embed = create_error_embed(
-                    "Discord Connection Error",
-                    f"Discord reported an issue: {str(e)[:100]}...\n\n"
-                    "💡 **Try this:**\n"
-                    "• Check bot permissions in voice channel\n"
-                    "• Try the `leave` command first, then `join` again",
-                )
-            await ctx.send(embed=embed)
-        except asyncio.TimeoutError:
-            embed = create_error_embed(
-                "Connection Timeout",
-                "Connection to voice channel timed out.\n\n"
-                "💡 **This might help:**\n"
-                "• Check your internet connection\n"
-                "• Try a different voice channel\n"
-                "• Wait a moment and try again",
-            )
-            await ctx.send(embed=embed)
         except Exception as e:
             logger.error(f"Unexpected voice connection error: {e}")
             embed = create_error_embed(
                 "Connection Failed",
-                f"Unexpected error connecting to voice channel.\n\n"
+                f"Unexpected error with voice connection.\n\n"
                 f"**Error:** {str(e)[:100]}...\n\n"
                 "💡 **Try this:**\n"
                 "• Check bot permissions\n"
@@ -314,17 +312,23 @@ class Music(commands.Cog):
 
         voice_channel = ctx.author.voice.channel
 
-        # Connect to voice if not already connected
+        # Connect to voice if not already connected with enhanced error handling
         try:
             if not ctx.voice_client:
-                await voice_channel.connect()
+                voice_client, status_message = await self.voice_manager.connect_to_voice(voice_channel)
+                if not voice_client:
+                    embed = create_error_embed("Connection failed", f"Could not connect: {status_message}")
+                    await ctx.send(embed=embed)
+                    return
             elif (
                 hasattr(ctx.voice_client, "channel")
                 and ctx.voice_client.channel != voice_channel
             ):
-                if hasattr(ctx.voice_client, "move_to"):
-                    voice_client: Any = ctx.voice_client
-                    await voice_client.move_to(voice_channel)
+                success, status_message = await self.voice_manager.move_to_voice(voice_channel, ctx.voice_client)
+                if not success:
+                    embed = create_error_embed("Move failed", f"Could not move to channel: {status_message}")
+                    await ctx.send(embed=embed)
+                    return
         except Exception as e:
             embed = create_error_embed("Connection failed", f"Could not connect: {e}")
             await ctx.send(embed=embed)
@@ -622,28 +626,36 @@ class Music(commands.Cog):
             return
         voice_channel = ctx.author.voice.channel
 
-        # Connect to voice if not already connected with better error handling
+        # Connect to voice if not already connected with enhanced error handling
         try:
             if not ctx.voice_client:
-                await voice_channel.connect()
+                voice_client, status_message = await self.voice_manager.connect_to_voice(voice_channel)
+                if not voice_client:
+                    embed = create_error_embed(
+                        "Voice Connection Failed",
+                        f"Could not connect to voice channel for playback.\n\n"
+                        f"**Status:** {status_message}\n\n"
+                        "💡 **Try this:**\n"
+                        "• Use the `join` command first\n"
+                        "• Check bot permissions in voice channel\n"
+                        "• Make sure you're in a voice channel",
+                    )
+                    await ctx.send(embed=embed)
+                    return
             elif (
                 hasattr(ctx.voice_client, "channel")
                 and ctx.voice_client.channel != voice_channel
             ):
-                if hasattr(ctx.voice_client, "move_to"):
-                    voice_client: Any = ctx.voice_client
-                    await voice_client.move_to(voice_channel)
-                else:
-                    await ctx.voice_client.disconnect(force=True)
-                    await voice_channel.connect()
-        except discord.ClientException as e:
-            logger.warning(f"Voice connection issue during play: {e}")
-            # Continue with playback attempt - voice client might still work
+                success, status_message = await self.voice_manager.move_to_voice(voice_channel, ctx.voice_client)
+                if not success:
+                    logger.warning(f"Voice move issue during play: {status_message}")
+                    # Try to continue with playback - the original connection might still work
         except Exception as e:
             logger.error(f"Failed to connect to voice for playback: {e}")
             embed = create_error_embed(
                 "Voice Connection Failed",
-                "Could not connect to voice channel for playback.\n\n"
+                f"Could not connect to voice channel for playback.\n\n"
+                f"**Error:** {str(e)[:100]}...\n\n"
                 "💡 **Try this:**\n"
                 "• Use the `join` command first\n"
                 "• Check bot permissions in voice channel\n"
@@ -807,7 +819,14 @@ class Music(commands.Cog):
         if not ctx.guild:
             return
         player = self.bot.get_audio_player(ctx.guild.id)
-        player.stop()
+        
+        # Stop playback properly
+        try:
+            player.stop()
+            logger.info(f"Stopped playback for guild {ctx.guild.id}")
+        except Exception as e:
+            logger.error(f"Error stopping playback: {e}")
+        
         await ctx.send("⏹️ Stopped playback and cleared queue.")
 
     @commands.command(name="queue", aliases=["q"])
@@ -873,9 +892,24 @@ class Music(commands.Cog):
         """Leave the voice channel"""
         if ctx.voice_client and ctx.guild:
             player = self.bot.get_audio_player(ctx.guild.id)
-            player.stop()
-            await ctx.voice_client.disconnect(force=True)
-            await ctx.send("👋 Left the voice channel.")
+            
+            # Stop player and cleanup resources
+            try:
+                await player.cleanup()
+                logger.info(f"Cleaned up audio player for guild {ctx.guild.id}")
+            except Exception as e:
+                logger.error(f"Error cleaning up audio player: {e}")
+            
+            # Use enhanced disconnect with cleanup
+            success, status_message = await self.voice_manager.disconnect_from_voice(
+                ctx.guild.id, ctx.voice_client, force=True
+            )
+            
+            if success:
+                await ctx.send("👋 Left the voice channel.")
+            else:
+                logger.warning(f"Disconnect issue: {status_message}")
+                await ctx.send("👋 Left the voice channel (with cleanup issues).")
         else:
             await ctx.send("I'm not in a voice channel.")
 
@@ -950,6 +984,24 @@ class Music(commands.Cog):
         # Create detailed status embed
         embed = create_multi_platform_status_embed(search_status)
         await ctx.send(embed=embed)
+
+    async def cog_unload(self) -> None:
+        """Clean up resources when the cog is unloaded"""
+        logger.info("Unloading Music cog - cleaning up resources")
+        
+        # Clean up all audio players
+        if hasattr(self.bot, 'audio_players'):
+            for guild_id, player in list(self.bot.audio_players.items()):
+                try:
+                    await player.cleanup()
+                    logger.info(f"Cleaned up audio player for guild {guild_id}")
+                except Exception as e:
+                    logger.error(f"Error cleaning up audio player for guild {guild_id}: {e}")
+            
+            # Clear the audio players dict
+            self.bot.audio_players.clear()
+        
+        logger.info("Music cog cleanup completed")
 
 
 async def setup(bot: "RobusttyBot") -> None:

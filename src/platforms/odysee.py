@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 import re
 from typing import Any, Dict, List, Optional
 from urllib.parse import quote
@@ -29,21 +30,54 @@ from src.utils.network_resilience import (
 
 logger = logging.getLogger(__name__)
 
-# Odysee-specific configurations for better resilience
-ODYSEE_CIRCUIT_BREAKER_CONFIG = CircuitBreakerConfig(
-    failure_threshold=5,  # Higher threshold - Odysee can be flaky
-    recovery_timeout=90,  # Longer recovery time
-    success_threshold=2,  # Lower success threshold for faster recovery
-    timeout=45,  # Longer timeout for Odysee API calls
-)
+def _detect_vps_environment() -> bool:
+    """Detect if running in VPS environment based on various indicators"""
+    vps_indicators = [
+        os.getenv('VPS_MODE', '').lower() == 'true',
+        os.getenv('DOCKER_CONTAINER', '').lower() == 'true', 
+        os.path.exists('/.dockerenv'),
+        os.getenv('CI', '').lower() == 'true',
+        'vps' in os.getenv('HOSTNAME', '').lower(),
+        'docker' in os.getenv('HOSTNAME', '').lower(),
+    ]
+    return any(vps_indicators)
 
-ODYSEE_RETRY_CONFIG = RetryConfig(
-    max_attempts=4,  # More retry attempts
-    base_delay=2.0,  # Longer base delay
-    max_delay=30.0,  # Longer max delay
-    exponential_base=2.0,
-    jitter=True,
-)
+# Environment detection
+IS_VPS_ENVIRONMENT = _detect_vps_environment()
+
+# VPS-optimized configurations for better resilience in variable network conditions
+if IS_VPS_ENVIRONMENT:
+    # More lenient configuration for VPS environments
+    ODYSEE_CIRCUIT_BREAKER_CONFIG = CircuitBreakerConfig(
+        failure_threshold=8,  # Higher threshold for VPS network variability
+        recovery_timeout=180,  # Longer recovery time for VPS (3 minutes)
+        success_threshold=3,  # Require more successes to confirm recovery
+        timeout=60,  # Longer timeout for VPS network latency
+    )
+    
+    ODYSEE_RETRY_CONFIG = RetryConfig(
+        max_attempts=5,  # More retry attempts for VPS
+        base_delay=3.0,  # Longer base delay for VPS
+        max_delay=45.0,  # Longer max delay for VPS
+        exponential_base=1.8,  # Gentler exponential backoff
+        jitter=True,
+    )
+else:
+    # Standard configuration for local/development environments
+    ODYSEE_CIRCUIT_BREAKER_CONFIG = CircuitBreakerConfig(
+        failure_threshold=5,  # Standard threshold for stable networks
+        recovery_timeout=90,  # Standard recovery time
+        success_threshold=2,  # Faster recovery for stable networks
+        timeout=45,  # Standard timeout
+    )
+    
+    ODYSEE_RETRY_CONFIG = RetryConfig(
+        max_attempts=4,  # Standard retry attempts
+        base_delay=2.0,  # Standard base delay
+        max_delay=30.0,  # Standard max delay
+        exponential_base=2.0,
+        jitter=True,
+    )
 
 # Enhanced error classification for better handling
 ODYSEE_RETRYABLE_ERRORS = (
@@ -71,20 +105,40 @@ class OdyseePlatform(VideoPlatform):
         super().__init__(name, config, cache_manager)
         self.api_url = config.get("api_url", "https://api.lbry.tv/api/v1")
         self.stream_url = config.get("stream_url", "https://api.lbry.tv")
-
-        # Enhanced timeout configuration for Odysee
-        self.api_timeout = config.get("api_timeout", 30)  # Longer default timeout
-        self.stream_timeout = config.get("stream_timeout", 20)
-        self.search_timeout = config.get("search_timeout", 25)
-
-        # Connection pool settings for better reliability
-        self.max_connections = config.get("max_connections", 10)
-        self.max_connections_per_host = config.get("max_connections_per_host", 5)
+        
+        # Environment-specific timeout configuration
+        if IS_VPS_ENVIRONMENT:
+            # VPS-optimized timeouts for variable network conditions
+            base_api_timeout = config.get("api_timeout", 45)  # Longer for VPS
+            base_stream_timeout = config.get("stream_timeout", 30)  # Longer for VPS
+            base_search_timeout = config.get("search_timeout", 35)  # Longer for VPS
+            
+            # More generous connection pool for VPS
+            self.max_connections = config.get("max_connections", 15)
+            self.max_connections_per_host = config.get("max_connections_per_host", 8)
+            
+            logger.info(f"Odysee configured for VPS environment with extended timeouts")
+        else:
+            # Standard timeouts for local/development
+            base_api_timeout = config.get("api_timeout", 30)
+            base_stream_timeout = config.get("stream_timeout", 20) 
+            base_search_timeout = config.get("search_timeout", 25)
+            
+            # Standard connection pool
+            self.max_connections = config.get("max_connections", 10)
+            self.max_connections_per_host = config.get("max_connections_per_host", 5)
+            
+            logger.info(f"Odysee configured for local environment with standard timeouts")
+        
+        self.api_timeout = base_api_timeout
+        self.stream_timeout = base_stream_timeout
+        self.search_timeout = base_search_timeout
 
         # Failure tracking for adaptive behavior
         self.consecutive_failures = 0
         self.last_success_time = None
-        self.adaptive_timeout_multiplier = 1.0
+        # Start with lower multiplier for VPS to be more conservative
+        self.adaptive_timeout_multiplier = 1.2 if IS_VPS_ENVIRONMENT else 1.0
 
         # URL patterns for Odysee videos
         self.url_patterns = [
@@ -721,60 +775,114 @@ class OdyseePlatform(VideoPlatform):
         self.consecutive_failures = 0
         self.last_success_time = time.time()
 
-        # Gradually reduce timeout multiplier on success
-        if self.adaptive_timeout_multiplier > 1.0:
-            self.adaptive_timeout_multiplier = max(
-                1.0, self.adaptive_timeout_multiplier * 0.9
-            )
-            logger.debug(
-                f"Reduced Odysee timeout multiplier to {self.adaptive_timeout_multiplier:.2f}"
-            )
+        # Environment-specific timeout multiplier reduction
+        if IS_VPS_ENVIRONMENT:
+            # More conservative reduction for VPS to maintain stability
+            baseline_multiplier = 1.2  # VPS baseline is higher
+            if self.adaptive_timeout_multiplier > baseline_multiplier:
+                self.adaptive_timeout_multiplier = max(
+                    baseline_multiplier, self.adaptive_timeout_multiplier * 0.95  # Gentler reduction
+                )
+                logger.debug(
+                    f"[VPS] Reduced Odysee timeout multiplier to {self.adaptive_timeout_multiplier:.2f} "
+                    f"(baseline: {baseline_multiplier})"
+                )
+        else:
+            # Faster reduction for local environments
+            if self.adaptive_timeout_multiplier > 1.0:
+                self.adaptive_timeout_multiplier = max(
+                    1.0, self.adaptive_timeout_multiplier * 0.9
+                )
+                logger.debug(
+                    f"Reduced Odysee timeout multiplier to {self.adaptive_timeout_multiplier:.2f}"
+                )
 
     async def _handle_network_failure(self, failure_type: str):
         """Handle network failure for adaptive behavior"""
         self.consecutive_failures += 1
 
-        # Increase timeout multiplier on consecutive failures
-        if self.consecutive_failures >= 2:
-            old_multiplier = self.adaptive_timeout_multiplier
-            self.adaptive_timeout_multiplier = min(
-                3.0, self.adaptive_timeout_multiplier * 1.2
-            )
-            if old_multiplier != self.adaptive_timeout_multiplier:
-                logger.info(
-                    f"Increased Odysee timeout multiplier to {self.adaptive_timeout_multiplier:.2f} "
-                    f"after {self.consecutive_failures} consecutive failures ({failure_type})"
+        # Environment-specific adaptive timeout adjustment
+        if IS_VPS_ENVIRONMENT:
+            # More aggressive timeout increases for VPS due to variable network conditions
+            if self.consecutive_failures >= 2:
+                old_multiplier = self.adaptive_timeout_multiplier
+                # Increase more gradually for VPS to avoid overly long timeouts
+                self.adaptive_timeout_multiplier = min(
+                    4.0, self.adaptive_timeout_multiplier * 1.15  # Gentler increase
                 )
+                if old_multiplier != self.adaptive_timeout_multiplier:
+                    logger.info(
+                        f"[VPS] Increased Odysee timeout multiplier to {self.adaptive_timeout_multiplier:.2f} "
+                        f"after {self.consecutive_failures} consecutive failures ({failure_type})"
+                    )
+        else:
+            # Standard timeout adjustment for local environments
+            if self.consecutive_failures >= 2:
+                old_multiplier = self.adaptive_timeout_multiplier
+                self.adaptive_timeout_multiplier = min(
+                    3.0, self.adaptive_timeout_multiplier * 1.2
+                )
+                if old_multiplier != self.adaptive_timeout_multiplier:
+                    logger.info(
+                        f"Increased Odysee timeout multiplier to {self.adaptive_timeout_multiplier:.2f} "
+                        f"after {self.consecutive_failures} consecutive failures ({failure_type})"
+                    )
 
     async def _configure_optimized_session(self):
         """Configure aiohttp session with Odysee-specific optimizations"""
         if self.session and not self.session.closed:
             return
 
-        # Create optimized connector for Odysee
-        connector = aiohttp.TCPConnector(
-            limit=self.max_connections,
-            limit_per_host=self.max_connections_per_host,
-            ttl_dns_cache=300,  # Cache DNS for 5 minutes
-            use_dns_cache=True,
-            keepalive_timeout=30,  # Keep connections alive longer
-            enable_cleanup_closed=True,
-            force_close=False,  # Reuse connections
-        )
+        # Environment-specific connector configuration
+        if IS_VPS_ENVIRONMENT:
+            # VPS-optimized connector settings
+            connector = aiohttp.TCPConnector(
+                limit=self.max_connections,
+                limit_per_host=self.max_connections_per_host,
+                ttl_dns_cache=600,  # Cache DNS longer for VPS (10 minutes)
+                use_dns_cache=True,
+                keepalive_timeout=60,  # Keep connections alive longer for VPS
+                enable_cleanup_closed=True,
+                force_close=False,  # Reuse connections aggressively
+                resolver=aiohttp.AsyncResolver(nameservers=['8.8.8.8', '1.1.1.1']),  # Use reliable DNS
+            )
+            
+            # More generous timeouts for VPS
+            timeout = aiohttp.ClientTimeout(
+                total=None,  # No total timeout (handled per request)
+                connect=20,  # Longer connection timeout for VPS
+                sock_read=45,  # Longer socket read timeout for VPS
+            )
+            
+            logger.debug("Configured VPS-optimized aiohttp session for Odysee")
+        else:
+            # Standard connector for local development
+            connector = aiohttp.TCPConnector(
+                limit=self.max_connections,
+                limit_per_host=self.max_connections_per_host,
+                ttl_dns_cache=300,  # Cache DNS for 5 minutes
+                use_dns_cache=True,
+                keepalive_timeout=30,  # Standard keepalive
+                enable_cleanup_closed=True,
+                force_close=False,  # Reuse connections
+            )
+            
+            # Standard timeout configuration
+            timeout = aiohttp.ClientTimeout(
+                total=None,  # No total timeout (handled per request)
+                connect=10,  # Standard connection timeout
+                sock_read=30,  # Standard socket read timeout
+            )
+            
+            logger.debug("Configured standard aiohttp session for Odysee")
 
-        # Enhanced timeout configuration
-        timeout = aiohttp.ClientTimeout(
-            total=None,  # No total timeout (handled per request)
-            connect=10,  # Connection timeout
-            sock_read=30,  # Socket read timeout
-        )
-
-        # Custom headers for better compatibility
+        # Enhanced headers for better compatibility
         headers = {
             "User-Agent": "Mozilla/5.0 (compatible; RobusttyBot/1.0; +https://github.com/robustty)",
             "Accept": "application/json, */*",
             "Accept-Encoding": "gzip, deflate",
             "Connection": "keep-alive",
+            "Cache-Control": "no-cache",  # Avoid stale responses
         }
 
         self.session = aiohttp.ClientSession(
@@ -785,7 +893,7 @@ class OdyseePlatform(VideoPlatform):
         )
 
         logger.debug(
-            "Configured optimized aiohttp session for Odysee with enhanced connection pooling"
+            f"Configured optimized aiohttp session for Odysee with {len(headers)} custom headers"
         )
 
     async def initialize(self):
@@ -817,6 +925,7 @@ class OdyseePlatform(VideoPlatform):
 
         return {
             "platform": "odysee",
+            "environment": "vps" if IS_VPS_ENVIRONMENT else "local",
             "api_url": self.api_url,
             "consecutive_failures": self.consecutive_failures,
             "adaptive_timeout_multiplier": self.adaptive_timeout_multiplier,
@@ -834,6 +943,21 @@ class OdyseePlatform(VideoPlatform):
                 "search": int(self.search_timeout * self.adaptive_timeout_multiplier),
                 "api": int(self.api_timeout * self.adaptive_timeout_multiplier),
                 "stream": int(self.stream_timeout * self.adaptive_timeout_multiplier),
+            },
+            "circuit_breaker_config": {
+                "failure_threshold": ODYSEE_CIRCUIT_BREAKER_CONFIG.failure_threshold,
+                "recovery_timeout": ODYSEE_CIRCUIT_BREAKER_CONFIG.recovery_timeout,
+                "success_threshold": ODYSEE_CIRCUIT_BREAKER_CONFIG.success_threshold,
+                "timeout": ODYSEE_CIRCUIT_BREAKER_CONFIG.timeout,
+            },
+            "retry_config": {
+                "max_attempts": ODYSEE_RETRY_CONFIG.max_attempts,
+                "base_delay": ODYSEE_RETRY_CONFIG.base_delay,
+                "max_delay": ODYSEE_RETRY_CONFIG.max_delay,
+            },
+            "connection_pool": {
+                "max_connections": self.max_connections,
+                "max_connections_per_host": self.max_connections_per_host,
             },
             "session_status": (
                 "active" if self.session and not self.session.closed else "inactive"

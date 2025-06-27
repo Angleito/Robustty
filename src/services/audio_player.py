@@ -38,6 +38,11 @@ class AudioPlayer:
         self._is_playing = False
         self._skip_flag = False
         self.metrics = get_metrics_collector()
+        
+        # Task management for proper cleanup
+        self._active_tasks: set[asyncio.Task] = set()
+        self._cleanup_event = asyncio.Event()
+        
         self._update_queue_metrics()
 
     async def add_to_queue(self, song_info: Dict):
@@ -78,8 +83,20 @@ class AudioPlayer:
 
     async def _play_song(self, song_info: Dict):
         """Play a specific song"""
-        if not self.voice_client or not self.voice_client.is_connected():
-            logger.error("Not connected to voice channel")
+        if not self.voice_client:
+            logger.error("No voice client available")
+            self._is_playing = False
+            return
+        
+        # Check if voice client is still connected
+        if not self.voice_client.is_connected():
+            logger.error("Voice client disconnected - attempting to handle gracefully")
+            self._is_playing = False
+            # Try to skip to next song if available
+            if self.queue:
+                logger.info("Attempting to play next song after connection loss")
+                await asyncio.sleep(2)  # Brief delay before retry
+                await self.play_next()
             return
 
         self._is_playing = True
@@ -137,18 +154,39 @@ class AudioPlayer:
             # Play the audio
             def after_play(error):
                 if self.bot:
-                    self.bot.loop.create_task(self._playback_finished(error))
+                    task = self.bot.loop.create_task(self._playback_finished(error))
+                    self._active_tasks.add(task)
+                    task.add_done_callback(self._active_tasks.discard)
                 else:
                     # Fallback if bot is not available
                     try:
-                        asyncio.create_task(self._playback_finished(error))
+                        task = asyncio.create_task(self._playback_finished(error))
+                        self._active_tasks.add(task)
+                        task.add_done_callback(self._active_tasks.discard)
                     except RuntimeError:
                         # This happens when there's no running event loop
+                        logger.warning("No event loop available for playback cleanup")
                         pass
 
             try:
+                # Verify voice client is still connected before playing
+                if not self.voice_client.is_connected():
+                    logger.error("Voice client disconnected just before playback")
+                    self._is_playing = False
+                    await self.play_next()
+                    return
+                
                 self.voice_client.play(transformed_source, after=after_play)
                 logger.info(f"Now playing: {song_info['title']}")
+            except discord.ClientException as e:
+                logger.error(f"Discord client error starting playback for {song_info['title']}: {e}")
+                # Handle specific Discord connection issues
+                if "not connected" in str(e).lower() or "invalid" in str(e).lower():
+                    logger.error("Voice connection is no longer valid")
+                    self.voice_client = None  # Clear invalid voice client
+                self._is_playing = False
+                await self.play_next()
+                return
             except Exception as e:
                 logger.error(f"Error starting playback for {song_info['title']}: {e}")
                 self._is_playing = False
@@ -210,8 +248,15 @@ class AudioPlayer:
             logger.error(
                 f"Current song: {self.current.get('title') if self.current else 'None'}"
             )
+            
+            # Check for specific Discord voice connection errors
+            error_str = str(error).lower()
+            if any(keyword in error_str for keyword in ["4006", "session", "websocket", "connection closed"]):
+                logger.error("Detected Discord voice connection error - may need reconnection")
+                # Clear voice client reference as it's likely invalid
+                self.voice_client = None
+            
             import traceback
-
             logger.error(f"Traceback: {traceback.format_exc()}")
 
         self._is_playing = False
@@ -224,9 +269,18 @@ class AudioPlayer:
             f"Skip flag was: {skip_was_requested}, Queue length: {len(self.queue)}"
         )
 
+        # Validate voice connection before attempting to play next
+        if self.voice_client and not self.voice_client.is_connected():
+            logger.warning("Voice client disconnected - clearing reference")
+            self.voice_client = None
+
         # Always advance to next song when playback finishes (whether by skip or natural end)
         logger.info("Attempting to play next song...")
-        await self.play_next()
+        try:
+            await self.play_next()
+        except Exception as e:
+            logger.error(f"Error in play_next from callback: {e}")
+            # Don't let callback errors crash the bot
 
     def skip(self):
         """Skip the current song"""
@@ -273,17 +327,74 @@ class AudioPlayer:
     def is_playing(self) -> bool:
         """Check if currently playing"""
         return self._is_playing
+    
+    def is_voice_connected(self) -> bool:
+        """Check if voice client is connected"""
+        return self.voice_client is not None and self.voice_client.is_connected()
+    
+    def validate_voice_connection(self) -> tuple[bool, str]:
+        """Validate voice connection status"""
+        if not self.voice_client:
+            return False, "No voice client available"
+        
+        if not self.voice_client.is_connected():
+            return False, "Voice client is disconnected"
+        
+        return True, "Voice connection is valid"
 
     def get_queue(self) -> List[Dict]:
         """Get current queue"""
         return list(self.queue)
 
     async def cleanup(self):
-        """Cleanup resources"""
+        """Cleanup resources and properly close all async tasks"""
+        logger.info("Starting audio player cleanup")
+        
+        # Set cleanup event to signal shutdown
+        self._cleanup_event.set()
+        
+        # Stop playback first
         self.stop()
+        
+        # Disconnect voice client properly
+        if self.voice_client:
+            try:
+                if self.voice_client.is_connected():
+                    await self.voice_client.disconnect(force=True)
+                    logger.info("Voice client disconnected")
+                # Clear the voice client reference
+                self.voice_client = None
+            except Exception as e:
+                logger.error(f"Error disconnecting voice client: {e}")
+        
+        # Cancel and wait for all active tasks to complete
+        if self._active_tasks:
+            logger.info(f"Cancelling {len(self._active_tasks)} active tasks")
+            for task in self._active_tasks.copy():
+                if not task.done():
+                    task.cancel()
+            
+            # Wait for all tasks to complete or be cancelled
+            if self._active_tasks:
+                try:
+                    await asyncio.gather(*self._active_tasks, return_exceptions=True)
+                    logger.info("All audio player tasks completed")
+                except Exception as e:
+                    logger.error(f"Error waiting for tasks to complete: {e}")
+            
+            # Clear the task set
+            self._active_tasks.clear()
+        
+        # Clear queue and current track
         self.queue.clear()
         self.current = None
+        self._is_playing = False
+        self._skip_flag = False
+        
+        # Update metrics
         self._update_queue_metrics()
+        
+        logger.info("Audio player cleanup completed")
 
     def _update_queue_metrics(self):
         """Update queue size metric"""

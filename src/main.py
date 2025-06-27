@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import signal
 import sys
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -31,9 +32,20 @@ logger = logging.getLogger(__name__)
 
 
 async def main() -> None:
-    """Main entry point"""
+    """Main entry point with proper signal handling"""
     bot: Optional[RobusttyBot] = None
     metrics_server: Optional[MetricsServer] = None
+    shutdown_event = asyncio.Event()
+    
+    def signal_handler(signum, frame):
+        """Handle shutdown signals"""
+        logger.info(f"Received signal {signum}, initiating graceful shutdown...")
+        shutdown_event.set()
+    
+    # Set up signal handlers for graceful shutdown
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+    
     try:
         # Load .env file
         load_dotenv()
@@ -64,7 +76,34 @@ async def main() -> None:
         logger.info(f"Metrics server started on port {metrics_port}")
 
         logger.info("Starting Robustty Music Bot...")
-        await bot.start(token)
+        
+        # Create task for bot startup
+        bot_task = asyncio.create_task(bot.start(token))
+        
+        # Wait for either shutdown signal or bot to finish
+        done, pending = await asyncio.wait(
+            [bot_task, asyncio.create_task(shutdown_event.wait())],
+            return_when=asyncio.FIRST_COMPLETED
+        )
+        
+        # Cancel pending tasks
+        for task in pending:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+        
+        # If shutdown was requested, close the bot gracefully
+        if shutdown_event.is_set():
+            logger.info("Shutdown signal received, closing bot gracefully...")
+            if bot and not bot.is_closed():
+                await bot.close()
+        else:
+            # Bot finished on its own, check for exceptions
+            for task in done:
+                if task.exception():
+                    raise task.exception()
 
     except ConfigurationError as e:
         logger.error(f"Configuration Error: {e}")
@@ -79,10 +118,26 @@ async def main() -> None:
         logger.error(f"Failed to start bot: {e}", exc_info=True)
         sys.exit(1)
     finally:
+        logger.info("Cleaning up resources...")
+        
+        # Cleanup bot
         if bot is not None:
-            await bot.close()
+            try:
+                if not bot.is_closed():
+                    await bot.close()
+                logger.info("Bot closed successfully")
+            except Exception as e:
+                logger.error(f"Error closing bot: {e}")
+        
+        # Cleanup metrics server
         if metrics_server is not None:
-            await metrics_server.stop()
+            try:
+                await metrics_server.stop()
+                logger.info("Metrics server stopped")
+            except Exception as e:
+                logger.error(f"Error stopping metrics server: {e}")
+        
+        logger.info("Cleanup completed")
 
 
 if __name__ == "__main__":

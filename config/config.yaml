@@ -25,11 +25,22 @@ platforms:
   peertube:
     enabled: true
     instances:
-      - https://tube.tchncs.de  # German instance, usually reliable
-      - https://peertube.tv     # Main peertube instance
-      - https://framatube.org   # French instance
-      - https://video.ploud.fr  # Alternative French instance  
-    max_results_per_instance: 5
+      # Primary reliable instances (tested and verified)
+      - https://tube.tchncs.de     # German instance, very reliable, federated content
+      - https://peertube.tv        # Main PeerTube instance, good for testing
+      - https://framatube.org      # French instance by Framasoft, stable
+      - https://video.ploud.fr     # Alternative French instance, good federation
+      
+      # Additional high-quality instances for redundancy  
+      - https://tilvids.com        # Educational content, very stable
+      - https://makertube.net      # Maker/DIY content, active community
+      - https://diode.zone         # Electronics/creative content, stable
+      - https://tube.shanti.cafe   # Finnish instance, 800k+ videos, 100% health
+      - https://video.infosec.exchange  # InfoSec focused, reliable German instance
+      - https://videos.spacefun.ch # Swiss instance, 245k+ videos, stable
+      - https://videos.elenarossini.com  # Personal instance, 17k+ videos, reliable
+      - https://peertube.heise.de  # German tech publisher, official instance
+    max_results_per_instance: 3  # Reduced per instance since we have more instances
 
   odysee:
     enabled: ${ODYSEE_ENABLED:false}
@@ -38,13 +49,15 @@ platforms:
     max_results: 10
     
     # Enhanced timeout configuration for connection stability
-    api_timeout: ${ODYSEE_API_TIMEOUT:30}        # API request timeout (seconds)
-    search_timeout: ${ODYSEE_SEARCH_TIMEOUT:25}  # Search request timeout (seconds)  
-    stream_timeout: ${ODYSEE_STREAM_TIMEOUT:20}  # Stream URL check timeout (seconds)
+    # Note: VPS environments automatically get longer timeouts via environment detection
+    api_timeout: ${ODYSEE_API_TIMEOUT:30}        # API request timeout (seconds) - VPS uses 45s
+    search_timeout: ${ODYSEE_SEARCH_TIMEOUT:25}  # Search request timeout (seconds) - VPS uses 35s
+    stream_timeout: ${ODYSEE_STREAM_TIMEOUT:20}  # Stream URL check timeout (seconds) - VPS uses 30s
     
     # Connection pool optimization
-    max_connections: ${ODYSEE_MAX_CONNECTIONS:10}              # Total connection pool size
-    max_connections_per_host: ${ODYSEE_MAX_CONNECTIONS_PER_HOST:5}  # Per-host connection limit
+    # Note: VPS environments automatically get larger connection pools
+    max_connections: ${ODYSEE_MAX_CONNECTIONS:10}              # Total connection pool size - VPS uses 15
+    max_connections_per_host: ${ODYSEE_MAX_CONNECTIONS_PER_HOST:5}  # Per-host connection limit - VPS uses 8
 
   rumble:
     enabled: ${RUMBLE_ENABLED:false}

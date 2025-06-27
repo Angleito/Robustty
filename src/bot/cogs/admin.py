@@ -1083,6 +1083,186 @@ class Admin(Cog):
             )
             await ctx.send(embed=embed)
 
+    @commands.command(name="voicehealth", aliases=["vhealth", "voice-status"])
+    @is_admin()
+    async def voice_health(self, ctx: Context[RobottyBot]) -> None:
+        """Show voice connection health status"""
+        await ctx.trigger_typing()
+
+        try:
+            if not hasattr(self.bot, 'voice_connection_manager') or not self.bot.voice_connection_manager:
+                embed = create_warning_embed(
+                    title="Voice Manager Unavailable",
+                    description="Voice connection manager is not initialized",
+                )
+                await ctx.send(embed=embed)
+                return
+
+            voice_manager = self.bot.voice_connection_manager
+            health_status = voice_manager.get_health_status()
+
+            # Create status embed
+            if health_status['total_guilds'] == 0:
+                embed = create_embed(
+                    title="🔇 Voice Status: Inactive",
+                    description="No active voice connections",
+                    color=discord.Color.blue()
+                )
+            elif health_status['failed'] == 0:
+                embed = create_success_embed(
+                    title="🔊 Voice Status: Healthy",
+                    description=f"All voice connections are functioning properly",
+                )
+            elif health_status['connection_rate'] >= 0.8:
+                embed = create_warning_embed(
+                    title="🔊 Voice Status: Mostly Healthy",
+                    description=f"Most voice connections are working ({health_status['connection_rate']:.1%} success rate)",
+                )
+            else:
+                embed = create_error_embed(
+                    title="🔇 Voice Status: Issues Detected",
+                    description=f"Multiple voice connection issues ({health_status['connection_rate']:.1%} success rate)",
+                )
+
+            # Add statistics
+            embed.add_field(
+                name="📊 Connection Statistics",
+                value=f"**Total Guilds:** {health_status['total_guilds']}\n"
+                f"**Connected:** {health_status['connected']}\n"
+                f"**Failed:** {health_status['failed']}\n"
+                f"**Success Rate:** {health_status['connection_rate']:.1%}",
+                inline=True,
+            )
+
+            # Add per-guild status if any connections exist
+            if health_status['states']:
+                guild_status_lines = []
+                for guild_id, state in list(health_status['states'].items())[:10]:  # Limit to 10 guilds
+                    guild = self.bot.get_guild(guild_id)
+                    guild_name = guild.name if guild else f"Guild {guild_id}"
+                    
+                    status_emoji = {
+                        'connected': '🟢',
+                        'connecting': '🟡', 
+                        'reconnecting': '🟠',
+                        'failed': '🔴',
+                        'disconnected': '⚪'
+                    }.get(state, '❓')
+                    
+                    guild_status_lines.append(f"{status_emoji} {guild_name}: {state}")
+
+                if guild_status_lines:
+                    embed.add_field(
+                        name="🏠 Guild Status",
+                        value="\n".join(guild_status_lines),
+                        inline=False,
+                    )
+                    
+                    if len(health_status['states']) > 10:
+                        embed.add_field(
+                            name="",
+                            value=f"... and {len(health_status['states']) - 10} more guilds",
+                            inline=False,
+                        )
+
+            # Add recommendations if there are issues
+            if health_status['failed'] > 0:
+                embed.add_field(
+                    name="💡 Recommendations",
+                    value="• Check Discord voice server status\n"
+                    "• Verify bot permissions in voice channels\n"
+                    "• Run voice diagnostics: `!voicediag`\n"
+                    "• Consider restarting bot if issues persist",
+                    inline=False,
+                )
+
+            await ctx.send(embed=embed)
+
+        except Exception as e:
+            logger.error(f"Error getting voice health status: {e}")
+            embed = create_error_embed(
+                title="Voice Health Check Failed",
+                description=f"Could not retrieve voice health status: {str(e)[:100]}...",
+            )
+            await ctx.send(embed=embed)
+
+    @commands.command(name="voicediag", aliases=["vdiag", "voice-diag"])
+    @is_admin()
+    async def voice_diagnostics(self, ctx: Context[RobottyBot]) -> None:
+        """Run voice connection diagnostics"""
+        await ctx.trigger_typing()
+
+        try:
+            if not hasattr(self.bot, 'voice_connection_manager') or not self.bot.voice_connection_manager:
+                embed = create_warning_embed(
+                    title="Voice Manager Unavailable",
+                    description="Voice connection manager is not initialized",
+                )
+                await ctx.send(embed=embed)
+                return
+
+            voice_manager = self.bot.voice_connection_manager
+            
+            # Run health check on all connections
+            unhealthy_guilds = await voice_manager.health_check_connections()
+            
+            if not unhealthy_guilds:
+                embed = create_success_embed(
+                    title="🔍 Voice Diagnostics: All Clear",
+                    description="All voice connections passed health checks",
+                )
+            else:
+                embed = create_warning_embed(
+                    title="🔍 Voice Diagnostics: Issues Found",
+                    description=f"Found {len(unhealthy_guilds)} unhealthy voice connections",
+                )
+                
+                guild_issues = []
+                for guild_id in unhealthy_guilds[:5]:  # Show first 5
+                    guild = self.bot.get_guild(guild_id)
+                    guild_name = guild.name if guild else f"Guild {guild_id}"
+                    connection_info = voice_manager.get_connection_info(guild_id)
+                    
+                    guild_issues.append(
+                        f"**{guild_name}**\n"
+                        f"State: {connection_info['state']}\n"
+                        f"Attempts: {connection_info['attempts']}/{connection_info['max_attempts']}"
+                    )
+                
+                if guild_issues:
+                    embed.add_field(
+                        name="🏠 Unhealthy Guilds",
+                        value="\n\n".join(guild_issues),
+                        inline=False,
+                    )
+                
+                if len(unhealthy_guilds) > 5:
+                    embed.add_field(
+                        name="",
+                        value=f"... and {len(unhealthy_guilds) - 5} more affected guilds",
+                        inline=False,
+                    )
+
+            # Add diagnostic information
+            embed.add_field(
+                name="🛠️ Diagnostic Actions",
+                value="• Checked voice client connections\n"
+                "• Validated connection states\n"
+                "• Cleared invalid references\n"
+                "• Updated connection tracking",
+                inline=False,
+            )
+
+            await ctx.send(embed=embed)
+
+        except Exception as e:
+            logger.error(f"Error running voice diagnostics: {e}")
+            embed = create_error_embed(
+                title="Voice Diagnostics Failed",
+                description=f"Could not run voice diagnostics: {str(e)[:100]}...",
+            )
+            await ctx.send(embed=embed)
+
 
 async def setup(bot: RobottyBot) -> None:
     await bot.add_cog(Admin(bot))

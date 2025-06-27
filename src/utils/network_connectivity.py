@@ -19,6 +19,7 @@ import aiohttp
 import discord
 import dns.asyncresolver
 import dns.exception
+import dns.resolver
 
 logger = logging.getLogger(__name__)
 
@@ -233,31 +234,31 @@ class NetworkConnectivityChecker:
             # Try A record first, then AAAA as fallback
             try:
                 await resolver.resolve(domain, "A")
-            except (dns.exception.NXDOMAIN, dns.exception.NoAnswer):
+            except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer):
                 # Try AAAA if A record fails
                 await resolver.resolve(domain, "AAAA")
 
             response_time = time.time() - start_time
             return True, response_time, None
 
-        except dns.exception.Timeout:
+        except dns.resolver.Timeout:
             response_time = time.time() - start_time
             return (
                 False,
                 response_time,
                 f"DNS timeout after {dns_server.timeout}s ({dns_server.name})",
             )
-        except dns.exception.NXDOMAIN:
+        except dns.resolver.NXDOMAIN:
             response_time = time.time() - start_time
             return (
                 False,
                 response_time,
                 f"Domain '{domain}' not found ({dns_server.name})",
             )
-        except dns.exception.NoNameservers:
+        except dns.resolver.NoNameservers:
             response_time = time.time() - start_time
             return False, response_time, f"No nameservers available ({dns_server.name})"
-        except dns.exception.NoAnswer:
+        except dns.resolver.NoAnswer:
             response_time = time.time() - start_time
             return (
                 False,

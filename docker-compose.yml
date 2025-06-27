@@ -18,6 +18,9 @@ services:
       - MAX_QUEUE_SIZE=${MAX_QUEUE_SIZE:-100}
       - REDIS_URL=${REDIS_URL:-redis://redis:6379}
       - COOKIE_REFRESH_INTERVAL=7200  # 2 hours in seconds
+      # VPS optimization flags
+      - VPS_MODE=${VPS_MODE:-true}          # Enable VPS-specific optimizations
+      - DOCKER_CONTAINER=true               # Indicate running in Docker container
       # Platform enable/disable flags
       - YOUTUBE_ENABLED=${YOUTUBE_ENABLED:-true}
       - RUMBLE_ENABLED=${RUMBLE_ENABLED:-true}

@@ -13,6 +13,7 @@ from src.services.platform_fallback_manager import PlatformFallbackManager
 from src.services.health_endpoints import HealthEndpoints
 from src.services.searcher import MultiPlatformSearcher
 from src.services.quota_monitor import QuotaMonitor, create_quota_monitor
+from src.services.voice_connection_manager import VoiceConnectionManager
 from src.utils.config_loader import ConfigType
 from src.services.metrics_collector import get_metrics_collector
 from src.services.health_monitor import HealthMonitor
@@ -45,6 +46,7 @@ class RobusttyBot(commands.Bot):
         self.health_endpoints: Optional[HealthEndpoints] = None
         self.quota_monitor: Optional[QuotaMonitor] = None
         self.audio_players: Dict[int, AudioPlayer] = {}
+        self.voice_connection_manager: Optional[VoiceConnectionManager] = None
         self.metrics = get_metrics_collector()
         self.health_monitor: Optional[HealthMonitor] = None
         self.connectivity_manager = get_connectivity_manager(config)
@@ -142,6 +144,10 @@ class RobusttyBot(commands.Bot):
         # Initialize health monitor
         self.health_monitor = HealthMonitor(self, self.config)
         
+        # Initialize voice connection manager
+        self.voice_connection_manager = VoiceConnectionManager(self)
+        logger.info("Voice connection manager initialized")
+        
         # Initialize platform prioritization manager
         from src.services.platform_prioritization import initialize_prioritization_manager
         initialize_prioritization_manager(self.config)
@@ -207,51 +213,131 @@ class RobusttyBot(commands.Bot):
         return self.audio_players[guild_id]
 
     async def close(self) -> None:
-        """Cleanup on bot shutdown"""
+        """Cleanup on bot shutdown with proper resource management"""
         logger.info("Shutting down bot...")
 
-        # Stop health endpoints first
-        if self.health_endpoints:
-            await self.health_endpoints.stop()
+        try:
+            # Stop health endpoints first
+            if self.health_endpoints:
+                try:
+                    await self.health_endpoints.stop()
+                    logger.info("Health endpoints stopped")
+                except Exception as e:
+                    logger.error(f"Error stopping health endpoints: {e}")
 
-        # Stop health monitor
-        if self.health_monitor:
-            await self.health_monitor.stop()
+            # Stop health monitor
+            if self.health_monitor:
+                try:
+                    await self.health_monitor.stop()
+                    logger.info("Health monitor stopped")
+                except Exception as e:
+                    logger.error(f"Error stopping health monitor: {e}")
 
-        # Stop cookie health monitor
-        if self.cookie_health_monitor:
-            await self.cookie_health_monitor.stop()
+            # Stop cookie health monitor
+            if self.cookie_health_monitor:
+                try:
+                    await self.cookie_health_monitor.stop()
+                    logger.info("Cookie health monitor stopped")
+                except Exception as e:
+                    logger.error(f"Error stopping cookie health monitor: {e}")
 
-        # Stop fallback manager
-        if self.fallback_manager:
-            await self.fallback_manager.stop()
+            # Stop fallback manager
+            if self.fallback_manager:
+                try:
+                    await self.fallback_manager.stop()
+                    logger.info("Fallback manager stopped")
+                except Exception as e:
+                    logger.error(f"Error stopping fallback manager: {e}")
 
-        # Cleanup audio players
-        for player in self.audio_players.values():
-            await player.cleanup()
+            # Cleanup searcher
+            if self.searcher:
+                try:
+                    await self.searcher.cleanup()
+                    logger.info("Searcher cleaned up")
+                except Exception as e:
+                    logger.error(f"Error cleaning up searcher: {e}")
 
-        # Cleanup platforms
-        await self.platform_registry.cleanup_all()
+            # Cleanup audio players with proper voice disconnection
+            logger.info(f"Cleaning up {len(self.audio_players)} audio players")
+            for guild_id, player in list(self.audio_players.items()):
+                try:
+                    await player.cleanup()
+                    logger.info(f"Cleaned up audio player for guild {guild_id}")
+                except Exception as e:
+                    logger.error(f"Error cleaning up audio player for guild {guild_id}: {e}")
+            
+            # Clear audio players dict
+            self.audio_players.clear()
 
-        # Shutdown prioritization manager
-        from src.services.platform_prioritization import shutdown_prioritization_manager
-        shutdown_prioritization_manager()
+            # Disconnect from all voice channels
+            for guild in self.guilds:
+                try:
+                    voice_client = guild.voice_client
+                    if voice_client and voice_client.is_connected():
+                        await voice_client.disconnect(force=True)
+                        logger.info(f"Disconnected from voice channel in guild {guild.name}")
+                except Exception as e:
+                    logger.error(f"Error disconnecting from voice in guild {guild.name}: {e}")
 
-        # Cleanup cache manager
-        if hasattr(self, "cache_manager") and self.cache_manager:
-            await self.cache_manager.close()
-        
-        # Cleanup quota monitor
-        if self.quota_monitor:
-            await self.quota_monitor.cleanup()
+            # Cleanup platforms
+            if self.platform_registry:
+                try:
+                    await self.platform_registry.cleanup_all()
+                    logger.info("Platform registry cleaned up")
+                except Exception as e:
+                    logger.error(f"Error cleaning up platform registry: {e}")
 
-        # Cleanup cookie managers
-        if self.cookie_manager:
-            await self.cookie_manager.cleanup()
-        if self.enhanced_cookie_manager:
-            await self.enhanced_cookie_manager.cleanup()
+            # Shutdown prioritization manager
+            try:
+                from src.services.platform_prioritization import shutdown_prioritization_manager
+                shutdown_prioritization_manager()
+                logger.info("Prioritization manager shut down")
+            except Exception as e:
+                logger.error(f"Error shutting down prioritization manager: {e}")
 
-        await super().close()
+            # Cleanup cache manager
+            if hasattr(self, "cache_manager") and self.cache_manager:
+                try:
+                    await self.cache_manager.close()
+                    logger.info("Cache manager closed")
+                except Exception as e:
+                    logger.error(f"Error closing cache manager: {e}")
+            
+            # Cleanup quota monitor
+            if self.quota_monitor:
+                try:
+                    await self.quota_monitor.cleanup()
+                    logger.info("Quota monitor cleaned up")
+                except Exception as e:
+                    logger.error(f"Error cleaning up quota monitor: {e}")
+
+            # Cleanup cookie managers
+            if self.cookie_manager:
+                try:
+                    await self.cookie_manager.cleanup()
+                    logger.info("Cookie manager cleaned up")
+                except Exception as e:
+                    logger.error(f"Error cleaning up cookie manager: {e}")
+            
+            if self.enhanced_cookie_manager:
+                try:
+                    await self.enhanced_cookie_manager.cleanup()
+                    logger.info("Enhanced cookie manager cleaned up")
+                except Exception as e:
+                    logger.error(f"Error cleaning up enhanced cookie manager: {e}")
+
+            # Call parent close
+            await super().close()
+            logger.info("Bot shutdown completed successfully")
+            
+        except Exception as e:
+            logger.error(f"Error during bot shutdown: {e}")
+            # Still try to call parent close
+            try:
+                await super().close()
+            except Exception as e2:
+                logger.error(f"Error calling parent close: {e2}")
+            raise
 
     async def on_voice_state_update(
         self,

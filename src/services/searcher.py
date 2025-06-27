@@ -62,6 +62,10 @@ class MultiPlatformSearcher:
         self.status_reporter = get_status_reporter()
         self._last_search_status: Optional[MultiPlatformStatus] = None
         self.config = config or {}
+        
+        # Task management for proper cleanup
+        self._background_tasks: set[asyncio.Task] = set()
+        self._shutdown_event = asyncio.Event()
 
         # Enhanced cache configuration
         cache_config = self.config.get("cache", {})
@@ -126,9 +130,11 @@ class MultiPlatformSearcher:
 
                 # Still check for new results in background if configured
                 if self.config.get("background_refresh_cache", True):
-                    asyncio.create_task(
+                    task = asyncio.create_task(
                         self._background_refresh_search(query, platforms, max_results)
                     )
+                    self._background_tasks.add(task)
+                    task.add_done_callback(self._background_tasks.discard)
 
                 # Store status and return early
                 self._last_search_status = (
@@ -896,3 +902,30 @@ class MultiPlatformSearcher:
             results[video_info["platform"]] = [video_details] if video_details else []
 
         return results
+
+    async def cleanup(self):
+        """Cleanup searcher resources and cancel background tasks"""
+        logger.info("Starting searcher cleanup")
+        
+        # Signal shutdown
+        self._shutdown_event.set()
+        
+        # Cancel all background tasks
+        if self._background_tasks:
+            logger.info(f"Cancelling {len(self._background_tasks)} background tasks")
+            for task in self._background_tasks.copy():
+                if not task.done():
+                    task.cancel()
+            
+            # Wait for all tasks to complete or be cancelled
+            if self._background_tasks:
+                try:
+                    await asyncio.gather(*self._background_tasks, return_exceptions=True)
+                    logger.info("All background tasks completed")
+                except Exception as e:
+                    logger.error(f"Error waiting for background tasks to complete: {e}")
+                
+                # Clear the task set
+                self._background_tasks.clear()
+        
+        logger.info("Searcher cleanup completed")

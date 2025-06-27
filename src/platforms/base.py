@@ -19,6 +19,7 @@ class VideoPlatform(ABC):
         self.session: Optional[aiohttp.ClientSession] = None
         self.enabled = config.get("enabled", True)
         self.cache_manager = cache_manager
+        self._session_closed = False
 
     @abstractmethod
     async def search_videos(
@@ -49,13 +50,46 @@ class VideoPlatform(ABC):
 
     async def initialize(self):
         """Initialize platform resources"""
-        self.session = aiohttp.ClientSession()
-        logger.info(f"Initialized {self.name} platform")
+        if self.session is None or self.session.closed:
+            # Create session with proper timeout and connection limits
+            timeout = aiohttp.ClientTimeout(total=30, connect=10)
+            connector = aiohttp.TCPConnector(
+                limit=100,  # Total connection pool size
+                limit_per_host=10,  # Connections per host
+                ttl_dns_cache=300,  # DNS cache TTL
+                use_dns_cache=True,
+                keepalive_timeout=30,
+                enable_cleanup_closed=True
+            )
+            self.session = aiohttp.ClientSession(
+                timeout=timeout,
+                connector=connector,
+                headers={'User-Agent': 'Robustty Bot/1.0'}
+            )
+            self._session_closed = False
+            logger.info(f"Initialized {self.name} platform with new HTTP session")
+        else:
+            logger.info(f"Reusing existing HTTP session for {self.name} platform")
 
     async def cleanup(self):
         """Cleanup platform resources"""
-        if self.session:
-            await self.session.close()
+        if self.session and not self._session_closed:
+            try:
+                # Close the session gracefully
+                if not self.session.closed:
+                    await self.session.close()
+                
+                # Wait a bit for the underlying connections to close
+                import asyncio
+                await asyncio.sleep(0.1)
+                
+                self._session_closed = True
+                logger.info(f"Closed HTTP session for {self.name} platform")
+            except Exception as e:
+                logger.error(f"Error closing HTTP session for {self.name}: {e}")
+            finally:
+                self.session = None
+        
         logger.info(f"Cleaned up {self.name} platform")
 
     # Cache-aware helper methods
@@ -113,5 +147,15 @@ class VideoPlatform(ABC):
             except Exception as e:
                 logger.debug(f"Error caching stream URL for {self.name}: {e}")
 
+    async def __aenter__(self):
+        """Async context manager entry"""
+        await self.initialize()
+        return self
+    
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Async context manager exit"""
+        await self.cleanup()
+        return False
+    
     def __str__(self):
         return f"{self.name} ({'enabled' if self.enabled else 'disabled'})"
