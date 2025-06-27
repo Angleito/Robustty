@@ -84,8 +84,8 @@ fi
 
 echo -e "${GREEN}📦 Found $cookie_files cookie files to sync${NC}"
 
-# Step 3: Establish persistent SSH connection
-echo -e "${BLUE}🔗 Step 2: Establishing persistent SSH connection to VPS...${NC}"
+# Step 3: Establish persistent SSH connection and execute combined operations
+echo -e "${BLUE}🔗 Step 2: Establishing SSH connection and preparing remote environment...${NC}"
 if ssh_connect_persistent "$VPS_HOST" "$VPS_USER" "22" "$SSH_KEY"; then
     echo -e "${GREEN}✅ Persistent SSH connection established${NC}"
 else
@@ -97,30 +97,129 @@ else
     exit 1
 fi
 
-# Step 4: Create remote directory if it doesn't exist
-echo -e "${BLUE}📁 Step 3: Ensuring remote directory exists...${NC}"
-ssh_exec_persistent "$VPS_HOST" "$VPS_USER" "22" "$SSH_KEY" "mkdir -p $VPS_PATH"
+# Combined remote preparation in single SSH session
+echo -e "${BLUE}📁 Step 3: Preparing remote environment (combined operations)...${NC}"
+combined_prep_script="
+    set -e
+    echo 'Starting combined remote preparation...'
+    
+    # Create directory structure
+    mkdir -p $VPS_PATH/{cookies,logs,backup}
+    
+    # Backup existing cookies if any
+    if [ -d '$VPS_PATH/cookies' ] && [ \"\$(ls -A $VPS_PATH/cookies 2>/dev/null)\" ]; then
+        backup_dir='$VPS_PATH/backup/cookies_\$(date +%Y%m%d_%H%M%S)'
+        mkdir -p \"\$backup_dir\"
+        cp -r $VPS_PATH/cookies/* \"\$backup_dir/\" 2>/dev/null || true
+        echo \"Backup created: \$backup_dir\"
+        
+        # Clean old backups (keep last 3)
+        find $VPS_PATH/backup -name 'cookies_*' -type d | sort -r | tail -n +4 | xargs rm -rf 2>/dev/null || true
+    fi
+    
+    # Clear existing cookies for clean sync
+    rm -f $VPS_PATH/cookies/*.json 2>/dev/null || true
+    
+    # System check
+    echo \"Remote system ready - Host: \$(hostname), Date: \$(date)\"
+    echo \"Disk space: \$(df -h $VPS_PATH | tail -1 | awk '{print \$4}') available\"
+    
+    echo 'Remote environment preparation completed'
+"
 
-# Step 5: Sync cookies to VPS using persistent connection
+if ssh_exec_persistent "$VPS_HOST" "$VPS_USER" "22" "$SSH_KEY" "$combined_prep_script"; then
+    echo -e "${GREEN}✅ Remote environment prepared successfully${NC}"
+else
+    echo -e "${RED}❌ Remote environment preparation failed${NC}"
+    exit 1
+fi
+
+# Step 4: Sync cookies to VPS using persistent connection
 echo -e "${BLUE}🚀 Step 4: Syncing cookies to VPS using persistent SSH...${NC}"
-if ssh_copy_persistent "to" "$VPS_HOST" "$VPS_USER" "22" "$SSH_KEY" "$LOCAL_COOKIE_DIR/" "$VPS_PATH/"; then
+if ssh_copy_persistent "to" "$VPS_HOST" "$VPS_USER" "22" "$SSH_KEY" "$LOCAL_COOKIE_DIR/" "$VPS_PATH/cookies/"; then
     echo -e "${GREEN}✅ Cookie sync completed successfully${NC}"
 else
     echo -e "${RED}❌ Cookie sync failed${NC}"
     exit 1
 fi
 
-# Step 6: Verify sync using persistent connection
-echo -e "${BLUE}🔍 Step 5: Verifying sync...${NC}"
-remote_files=$(ssh_exec_persistent "$VPS_HOST" "$VPS_USER" "22" "$SSH_KEY" "find $VPS_PATH -name '*.json' 2>/dev/null | wc -l")
-echo -e "${GREEN}📊 Remote VPS now has $remote_files cookie files${NC}"
+# Step 5: Verify sync and restart services in combined SSH session
+echo -e "${BLUE}🔍 Step 5: Verifying sync and restarting services (combined operations)...${NC}"
+combined_verify_restart_script="
+    set -e
+    echo 'Starting verification and service restart...'
+    
+    # Verify cookie sync
+    cookie_count=\$(find $VPS_PATH/cookies -name '*.json' 2>/dev/null | wc -l)
+    echo \"Cookie files synced: \$cookie_count\"
+    
+    if [ \$cookie_count -eq 0 ]; then
+        echo 'ERROR: No cookie files found after sync'
+        exit 1
+    fi
+    
+    # List cookie files for verification
+    echo 'Cookie files:'
+    ls -la $VPS_PATH/cookies/*.json 2>/dev/null | head -3
+    if [ \$cookie_count -gt 3 ]; then
+        echo \"... and \$((cookie_count - 3)) more files\"
+    fi
+    
+    # Test cookie file validity
+    sample_cookie=\$(find $VPS_PATH/cookies -name '*.json' | head -1)
+    if [ -n \"\$sample_cookie\" ]; then
+        if python3 -m json.tool \"\$sample_cookie\" >/dev/null 2>&1; then
+            echo 'Sample cookie file is valid JSON'
+        else
+            echo 'WARNING: Sample cookie file may be corrupted'
+        fi
+    fi
+    
+    # Navigate to project directory
+    cd $VPS_PATH
+    
+    # Determine which docker-compose file to use
+    if [ -f docker-compose.vps.yml ]; then
+        compose_file='docker-compose.vps.yml'
+    elif [ -f docker-compose.yml ]; then
+        compose_file='docker-compose.yml'
+    else
+        echo 'WARNING: No docker-compose file found, skipping service restart'
+        exit 0
+    fi
+    
+    echo \"Using compose file: \$compose_file\"
+    
+    # Restart services
+    echo 'Restarting Docker services...'
+    docker-compose -f \"\$compose_file\" restart robustty || 
+    docker-compose -f \"\$compose_file\" restart || {
+        echo 'Service restart failed, trying full restart...'
+        docker-compose -f \"\$compose_file\" down
+        sleep 5
+        docker-compose -f \"\$compose_file\" up -d
+    }
+    
+    # Wait for services to start
+    sleep 10
+    
+    # Check service status
+    echo 'Service status:'
+    docker-compose -f \"\$compose_file\" ps | grep -E '(robustty|bot)' || echo 'No matching services found'
+    
+    # Get recent logs
+    echo 'Recent bot logs:'
+    docker-compose -f \"\$compose_file\" logs --tail 5 robustty 2>/dev/null || 
+    docker logs --tail 5 \$(docker ps -q --filter name=robustty) 2>/dev/null || 
+    echo 'Could not retrieve recent logs'
+    
+    echo 'Verification and service restart completed'
+"
 
-# Step 7: Restart VPS bot to pick up new cookies
-echo -e "${BLUE}🔄 Step 6: Restarting bot on VPS to pick up new cookies...${NC}"
-if ssh_exec_persistent "$VPS_HOST" "$VPS_USER" "22" "$SSH_KEY" "cd ~/Robustty && docker-compose restart robustty"; then
-    echo -e "${GREEN}✅ VPS bot restarted successfully${NC}"
+if ssh_exec_persistent "$VPS_HOST" "$VPS_USER" "22" "$SSH_KEY" "$combined_verify_restart_script"; then
+    echo -e "${GREEN}✅ Verification and service restart completed successfully${NC}"
 else
-    echo -e "${YELLOW}⚠️  Failed to restart VPS bot (cookies synced but bot may need manual restart)${NC}"
+    echo -e "${YELLOW}⚠️  Verification completed but service restart may have issues${NC}"
 fi
 
 echo ""
