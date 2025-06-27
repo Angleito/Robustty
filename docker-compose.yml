@@ -30,13 +30,8 @@ services:
       - ./data:/app/data
       - robustty-cookies:/app/cookies
       # Conditional mount for macOS Brave browser data (only if path exists)
-      # On Ubuntu VPS, this volume will be empty but won't cause errors
-      - type: bind
-        source: ${BRAVE_BROWSER_PATH:-./empty-cookies}
-        target: /host-brave
-        read_only: true
-        bind:
-          create_host_path: true
+      # On Ubuntu VPS, this will fallback to empty-cookies directory
+      - ${BRAVE_BROWSER_PATH:-./empty-cookies}:/host-brave:ro
     networks:
       - robustty-network
     dns:
