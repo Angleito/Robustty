@@ -25,7 +25,7 @@ chmod 755 ~/Robustty/cookies ~/Robustty/logs ~/Robustty/data
 # Create empty cookie files if they don't exist
 echo -e "${BLUE}🍪 Initializing cookie files...${NC}"
 for platform in youtube rumble odysee peertube; do
-    cookie_file="~/Robustty/cookies/${platform}_cookies.json"
+    cookie_file="$HOME/Robustty/cookies/${platform}_cookies.json"
     if [ ! -f "$cookie_file" ]; then
         echo "[]" > "$cookie_file"
         chown 1000:1000 "$cookie_file" 2>/dev/null || true
