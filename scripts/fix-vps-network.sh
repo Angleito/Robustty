@@ -1,12 +1,7 @@
 #!/bin/bash
-#
-# VPS Network Fix Script for Robustty Bot
-# 
-# This script automatically fixes common VPS networking issues
-# that prevent Docker containers from accessing external services.
-#
-# Usage: sudo ./fix-vps-network.sh [--dry-run] [--force]
-#
+
+# VPS Network Fix Script for Robustty Discord Bot
+# Automatically fixes common VPS Docker networking issues
 
 set -e
 
@@ -17,302 +12,306 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-# Parse arguments
+# Logging function
+log() {
+    echo -e "${BLUE}[$(date +'%Y-%m-%d %H:%M:%S')]${NC} $1"
+}
+
+error() {
+    echo -e "${RED}[ERROR]${NC} $1"
+}
+
+warning() {
+    echo -e "${YELLOW}[WARNING]${NC} $1"
+}
+
+success() {
+    echo -e "${GREEN}[SUCCESS]${NC} $1"
+}
+
+# Check if running as root
+if [[ $EUID -ne 0 ]]; then
+   error "This script must be run as root (use sudo)"
+   exit 1
+fi
+
+# Parse command line arguments
 DRY_RUN=false
-FORCE=false
-for arg in "$@"; do
-    case $arg in
+FORCE_INSTALL=false
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
         --dry-run)
             DRY_RUN=true
+            shift
             ;;
         --force)
-            FORCE=true
+            FORCE_INSTALL=true
+            shift
             ;;
         *)
-            echo "Unknown argument: $arg"
             echo "Usage: $0 [--dry-run] [--force]"
+            echo "  --dry-run: Show what would be done without making changes"
+            echo "  --force: Force installation of Docker if missing"
             exit 1
             ;;
     esac
 done
 
-# Check if running as root
-if [[ $EUID -ne 0 ]] && [[ "$DRY_RUN" == "false" ]]; then
-   echo -e "${RED}This script must be run as root (use sudo)${NC}"
-   exit 1
+if [[ "$DRY_RUN" == true ]]; then
+    warning "DRY RUN MODE - No changes will be made"
 fi
 
-echo -e "${BLUE}🔧 Robustty VPS Network Fix Tool${NC}"
-echo "=================================="
+echo "========================================"
+echo "🔧 VPS Network Fix Tool for Robustty"
+echo "========================================"
 
-# Function to execute or print commands
-execute_cmd() {
-    local cmd="$1"
-    local description="$2"
-    
-    echo -e "\n${YELLOW}→ ${description}${NC}"
-    if [[ "$DRY_RUN" == "true" ]]; then
-        echo -e "${BLUE}[DRY RUN] Would execute:${NC} $cmd"
-    else
-        echo -e "${BLUE}Executing:${NC} $cmd"
-        eval "$cmd"
-        if [[ $? -eq 0 ]]; then
-            echo -e "${GREEN}✓ Success${NC}"
+# Backup current iptables rules
+log "Backing up current iptables rules..."
+if [[ "$DRY_RUN" == false ]]; then
+    iptables-save > /tmp/iptables-backup-$(date +%Y%m%d-%H%M%S).txt
+    success "Iptables rules backed up"
+else
+    log "[DRY RUN] Would backup iptables rules"
+fi
+
+# 1. Check and install Docker if needed
+log "Checking Docker installation..."
+if ! command -v docker &> /dev/null; then
+    if [[ "$FORCE_INSTALL" == true ]]; then
+        log "Installing Docker..."
+        if [[ "$DRY_RUN" == false ]]; then
+            curl -fsSL https://get.docker.com | sh
+            systemctl enable docker
+            systemctl start docker
+            success "Docker installed and started"
         else
-            echo -e "${RED}✗ Failed${NC}"
-            return 1
+            log "[DRY RUN] Would install Docker"
         fi
-    fi
-}
-
-# Function to check if a command exists
-command_exists() {
-    command -v "$1" >/dev/null 2>&1
-}
-
-# Function to backup iptables rules
-backup_iptables() {
-    if [[ "$DRY_RUN" == "false" ]]; then
-        local backup_file="/tmp/iptables-backup-$(date +%Y%m%d-%H%M%S).rules"
-        iptables-save > "$backup_file" 2>/dev/null || true
-        echo -e "${GREEN}Backed up iptables rules to: $backup_file${NC}"
-    fi
-}
-
-echo -e "\n${BLUE}1. Checking Docker Installation${NC}"
-echo "--------------------------------"
-
-if ! command_exists docker; then
-    echo -e "${RED}Docker is not installed!${NC}"
-    if [[ "$FORCE" == "true" ]] || [[ "$DRY_RUN" == "true" ]]; then
-        execute_cmd "curl -fsSL https://get.docker.com | sh" "Installing Docker"
-        execute_cmd "systemctl enable docker" "Enabling Docker service"
-        execute_cmd "systemctl start docker" "Starting Docker service"
     else
-        echo "Run with --force to install Docker automatically"
+        error "Docker is not installed. Use --force to install automatically"
         exit 1
     fi
 else
-    echo -e "${GREEN}✓ Docker is installed${NC}"
+    success "Docker is already installed"
 fi
 
-# Check if Docker is running
-if ! systemctl is-active --quiet docker && [[ "$DRY_RUN" == "false" ]]; then
-    execute_cmd "systemctl start docker" "Starting Docker service"
-fi
-
-echo -e "\n${BLUE}2. Fixing Docker Network Configuration${NC}"
-echo "--------------------------------------"
-
-# Ensure Docker's iptables integration is proper
-execute_cmd "systemctl restart docker" "Restarting Docker to refresh iptables rules"
-
-# Fix Docker bridge MTU
-echo -e "\n${BLUE}3. Fixing MTU Configuration${NC}"
-echo "-------------------------------"
-
-# Get Docker bridge interface name
-DOCKER_BRIDGE=$(ip link show | grep -E "docker0|br-" | awk -F: '{print $2}' | tr -d ' ' | head -n1)
-
-if [[ -n "$DOCKER_BRIDGE" ]]; then
-    execute_cmd "ip link set dev $DOCKER_BRIDGE mtu 1500" "Setting MTU to 1500 for $DOCKER_BRIDGE"
-else
-    echo -e "${YELLOW}⚠ No Docker bridge interface found${NC}"
-fi
-
-echo -e "\n${BLUE}4. Configuring DNS for Docker${NC}"
-echo "---------------------------------"
-
-# Create Docker daemon configuration with DNS
-DOCKER_CONFIG="/etc/docker/daemon.json"
-if [[ "$DRY_RUN" == "false" ]]; then
-    # Backup existing config
-    if [[ -f "$DOCKER_CONFIG" ]]; then
-        cp "$DOCKER_CONFIG" "${DOCKER_CONFIG}.backup-$(date +%Y%m%d-%H%M%S)"
-    fi
-    
-    # Create new config with DNS settings
-    cat > "$DOCKER_CONFIG" <<EOF
-{
-  "dns": ["1.1.1.1", "1.0.0.1", "8.8.8.8", "8.8.4.4"],
-  "dns-opts": ["ndots:0"],
-  "dns-search": [],
+# 2. Configure Docker daemon
+log "Configuring Docker daemon..."
+DAEMON_CONFIG='{
+  "dns": ["8.8.8.8", "1.1.1.1"],
+  "mtu": 1450,
   "log-driver": "json-file",
   "log-opts": {
     "max-size": "10m",
     "max-file": "3"
-  },
-  "default-address-pools": [
-    {
-      "base": "172.17.0.0/16",
-      "size": 24
-    }
-  ]
-}
-EOF
-    echo -e "${GREEN}✓ Updated Docker daemon configuration${NC}"
+  }
+}'
+
+if [[ "$DRY_RUN" == false ]]; then
+    mkdir -p /etc/docker
+    echo "$DAEMON_CONFIG" > /etc/docker/daemon.json
+    success "Docker daemon configuration updated"
 else
-    echo -e "${BLUE}[DRY RUN] Would update Docker daemon configuration${NC}"
+    log "[DRY RUN] Would create /etc/docker/daemon.json with DNS and MTU settings"
 fi
 
-execute_cmd "systemctl restart docker" "Restarting Docker with new configuration"
+# 3. Enable IP forwarding
+log "Enabling IP forwarding..."
+if [[ "$DRY_RUN" == false ]]; then
+    echo 'net.ipv4.ip_forward=1' >> /etc/sysctl.conf
+    echo 'net.bridge.bridge-nf-call-iptables=1' >> /etc/sysctl.conf
+    echo 'net.bridge.bridge-nf-call-ip6tables=1' >> /etc/sysctl.conf
+    sysctl -p
+    success "IP forwarding enabled"
+else
+    log "[DRY RUN] Would enable IP forwarding and bridge netfilter"
+fi
 
-echo -e "\n${BLUE}5. Configuring IPTables Rules${NC}"
-echo "---------------------------------"
+# 4. Load bridge netfilter module
+log "Loading bridge netfilter module..."
+if [[ "$DRY_RUN" == false ]]; then
+    modprobe br_netfilter
+    echo 'br_netfilter' >> /etc/modules-load.d/docker.conf
+    success "Bridge netfilter module loaded"
+else
+    log "[DRY RUN] Would load br_netfilter module"
+fi
 
-# Backup current iptables rules
-backup_iptables
+# 5. Restart Docker to apply daemon configuration
+log "Restarting Docker service..."
+if [[ "$DRY_RUN" == false ]]; then
+    systemctl restart docker
+    sleep 5
+    success "Docker service restarted"
+else
+    log "[DRY RUN] Would restart Docker service"
+fi
 
-# Ensure DOCKER-USER chain exists and has proper rules
-if iptables -L DOCKER-USER -n >/dev/null 2>&1; then
-    # Check if DOCKER-USER chain is empty or blocking
-    RULES_COUNT=$(iptables -L DOCKER-USER -n | grep -c "RETURN" || true)
-    if [[ $RULES_COUNT -eq 0 ]]; then
-        execute_cmd "iptables -I DOCKER-USER -j RETURN" "Adding RETURN rule to DOCKER-USER chain"
+# 6. Configure iptables rules for Docker
+log "Configuring iptables rules..."
+
+if [[ "$DRY_RUN" == false ]]; then
+    # Create DOCKER-USER chain if it doesn't exist
+    if ! iptables -L DOCKER-USER &> /dev/null; then
+        iptables -N DOCKER-USER
+        log "Created DOCKER-USER chain"
     fi
+    
+    # Allow all traffic from Docker containers to anywhere
+    iptables -I DOCKER-USER -i docker0 -j ACCEPT
+    iptables -I DOCKER-USER -o docker0 -j ACCEPT
+    
+    # Allow containers to communicate with host
+    iptables -I INPUT -i docker0 -j ACCEPT
+    
+    # Ensure NAT masquerading for Docker containers
+    iptables -t nat -A POSTROUTING -s 172.17.0.0/16 ! -o docker0 -j MASQUERADE
+    
+    success "Iptables rules configured for Docker connectivity"
 else
-    echo -e "${YELLOW}DOCKER-USER chain doesn't exist, Docker will create it${NC}"
+    log "[DRY RUN] Would configure iptables rules:"
+    log "  - Create/update DOCKER-USER chain"
+    log "  - Allow traffic from docker0 interface"
+    log "  - Add NAT masquerading for container outbound traffic"
 fi
 
-# Ensure proper masquerading for Docker networks
-execute_cmd "iptables -t nat -C POSTROUTING -s 172.17.0.0/16 ! -o docker0 -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -s 172.17.0.0/16 ! -o docker0 -j MASQUERADE" "Ensuring NAT masquerading for Docker"
-
-# Allow established connections
-execute_cmd "iptables -C INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || iptables -I INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT" "Allowing established connections"
-
-# Ensure Docker containers can access external DNS
-execute_cmd "iptables -C FORWARD -i docker0 -o eth0 -j ACCEPT 2>/dev/null || iptables -I FORWARD -i docker0 -o eth0 -j ACCEPT" "Allowing Docker bridge to external interface forwarding"
-execute_cmd "iptables -C FORWARD -i eth0 -o docker0 -m state --state ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || iptables -I FORWARD -i eth0 -o docker0 -m state --state ESTABLISHED,RELATED -j ACCEPT" "Allowing return traffic to Docker"
-
-echo -e "\n${BLUE}6. Fixing System DNS Resolution${NC}"
-echo "----------------------------------"
-
-# Ensure system DNS is working
-if [[ -f /etc/resolv.conf ]]; then
-    # Check if resolv.conf has valid nameservers
-    if ! grep -q "nameserver" /etc/resolv.conf || grep -q "nameserver 127" /etc/resolv.conf; then
-        if [[ "$DRY_RUN" == "false" ]]; then
-            # Backup original
-            cp /etc/resolv.conf /etc/resolv.conf.backup-$(date +%Y%m%d-%H%M%S)
-            
-            # Create new resolv.conf
-            cat > /etc/resolv.conf <<EOF
-nameserver 1.1.1.1
-nameserver 1.0.0.1
-nameserver 8.8.8.8
-nameserver 8.8.4.4
-EOF
-            echo -e "${GREEN}✓ Updated system DNS configuration${NC}"
-        else
-            echo -e "${BLUE}[DRY RUN] Would update /etc/resolv.conf${NC}"
-        fi
+# 7. Configure UFW if present
+if command -v ufw &> /dev/null; then
+    log "Configuring UFW for Docker compatibility..."
+    if [[ "$DRY_RUN" == false ]]; then
+        # Allow Docker to manage its own rules
+        ufw --force reload
+        # Allow essential outbound ports
+        ufw allow out 53 comment 'DNS'
+        ufw allow out 80 comment 'HTTP'
+        ufw allow out 443 comment 'HTTPS'
+        success "UFW configured for Docker"
     else
-        echo -e "${GREEN}✓ System DNS configuration looks good${NC}"
+        log "[DRY RUN] Would configure UFW to allow DNS, HTTP, and HTTPS outbound"
     fi
 fi
 
-echo -e "\n${BLUE}7. Optimizing Network Performance${NC}"
-echo "------------------------------------"
-
-# Increase network buffer sizes
-execute_cmd "sysctl -w net.core.rmem_max=134217728" "Increasing receive buffer maximum"
-execute_cmd "sysctl -w net.core.wmem_max=134217728" "Increasing send buffer maximum"
-execute_cmd "sysctl -w net.ipv4.tcp_rmem='4096 87380 134217728'" "Setting TCP receive buffer sizes"
-execute_cmd "sysctl -w net.ipv4.tcp_wmem='4096 65536 134217728'" "Setting TCP send buffer sizes"
-
-# Enable TCP fast open
-execute_cmd "sysctl -w net.ipv4.tcp_fastopen=3" "Enabling TCP fast open"
-
-# Increase connection tracking limits
-execute_cmd "sysctl -w net.netfilter.nf_conntrack_max=131072" "Increasing connection tracking limit"
-
-# Make sysctl changes persistent
-if [[ "$DRY_RUN" == "false" ]]; then
-    cat >> /etc/sysctl.conf <<EOF
-
-# Robustty VPS Network Optimizations
-net.core.rmem_max=134217728
-net.core.wmem_max=134217728
-net.ipv4.tcp_rmem=4096 87380 134217728
-net.ipv4.tcp_wmem=4096 65536 134217728
-net.ipv4.tcp_fastopen=3
-net.netfilter.nf_conntrack_max=131072
-EOF
-    echo -e "${GREEN}✓ Made network optimizations persistent${NC}"
-fi
-
-echo -e "\n${BLUE}8. Restarting Robustty Services${NC}"
-echo "-----------------------------------"
-
-# Check if docker-compose exists in current directory
-if [[ -f "docker-compose.yml" ]] || [[ -f "../docker-compose.yml" ]]; then
-    COMPOSE_DIR="."
-    if [[ -f "../docker-compose.yml" ]]; then
-        COMPOSE_DIR=".."
+# 8. Save iptables rules
+log "Saving iptables rules..."
+if [[ "$DRY_RUN" == false ]]; then
+    # Install iptables-persistent if not present
+    if ! command -v iptables-save &> /dev/null; then
+        apt-get update && apt-get install -y iptables-persistent
     fi
     
-    execute_cmd "cd $COMPOSE_DIR && docker-compose down" "Stopping Robustty services"
-    execute_cmd "cd $COMPOSE_DIR && docker-compose up -d" "Starting Robustty services"
+    # Save rules
+    iptables-save > /etc/iptables/rules.v4
+    if command -v ip6tables-save &> /dev/null; then
+        ip6tables-save > /etc/iptables/rules.v6
+    fi
+    success "Iptables rules saved"
+else
+    log "[DRY RUN] Would save iptables rules to /etc/iptables/"
+fi
+
+# 9. Create network optimization script
+log "Creating network optimization script..."
+OPTIMIZATION_SCRIPT='#!/bin/bash
+# Network optimization for Discord bot VPS deployment
+echo "Applying network optimizations..."
+
+# TCP buffer sizes
+echo "net.core.rmem_max = 16777216" >> /etc/sysctl.conf
+echo "net.core.wmem_max = 16777216" >> /etc/sysctl.conf
+echo "net.ipv4.tcp_rmem = 4096 16384 16777216" >> /etc/sysctl.conf
+echo "net.ipv4.tcp_wmem = 4096 16384 16777216" >> /etc/sysctl.conf
+
+# Connection tracking
+echo "net.netfilter.nf_conntrack_max = 65536" >> /etc/sysctl.conf
+
+# Apply settings
+sysctl -p
+
+echo "Network optimizations applied"
+'
+
+if [[ "$DRY_RUN" == false ]]; then
+    echo "$OPTIMIZATION_SCRIPT" > /usr/local/bin/optimize-network.sh
+    chmod +x /usr/local/bin/optimize-network.sh
+    /usr/local/bin/optimize-network.sh
+    success "Network optimizations applied"
+else
+    log "[DRY RUN] Would create and run network optimization script"
+fi
+
+# 10. Test Docker networking
+log "Testing Docker networking..."
+if [[ "$DRY_RUN" == false ]]; then
+    if docker run --rm alpine ping -c 1 8.8.8.8 &> /dev/null; then
+        success "Docker container can reach external IPs"
+    else
+        error "Docker container cannot reach external IPs"
+    fi
     
-    # Wait for services to start
-    echo -e "${BLUE}Waiting for services to start...${NC}"
-    sleep 10
-    
-    # Check service health
-    if [[ "$DRY_RUN" == "false" ]]; then
-        cd $COMPOSE_DIR
-        if docker-compose ps | grep -q "Up"; then
-            echo -e "${GREEN}✓ Robustty services are running${NC}"
-        else
-            echo -e "${RED}✗ Some services failed to start${NC}"
-            docker-compose logs --tail=50
-        fi
+    if docker run --rm alpine nslookup discord.com &> /dev/null; then
+        success "Docker container DNS resolution working"
+    else
+        error "Docker container DNS resolution failed"
     fi
 else
-    echo -e "${YELLOW}⚠ docker-compose.yml not found in current directory${NC}"
-    echo "Please run this script from the Robustty project directory"
+    log "[DRY RUN] Would test Docker container networking"
 fi
 
-echo -e "\n${BLUE}9. Verifying Fixes${NC}"
-echo "--------------------"
+# 11. Create systemd service for persistent rules
+log "Creating systemd service for network rules..."
+SERVICE_CONTENT='[Unit]
+Description=Robustty VPS Network Configuration
+After=docker.service
+Wants=docker.service
 
-if [[ "$DRY_RUN" == "false" ]]; then
-    # Test DNS resolution
-    if nslookup discord.com >/dev/null 2>&1; then
-        echo -e "${GREEN}✓ DNS resolution working${NC}"
-    else
-        echo -e "${RED}✗ DNS resolution still failing${NC}"
-    fi
-    
-    # Test outbound connectivity
-    if curl -s -m 5 https://discord.com/api/v10/gateway >/dev/null 2>&1; then
-        echo -e "${GREEN}✓ Outbound HTTPS working${NC}"
-    else
-        echo -e "${RED}✗ Outbound HTTPS still failing${NC}"
-    fi
-    
-    # Test from within container if running
-    if docker ps --format "{{.Names}}" | grep -q "robustty"; then
-        CONTAINER=$(docker ps --format "{{.Names}}" | grep "robustty" | grep -v "redis" | head -n1)
-        if docker exec $CONTAINER curl -s -m 5 https://discord.com/api/v10/gateway >/dev/null 2>&1; then
-            echo -e "${GREEN}✓ Container outbound connectivity working${NC}"
-        else
-            echo -e "${RED}✗ Container outbound connectivity still failing${NC}"
-        fi
-    fi
-fi
+[Service]
+Type=oneshot
+ExecStart=/bin/bash -c "iptables -I DOCKER-USER -i docker0 -j ACCEPT; iptables -I DOCKER-USER -o docker0 -j ACCEPT"
+RemainAfterExit=yes
 
-echo -e "\n${GREEN}✅ Network fix script completed!${NC}"
-echo "=================================="
+[Install]
+WantedBy=multi-user.target'
 
-if [[ "$DRY_RUN" == "true" ]]; then
-    echo -e "${YELLOW}This was a dry run. No changes were made.${NC}"
-    echo "Run without --dry-run to apply fixes."
+if [[ "$DRY_RUN" == false ]]; then
+    echo "$SERVICE_CONTENT" > /etc/systemd/system/robustty-network.service
+    systemctl daemon-reload
+    systemctl enable robustty-network.service
+    success "Systemd service created for persistent network rules"
 else
-    echo -e "${BLUE}Next steps:${NC}"
-    echo "1. Run the diagnostic script to verify fixes:"
-    echo "   python3 scripts/diagnose-vps-network.py"
-    echo "2. Check Robustty bot logs:"
-    echo "   docker-compose logs -f robustty"
-    echo "3. If issues persist, check VPS firewall rules with your provider"
+    log "[DRY RUN] Would create systemd service for persistent network rules"
 fi
+
+echo ""
+echo "========================================"
+echo "✅ VPS NETWORK FIX COMPLETE"
+echo "========================================"
+
+if [[ "$DRY_RUN" == false ]]; then
+    success "All network fixes have been applied!"
+    echo ""
+    echo "🚀 Next Steps:"
+    echo "1. Restart your Discord bot: docker-compose down && docker-compose up -d"
+    echo "2. Check bot logs: docker-compose logs -f robustty"
+    echo "3. Test voice connections and platform connectivity"
+    echo ""
+    echo "📋 What was fixed:"
+    echo "• Docker daemon configured with reliable DNS servers"
+    echo "• MTU set to 1450 for VPS compatibility"
+    echo "• IP forwarding enabled"
+    echo "• Iptables rules configured for container connectivity"
+    echo "• NAT masquerading enabled for outbound traffic"
+    echo "• Network optimizations applied"
+    echo "• Persistent configuration created"
+else
+    warning "DRY RUN completed - no changes were made"
+    echo "Run without --dry-run to apply the fixes"
+fi
+
+echo ""
+echo "📞 If you still experience issues:"
+echo "• Run the diagnostic script: ./scripts/diagnose-vps-network.sh"
+echo "• Check the troubleshooting guide: cat VPS_TROUBLESHOOTING.md"
+echo "• Verify your VPS provider doesn't block specific ports"
+
+exit 0

@@ -1,9 +1,9 @@
 #!/bin/bash
 
-# VPS Network Diagnostics Script for Docker Containers
-# Diagnoses common Docker networking issues on VPS deployments
+# VPS Network Diagnostic Script for Robustty Discord Bot
+# Diagnoses common VPS Docker networking issues that cause "Connection closed" errors
 
-set -euo pipefail
+set -e
 
 # Colors for output
 RED='\033[0;31m'
@@ -12,394 +12,244 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-echo -e "${BLUE}=== VPS Docker Network Diagnostics ===${NC}\n"
-
-# Function to check if running on VPS
-check_vps_environment() {
-    echo -e "${YELLOW}1. Checking Environment...${NC}"
-    
-    # Check if running in cloud environment
-    if [ -f /sys/hypervisor/uuid ] && [ $(head -c 3 /sys/hypervisor/uuid) == "ec2" ]; then
-        echo -e "   ${GREEN}✓${NC} Running on AWS EC2"
-    elif [ -f /sys/class/dmi/id/product_name ] && grep -q "Google\|GCE" /sys/class/dmi/id/product_name; then
-        echo -e "   ${GREEN}✓${NC} Running on Google Cloud"
-    elif [ -f /sys/class/dmi/id/sys_vendor ] && grep -q "DigitalOcean" /sys/class/dmi/id/sys_vendor; then
-        echo -e "   ${GREEN}✓${NC} Running on DigitalOcean"
-    elif systemd-detect-virt -q; then
-        VIRT=$(systemd-detect-virt)
-        echo -e "   ${GREEN}✓${NC} Running in virtualized environment: $VIRT"
-    else
-        echo -e "   ${YELLOW}!${NC} Could not detect VPS environment"
-    fi
-    echo
+# Logging function
+log() {
+    echo -e "${BLUE}[$(date +'%Y-%m-%d %H:%M:%S')]${NC} $1"
 }
 
-# Function to check Docker installation
-check_docker_status() {
-    echo -e "${YELLOW}2. Checking Docker Status...${NC}"
-    
-    if ! command -v docker &> /dev/null; then
-        echo -e "   ${RED}✗${NC} Docker is not installed"
-        return 1
-    fi
-    
-    echo -e "   ${GREEN}✓${NC} Docker is installed"
-    
-    if ! systemctl is-active --quiet docker; then
-        echo -e "   ${RED}✗${NC} Docker service is not running"
-        return 1
-    fi
-    
-    echo -e "   ${GREEN}✓${NC} Docker service is running"
-    
-    # Check Docker version
-    DOCKER_VERSION=$(docker --version | awk '{print $3}' | sed 's/,$//')
-    echo -e "   ${BLUE}ℹ${NC} Docker version: $DOCKER_VERSION"
-    echo
+error() {
+    echo -e "${RED}[ERROR]${NC} $1"
 }
 
-# Function to check Docker networks
-check_docker_networks() {
-    echo -e "${YELLOW}3. Checking Docker Networks...${NC}"
-    
-    # List all Docker networks
-    echo -e "   ${BLUE}Available networks:${NC}"
-    docker network ls --format "table {{.Name}}\t{{.Driver}}\t{{.Scope}}" | sed 's/^/   /'
-    
-    # Check for custom network
-    if docker network ls | grep -q "robustty-network"; then
-        echo -e "\n   ${GREEN}✓${NC} Custom network 'robustty-network' exists"
-        
-        # Get network details
-        NETWORK_INFO=$(docker network inspect robustty-network 2>/dev/null || echo "")
-        if [ -n "$NETWORK_INFO" ]; then
-            SUBNET=$(echo "$NETWORK_INFO" | jq -r '.[0].IPAM.Config[0].Subnet' 2>/dev/null || echo "N/A")
-            GATEWAY=$(echo "$NETWORK_INFO" | jq -r '.[0].IPAM.Config[0].Gateway' 2>/dev/null || echo "N/A")
-            echo -e "   ${BLUE}ℹ${NC} Subnet: $SUBNET"
-            echo -e "   ${BLUE}ℹ${NC} Gateway: $GATEWAY"
-        fi
-    else
-        echo -e "\n   ${YELLOW}!${NC} Custom network 'robustty-network' not found"
-    fi
-    echo
+warning() {
+    echo -e "${YELLOW}[WARNING]${NC} $1"
 }
 
-# Function to check iptables rules
-check_iptables_rules() {
-    echo -e "${YELLOW}4. Checking iptables Rules...${NC}"
+success() {
+    echo -e "${GREEN}[SUCCESS]${NC} $1"
+}
+
+# Test results storage
+ISSUES_FOUND=0
+RECOMMENDATIONS=()
+
+add_recommendation() {
+    RECOMMENDATIONS+=("$1")
+    ((ISSUES_FOUND++))
+}
+
+echo "========================================"
+echo "🔍 VPS Network Diagnostic Tool for Robustty"
+echo "========================================"
+
+# 1. Check if running on VPS
+log "Checking VPS environment..."
+if [[ -f /.dockerenv ]] || [[ -n "$DOCKER_CONTAINER" ]] || [[ -n "$VPS_MODE" ]]; then
+    success "Running in containerized/VPS environment"
+else
+    log "Environment: Standard Linux server"
+fi
+
+# 2. Check Docker installation
+log "Checking Docker installation..."
+if command -v docker &> /dev/null; then
+    DOCKER_VERSION=$(docker --version)
+    success "Docker installed: $DOCKER_VERSION"
     
-    # Check if iptables is available
-    if ! command -v iptables &> /dev/null; then
-        echo -e "   ${RED}✗${NC} iptables not found"
-        return 1
-    fi
-    
-    # Check Docker chain
-    if iptables -L DOCKER -n &> /dev/null; then
-        echo -e "   ${GREEN}✓${NC} DOCKER chain exists"
+    # Check Docker service status
+    if systemctl is-active --quiet docker; then
+        success "Docker service is running"
     else
-        echo -e "   ${RED}✗${NC} DOCKER chain missing"
+        error "Docker service is not running"
+        add_recommendation "Start Docker service: sudo systemctl start docker"
+    fi
+else
+    error "Docker is not installed"
+    add_recommendation "Install Docker: curl -fsSL https://get.docker.com | sh"
+fi
+
+# 3. Check Docker daemon configuration
+log "Checking Docker daemon configuration..."
+if [[ -f /etc/docker/daemon.json ]]; then
+    log "Docker daemon.json exists"
+    if grep -q "dns" /etc/docker/daemon.json; then
+        success "DNS configuration found in daemon.json"
+    else
+        warning "No DNS configuration in daemon.json"
+        add_recommendation "Add DNS config to /etc/docker/daemon.json: {\"dns\": [\"8.8.8.8\", \"1.1.1.1\"]}"
+    fi
+else
+    warning "No Docker daemon.json configuration file"
+    add_recommendation "Create /etc/docker/daemon.json with DNS settings"
+fi
+
+# 4. Check iptables rules
+log "Checking iptables configuration..."
+
+# Check if iptables is available
+if command -v iptables &> /dev/null; then
+    # Check DOCKER chain
+    if iptables -t nat -L DOCKER &> /dev/null; then
+        success "Docker iptables chains exist"
+    else
+        error "Docker iptables chains missing"
+        add_recommendation "Restart Docker to recreate iptables chains: sudo systemctl restart docker"
     fi
     
     # Check DOCKER-USER chain
-    if iptables -L DOCKER-USER -n &> /dev/null; then
-        echo -e "   ${GREEN}✓${NC} DOCKER-USER chain exists"
-        
-        # Count rules in DOCKER-USER
-        RULE_COUNT=$(iptables -L DOCKER-USER -n | grep -c "^[A-Z]" || true)
-        echo -e "   ${BLUE}ℹ${NC} DOCKER-USER chain has $((RULE_COUNT - 2)) custom rules"
+    if iptables -L DOCKER-USER &> /dev/null; then
+        log "DOCKER-USER chain exists"
+        USER_RULES=$(iptables -L DOCKER-USER --line-numbers | wc -l)
+        if [[ $USER_RULES -gt 3 ]]; then
+            log "DOCKER-USER has custom rules"
+        else
+            warning "DOCKER-USER chain is empty (may block container traffic)"
+            add_recommendation "Configure DOCKER-USER chain for container connectivity"
+        fi
     else
-        echo -e "   ${RED}✗${NC} DOCKER-USER chain missing"
+        error "DOCKER-USER chain missing"
+        add_recommendation "Create DOCKER-USER chain and add connectivity rules"
     fi
     
-    # Check INPUT chain for Docker
-    if iptables -L INPUT -n | grep -q "docker0"; then
-        echo -e "   ${GREEN}✓${NC} Docker bridge interface allowed in INPUT chain"
+    # Check IP forwarding
+    if [[ $(cat /proc/sys/net/ipv4/ip_forward) -eq 1 ]]; then
+        success "IP forwarding is enabled"
     else
-        echo -e "   ${YELLOW}!${NC} Docker bridge interface not explicitly allowed in INPUT chain"
+        error "IP forwarding is disabled"
+        add_recommendation "Enable IP forwarding: echo 'net.ipv4.ip_forward=1' >> /etc/sysctl.conf"
     fi
     
-    # Check FORWARD chain
-    if iptables -L FORWARD -n | grep -q "DOCKER"; then
-        echo -e "   ${GREEN}✓${NC} Docker forwarding rules present"
+    # Check masquerading
+    MASQ_RULES=$(iptables -t nat -L POSTROUTING | grep -c MASQUERADE || true)
+    if [[ $MASQ_RULES -gt 0 ]]; then
+        success "NAT masquerading rules found ($MASQ_RULES rules)"
     else
-        echo -e "   ${RED}✗${NC} Docker forwarding rules missing"
+        error "No NAT masquerading rules found"
+        add_recommendation "Add masquerading rule: iptables -t nat -A POSTROUTING -s 172.17.0.0/16 -j MASQUERADE"
     fi
-    
-    # Check NAT masquerading
-    if iptables -t nat -L POSTROUTING -n | grep -q "MASQUERADE"; then
-        echo -e "   ${GREEN}✓${NC} NAT masquerading enabled"
-    else
-        echo -e "   ${RED}✗${NC} NAT masquerading not configured"
-    fi
-    echo
-}
+else
+    error "iptables not available"
+    add_recommendation "Install iptables: apt-get install iptables"
+fi
 
-# Function to check DNS configuration
-check_dns_configuration() {
-    echo -e "${YELLOW}5. Checking DNS Configuration...${NC}"
+# 5. Check network interfaces
+log "Checking network interfaces..."
+if ip link show docker0 &> /dev/null; then
+    success "Docker bridge interface exists"
     
-    # Check host DNS
-    echo -e "   ${BLUE}Host DNS servers:${NC}"
-    if [ -f /etc/resolv.conf ]; then
-        grep "nameserver" /etc/resolv.conf | head -3 | sed 's/^/   /'
-    else
-        echo -e "   ${RED}✗${NC} /etc/resolv.conf not found"
+    # Check MTU
+    DOCKER_MTU=$(ip link show docker0 | grep -o 'mtu [0-9]*' | cut -d' ' -f2)
+    log "Docker bridge MTU: $DOCKER_MTU"
+    if [[ $DOCKER_MTU -gt 1500 ]]; then
+        warning "Docker MTU ($DOCKER_MTU) may be too high for VPS"
+        add_recommendation "Lower Docker MTU to 1450 in daemon.json: \"mtu\": 1450"
     fi
-    
-    # Test host DNS resolution
-    echo -e "\n   ${BLUE}Testing host DNS resolution:${NC}"
-    if host google.com &> /dev/null; then
-        echo -e "   ${GREEN}✓${NC} Host can resolve google.com"
-    else
-        echo -e "   ${RED}✗${NC} Host cannot resolve google.com"
-    fi
-    
-    # Check Docker daemon DNS settings
-    if [ -f /etc/docker/daemon.json ]; then
-        echo -e "\n   ${BLUE}Docker daemon DNS configuration:${NC}"
-        DNS_CONFIG=$(jq '.dns // empty' /etc/docker/daemon.json 2>/dev/null || echo "")
-        if [ -n "$DNS_CONFIG" ] && [ "$DNS_CONFIG" != "null" ]; then
-            echo "   $DNS_CONFIG"
-        else
-            echo -e "   ${YELLOW}!${NC} No custom DNS configured in daemon.json"
-        fi
-    fi
-    echo
-}
+else
+    warning "Docker bridge interface not found"
+    add_recommendation "Create Docker bridge: docker network create --driver bridge test-bridge"
+fi
 
-# Function to test container networking
-test_container_networking() {
-    echo -e "${YELLOW}6. Testing Container Networking...${NC}"
-    
-    # Check if robustty container is running
-    if docker ps | grep -q "robustty"; then
-        CONTAINER_NAME=$(docker ps --format "{{.Names}}" | grep "robustty" | head -1)
-        echo -e "   ${GREEN}✓${NC} Found running container: $CONTAINER_NAME"
-        
-        # Test DNS inside container
-        echo -e "\n   ${BLUE}Testing DNS resolution inside container:${NC}"
-        if docker exec "$CONTAINER_NAME" nslookup google.com &> /dev/null; then
-            echo -e "   ${GREEN}✓${NC} Container can resolve google.com"
-        else
-            echo -e "   ${RED}✗${NC} Container cannot resolve google.com"
-            
-            # Try with explicit DNS
-            echo -e "   ${BLUE}Trying with explicit DNS (8.8.8.8):${NC}"
-            if docker exec "$CONTAINER_NAME" nslookup google.com 8.8.8.8 &> /dev/null; then
-                echo -e "   ${YELLOW}!${NC} Resolution works with explicit DNS server"
-            else
-                echo -e "   ${RED}✗${NC} DNS resolution failed even with explicit server"
-            fi
-        fi
-        
-        # Test outbound connectivity
-        echo -e "\n   ${BLUE}Testing outbound connectivity:${NC}"
-        if docker exec "$CONTAINER_NAME" ping -c 1 -W 2 8.8.8.8 &> /dev/null; then
-            echo -e "   ${GREEN}✓${NC} Container can reach 8.8.8.8"
-        else
-            echo -e "   ${RED}✗${NC} Container cannot reach 8.8.8.8"
-        fi
-        
-        # Test HTTPS connectivity
-        if docker exec "$CONTAINER_NAME" curl -s -m 5 https://www.google.com > /dev/null; then
-            echo -e "   ${GREEN}✓${NC} Container can make HTTPS requests"
-        else
-            echo -e "   ${RED}✗${NC} Container cannot make HTTPS requests"
-        fi
-        
-        # Check container's resolv.conf
-        echo -e "\n   ${BLUE}Container DNS configuration:${NC}"
-        docker exec "$CONTAINER_NAME" cat /etc/resolv.conf | grep "nameserver" | head -3 | sed 's/^/   /'
-        
+# 6. Test DNS resolution
+log "Testing DNS resolution..."
+
+# Test from host
+if nslookup discord.com &> /dev/null; then
+    success "Host DNS resolution working"
+else
+    error "Host DNS resolution failed"
+    add_recommendation "Fix host DNS: echo 'nameserver 8.8.8.8' > /etc/resolv.conf"
+fi
+
+# Test from container (if Docker is available)
+if command -v docker &> /dev/null && systemctl is-active --quiet docker; then
+    log "Testing container DNS resolution..."
+    if docker run --rm alpine nslookup discord.com &> /dev/null; then
+        success "Container DNS resolution working"
     else
-        echo -e "   ${YELLOW}!${NC} No running robustty container found"
-        
-        # Create test container
-        echo -e "\n   ${BLUE}Creating test container...${NC}"
-        if docker run --rm -d --name network-test --network robustty-network alpine:latest sleep 300 &> /dev/null; then
-            echo -e "   ${GREEN}✓${NC} Test container created"
-            
-            # Install necessary tools
-            docker exec network-test apk add --no-cache curl bind-tools &> /dev/null
-            
-            # Test from test container
-            echo -e "\n   ${BLUE}Testing from test container:${NC}"
-            if docker exec network-test nslookup google.com &> /dev/null; then
-                echo -e "   ${GREEN}✓${NC} DNS resolution works"
-            else
-                echo -e "   ${RED}✗${NC} DNS resolution failed"
-            fi
-            
-            if docker exec network-test ping -c 1 -W 2 8.8.8.8 &> /dev/null; then
-                echo -e "   ${GREEN}✓${NC} Can reach 8.8.8.8"
-            else
-                echo -e "   ${RED}✗${NC} Cannot reach 8.8.8.8"
-            fi
-            
-            # Cleanup
-            docker stop network-test &> /dev/null
-        else
-            echo -e "   ${RED}✗${NC} Failed to create test container"
-        fi
+        error "Container DNS resolution failed"
+        add_recommendation "Fix container DNS in daemon.json or add --dns flags"
     fi
-    echo
-}
+fi
 
-# Function to check MTU settings
-check_mtu_settings() {
-    echo -e "${YELLOW}7. Checking MTU Settings...${NC}"
-    
-    # Get host interface MTU
-    DEFAULT_IFACE=$(ip route | grep default | awk '{print $5}' | head -1)
-    if [ -n "$DEFAULT_IFACE" ]; then
-        HOST_MTU=$(ip link show "$DEFAULT_IFACE" | grep -oP 'mtu \K\d+')
-        echo -e "   ${BLUE}ℹ${NC} Host interface ($DEFAULT_IFACE) MTU: $HOST_MTU"
-    fi
-    
-    # Check Docker bridge MTU
-    if ip link show docker0 &> /dev/null; then
-        DOCKER_MTU=$(ip link show docker0 | grep -oP 'mtu \K\d+')
-        echo -e "   ${BLUE}ℹ${NC} Docker bridge (docker0) MTU: $DOCKER_MTU"
-        
-        if [ "$DOCKER_MTU" -gt "${HOST_MTU:-1500}" ]; then
-            echo -e "   ${YELLOW}!${NC} Docker MTU is larger than host MTU - may cause issues"
-        fi
-    fi
-    
-    # Check custom network MTU
-    if docker network ls | grep -q "robustty-network"; then
-        NETWORK_MTU=$(docker network inspect robustty-network | jq -r '.[0].Options."com.docker.network.driver.mtu" // empty' 2>/dev/null)
-        if [ -n "$NETWORK_MTU" ]; then
-            echo -e "   ${BLUE}ℹ${NC} Custom network MTU: $NETWORK_MTU"
-        else
-            echo -e "   ${YELLOW}!${NC} No custom MTU set for robustty-network"
-        fi
-    fi
-    echo
-}
+# 7. Test connectivity to key services
+log "Testing connectivity to key services..."
 
-# Function to check for common VPS provider issues
-check_vps_specific_issues() {
-    echo -e "${YELLOW}8. Checking VPS-Specific Issues...${NC}"
-    
-    # Check for UFW
-    if command -v ufw &> /dev/null; then
-        if ufw status | grep -q "Status: active"; then
-            echo -e "   ${YELLOW}!${NC} UFW firewall is active - may conflict with Docker"
-            
-            # Check if Docker rules are allowed
-            if ufw status | grep -q "2375\|2376\|2377"; then
-                echo -e "   ${GREEN}✓${NC} Docker ports appear to be allowed in UFW"
-            else
-                echo -e "   ${YELLOW}!${NC} Docker ports not explicitly allowed in UFW"
-            fi
-        else
-            echo -e "   ${GREEN}✓${NC} UFW is inactive"
-        fi
+# Discord API
+if curl -s --connect-timeout 10 https://discord.com/api/v10/gateway &> /dev/null; then
+    success "Discord API reachable"
+else
+    error "Discord API unreachable"
+    add_recommendation "Check firewall rules for outbound HTTPS traffic"
+fi
+
+# YouTube API  
+if curl -s --connect-timeout 10 https://www.googleapis.com/youtube/v3/ &> /dev/null; then
+    success "YouTube API reachable"
+else
+    warning "YouTube API unreachable"
+    add_recommendation "Check outbound connectivity to googleapis.com"
+fi
+
+# PeerTube instance
+if curl -s --connect-timeout 10 https://tube.tchncs.de &> /dev/null; then
+    success "PeerTube instance reachable"
+else
+    warning "PeerTube instance unreachable"
+    add_recommendation "PeerTube connectivity issues may be expected on some VPS"
+fi
+
+# Odysee API
+if curl -s --connect-timeout 10 https://api.lbry.tv/api/v1/proxy &> /dev/null; then
+    success "Odysee API reachable"
+else
+    warning "Odysee API unreachable"
+    add_recommendation "Odysee connectivity issues may be expected on some VPS"
+fi
+
+# 8. Check for common VPS restrictions
+log "Checking for common VPS restrictions..."
+
+# Check UFW
+if command -v ufw &> /dev/null; then
+    UFW_STATUS=$(ufw status | head -1)
+    log "UFW status: $UFW_STATUS"
+    if echo "$UFW_STATUS" | grep -q "active"; then
+        warning "UFW firewall is active - may interfere with Docker"
+        add_recommendation "Configure UFW to allow Docker: ufw allow out 53 && ufw allow out 80 && ufw allow out 443"
     fi
-    
-    # Check for firewalld
-    if command -v firewall-cmd &> /dev/null; then
-        if systemctl is-active --quiet firewalld; then
-            echo -e "   ${YELLOW}!${NC} firewalld is active - may conflict with Docker"
-            
-            # Check Docker zone
-            if firewall-cmd --get-zones | grep -q docker; then
-                echo -e "   ${GREEN}✓${NC} Docker zone exists in firewalld"
-            else
-                echo -e "   ${YELLOW}!${NC} Docker zone not configured in firewalld"
-            fi
-        fi
+fi
+
+# Check firewalld
+if command -v firewalld &> /dev/null; then
+    if systemctl is-active --quiet firewalld; then
+        warning "firewalld is active - may interfere with Docker"
+        add_recommendation "Configure firewalld for Docker or disable: systemctl disable firewalld"
     fi
-    
-    # Check kernel modules
-    echo -e "\n   ${BLUE}Checking required kernel modules:${NC}"
-    for module in br_netfilter overlay; do
-        if lsmod | grep -q "^$module"; then
-            echo -e "   ${GREEN}✓${NC} $module module loaded"
-        else
-            echo -e "   ${YELLOW}!${NC} $module module not loaded"
-        fi
+fi
+
+# 9. Summary and recommendations
+echo ""
+echo "========================================"
+echo "📊 DIAGNOSTIC SUMMARY"
+echo "========================================"
+
+if [[ $ISSUES_FOUND -eq 0 ]]; then
+    success "No major issues found! 🎉"
+    log "Your VPS networking appears to be configured correctly."
+else
+    warning "Found $ISSUES_FOUND potential issues"
+    echo ""
+    echo "🔧 RECOMMENDATIONS:"
+    for i in "${!RECOMMENDATIONS[@]}"; do
+        echo "  $((i+1)). ${RECOMMENDATIONS[$i]}"
     done
-    
-    # Check sysctl settings
-    echo -e "\n   ${BLUE}Checking sysctl settings:${NC}"
-    if [ "$(sysctl -n net.ipv4.ip_forward)" = "1" ]; then
-        echo -e "   ${GREEN}✓${NC} IP forwarding enabled"
-    else
-        echo -e "   ${RED}✗${NC} IP forwarding disabled"
-    fi
-    
-    if [ "$(sysctl -n net.bridge.bridge-nf-call-iptables 2>/dev/null)" = "1" ]; then
-        echo -e "   ${GREEN}✓${NC} Bridge netfilter enabled"
-    else
-        echo -e "   ${YELLOW}!${NC} Bridge netfilter not enabled"
-    fi
-    echo
-}
+fi
 
-# Function to generate diagnostic summary
-generate_summary() {
-    echo -e "${YELLOW}9. Diagnostic Summary${NC}"
-    echo -e "${BLUE}${'─' * 50}${NC}"
-    
-    # Collect all issues
-    ISSUES=()
-    
-    # Check for critical issues
-    if ! systemctl is-active --quiet docker; then
-        ISSUES+=("Docker service not running")
-    fi
-    
-    if ! iptables -L DOCKER -n &> /dev/null; then
-        ISSUES+=("Docker iptables chains missing")
-    fi
-    
-    if ! iptables -t nat -L POSTROUTING -n | grep -q "MASQUERADE"; then
-        ISSUES+=("NAT masquerading not configured")
-    fi
-    
-    if [ "$(sysctl -n net.ipv4.ip_forward)" != "1" ]; then
-        ISSUES+=("IP forwarding disabled")
-    fi
-    
-    # Print issues
-    if [ ${#ISSUES[@]} -gt 0 ]; then
-        echo -e "${RED}Critical Issues Found:${NC}"
-        for issue in "${ISSUES[@]}"; do
-            echo -e "  ${RED}✗${NC} $issue"
-        done
-        echo
-        echo -e "${YELLOW}Run './scripts/fix-vps-network.sh' to attempt automatic fixes${NC}"
-    else
-        echo -e "${GREEN}No critical issues found!${NC}"
-        echo -e "\nIf you're still experiencing issues, check:"
-        echo -e "  - Container logs: docker-compose logs robustty"
-        echo -e "  - Specific platform errors in the application"
-        echo -e "  - VPS provider-specific firewall rules"
-    fi
-    
-    echo -e "${BLUE}${'─' * 50}${NC}"
-}
+echo ""
+echo "🚀 Next Steps:"
+echo "1. Run the fix script: sudo ./scripts/fix-vps-network.sh"
+echo "2. Restart Docker: sudo systemctl restart docker"
+echo "3. Restart your bot: docker-compose down && docker-compose up -d"
+echo "4. Check bot logs: docker-compose logs -f robustty"
 
-# Main execution
-main() {
-    # Check if running as root
-    if [ "$EUID" -ne 0 ]; then
-        echo -e "${YELLOW}Note: Some diagnostics require root access. Run with sudo for complete results.${NC}\n"
-    fi
-    
-    check_vps_environment
-    check_docker_status || exit 1
-    check_docker_networks
-    check_iptables_rules
-    check_dns_configuration
-    test_container_networking
-    check_mtu_settings
-    check_vps_specific_issues
-    generate_summary
-}
-
-# Run main function
-main
+exit $ISSUES_FOUND

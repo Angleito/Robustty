@@ -1,405 +1,328 @@
-# VPS Troubleshooting Guide for Robustty Bot
+# VPS Troubleshooting Guide for Robustty Discord Bot
 
-This guide documents common VPS networking issues encountered when deploying the Robustty Discord bot and provides comprehensive solutions.
+This guide addresses common VPS deployment issues that cause "Connection closed" errors and Discord voice WebSocket 4006 failures.
 
-## Table of Contents
-- [Common Issues](#common-issues)
-- [Diagnostic Tools](#diagnostic-tools)
-- [Step-by-Step Fixes](#step-by-step-fixes)
-- [VPS Provider Specific Fixes](#vps-provider-specific-fixes)
-- [Docker Networking Best Practices](#docker-networking-best-practices)
-
-## Common Issues
-
-### 1. Docker Container Cannot Reach External Services
-**Symptoms:**
-- Bot connects to Discord but fails to join voice channels
-- Platform searches timeout (YouTube, Rumble, Odysee, PeerTube)
-- DNS resolution fails inside containers
-- `urllib.error.URLError: <urlopen error [Errno -3] Temporary failure in name resolution>`
-
-**Root Causes:**
-- Docker bridge network misconfiguration
-- IPTables rules blocking outbound traffic
-- DNS not properly configured for containers
-- MTU mismatch between Docker bridge and host network
-
-### 2. Discord Voice Connection Failures
-**Symptoms:**
-- Bot joins voice channel but immediately disconnects
-- "Failed to connect to voice channel" errors
-- WebSocket connection timeouts
-
-**Root Causes:**
-- UDP ports blocked by firewall
-- NAT/masquerading not configured
-- Discord voice server regions blocked
-
-### 3. Platform API Timeouts
-**Symptoms:**
-- Odysee searches timeout after 30+ seconds
-- PeerTube instance unreachable
-- YouTube API calls fail intermittently
-
-**Root Causes:**
-- High network latency on VPS
-- DNS resolution delays
-- TCP buffer sizes too small
-
-## Diagnostic Tools
-
-### Running Network Diagnostics
+## 🚨 Quick Fix (TL;DR)
 
 ```bash
-# Full diagnostic scan
-python3 scripts/diagnose-vps-network.py
-
-# Verbose output with detailed information
-python3 scripts/diagnose-vps-network.py --verbose
-
-# JSON output for automation
-python3 scripts/diagnose-vps-network.py --json > network-report.json
-```
-
-### What the Diagnostic Tool Checks:
-1. **Docker Installation & Configuration**
-   - Docker daemon status
-   - Network driver configuration
-   - Bridge network subnet
-
-2. **IPTables Rules**
-   - DOCKER-USER chain configuration
-   - NAT masquerading rules
-   - Firewall restrictions
-
-3. **Container Connectivity**
-   - DNS resolution from containers
-   - Outbound HTTP/HTTPS
-   - Discord API accessibility
-
-4. **Network Performance**
-   - MTU configuration
-   - TCP buffer sizes
-   - Connection tracking limits
-
-5. **Platform Connectivity**
-   - Discord voice servers
-   - PeerTube instances
-   - Odysee API endpoints
-
-## Step-by-Step Fixes
-
-### Quick Fix (Automated)
-
-```bash
-# Dry run to see what changes will be made
-sudo ./scripts/fix-vps-network.sh --dry-run
-
-# Apply all fixes automatically
+# On your VPS, run these commands:
+sudo ./scripts/diagnose-vps-network.sh
 sudo ./scripts/fix-vps-network.sh
-
-# Force installation of missing components
-sudo ./scripts/fix-vps-network.sh --force
+docker-compose down && docker-compose up -d
 ```
 
-### Manual Fixes
+## 🔍 Common Issues & Solutions
 
-#### 1. Fix Docker DNS Configuration
+### 1. Discord Voice WebSocket Error 4006
 
+**Symptoms:**
+- `discord.errors.ConnectionClosed: Shard ID None WebSocket closed with 4006`
+- Voice connections fail repeatedly
+- Bot can connect to Discord but not join voice channels
+
+**Causes:**
+- VPS network instability affecting Discord voice servers
+- Session invalidation due to connection drops
+- Containerized environment networking issues
+
+**Solutions:**
+1. **Enable VPS Voice Optimizations:**
+   ```bash
+   export VPS_MODE=true
+   docker-compose restart robustty
+   ```
+
+2. **Check Voice Connection Environment:**
+   - Use `!voiceenv` command in Discord to see current settings
+   - Use `!voicediag` to run diagnostics
+   - Use `!voicehealth` to check connection status
+
+3. **Manual Voice Connection Settings:**
+   ```bash
+   # In your .env file
+   VOICE_ENVIRONMENT=vps
+   VOICE_RETRY_ATTEMPTS=8
+   VOICE_RETRY_DELAY=5
+   ```
+
+### 2. "Connection Closed" Errors on All Platforms
+
+**Symptoms:**
+- All platforms (PeerTube, Odysee, Rumble) show "Connection closed"
+- YouTube might work but others fail
+- Network timeouts across the board
+
+**Root Cause:** Docker networking conflicts with VPS firewall rules
+
+**Fix Steps:**
+1. **Run Network Diagnostic:**
+   ```bash
+   sudo ./scripts/diagnose-vps-network.sh
+   ```
+
+2. **Apply Automatic Fix:**
+   ```bash
+   sudo ./scripts/fix-vps-network.sh
+   ```
+
+3. **Manual Fix (if automatic fails):**
+   ```bash
+   # Enable IP forwarding
+   echo 'net.ipv4.ip_forward=1' >> /etc/sysctl.conf
+   sysctl -p
+   
+   # Fix Docker iptables rules
+   iptables -I DOCKER-USER -i docker0 -j ACCEPT
+   iptables -I DOCKER-USER -o docker0 -j ACCEPT
+   iptables -t nat -A POSTROUTING -s 172.17.0.0/16 ! -o docker0 -j MASQUERADE
+   
+   # Save rules
+   iptables-save > /etc/iptables/rules.v4
+   ```
+
+### 3. Platform-Specific Issues
+
+#### PeerTube Connectivity
+**Issue:** All PeerTube instances failing
+**Temporary Solution:** PeerTube is automatically disabled in VPS stability mode
+**Re-enable:** Use `!enable-platform peertube` after fixing network
+
+#### Odysee Timeouts
+**Issue:** Consistent Odysee API timeouts
+**Automatic Fix:** VPS mode increases timeouts automatically
+**Manual Override:**
 ```bash
-# Create/update Docker daemon configuration
-sudo nano /etc/docker/daemon.json
+export ODYSEE_TIMEOUT_MULTIPLIER=2.0
+docker-compose restart robustty
 ```
 
-Add:
-```json
+### 4. DNS Resolution Problems
+
+**Symptoms:**
+- "No answer for domain" errors
+- Cannot resolve discord.com, googleapis.com
+- DNS timeouts in containers
+
+**Fix:**
+1. **Update Docker DNS Configuration:**
+   ```bash
+   # Create /etc/docker/daemon.json
+   sudo tee /etc/docker/daemon.json <<EOF
+   {
+     "dns": ["8.8.8.8", "1.1.1.1"],
+     "mtu": 1450
+   }
+   EOF
+   sudo systemctl restart docker
+   ```
+
+2. **Update docker-compose.yml:**
+   ```yaml
+   services:
+     robustty:
+       dns:
+         - 8.8.8.8
+         - 1.1.1.1
+   ```
+
+### 5. MTU Configuration Issues
+
+**Symptoms:**
+- Large packets dropped
+- Intermittent connection failures
+- "Connection reset by peer" errors
+
+**Fix:**
+```bash
+# Set Docker MTU to 1450 (safe for most VPS)
+sudo tee /etc/docker/daemon.json <<EOF
 {
-  "dns": ["1.1.1.1", "1.0.0.1", "8.8.8.8", "8.8.4.4"],
-  "dns-opts": ["ndots:0"],
-  "dns-search": []
+  "mtu": 1450
 }
-```
-
-```bash
-# Restart Docker
+EOF
 sudo systemctl restart docker
 ```
 
-#### 2. Fix IPTables Rules
-
-```bash
-# Add DOCKER-USER chain rule to allow all traffic
-sudo iptables -I DOCKER-USER -j RETURN
-
-# Ensure NAT masquerading for Docker
-sudo iptables -t nat -A POSTROUTING -s 172.17.0.0/16 ! -o docker0 -j MASQUERADE
-
-# Allow Docker bridge to external interface
-sudo iptables -I FORWARD -i docker0 -o eth0 -j ACCEPT
-sudo iptables -I FORWARD -i eth0 -o docker0 -m state --state ESTABLISHED,RELATED -j ACCEPT
-
-# Save rules (Ubuntu/Debian)
-sudo apt-get install -y iptables-persistent
-sudo netfilter-persistent save
-```
-
-#### 3. Fix MTU Issues
-
-```bash
-# Find Docker bridge interface
-ip link show | grep docker
-
-# Set MTU to 1500
-sudo ip link set dev docker0 mtu 1500
-
-# Make persistent by adding to Docker daemon.json
-"mtu": 1500
-```
-
-#### 4. Fix System DNS
-
-```bash
-# Backup current configuration
-sudo cp /etc/resolv.conf /etc/resolv.conf.backup
-
-# Set reliable DNS servers
-echo "nameserver 1.1.1.1" | sudo tee /etc/resolv.conf
-echo "nameserver 8.8.8.8" | sudo tee -a /etc/resolv.conf
-```
-
-#### 5. Optimize Network Performance
-
-```bash
-# Increase TCP buffer sizes
-sudo sysctl -w net.core.rmem_max=134217728
-sudo sysctl -w net.core.wmem_max=134217728
-sudo sysctl -w net.ipv4.tcp_rmem='4096 87380 134217728'
-sudo sysctl -w net.ipv4.tcp_wmem='4096 65536 134217728'
-
-# Enable TCP fast open
-sudo sysctl -w net.ipv4.tcp_fastopen=3
-
-# Increase connection tracking
-sudo sysctl -w net.netfilter.nf_conntrack_max=131072
-
-# Make permanent
-echo "net.core.rmem_max=134217728" | sudo tee -a /etc/sysctl.conf
-echo "net.core.wmem_max=134217728" | sudo tee -a /etc/sysctl.conf
-```
-
-## VPS Provider Specific Fixes
+## 🌐 VPS Provider-Specific Fixes
 
 ### DigitalOcean
-
 ```bash
-# Disable firewall if causing issues
-sudo ufw disable
-
-# Or allow Docker traffic
-sudo ufw allow from 172.16.0.0/12
-sudo ufw reload
+# DigitalOcean often requires explicit UFW configuration
+sudo ufw allow out 53
+sudo ufw allow out 80  
+sudo ufw allow out 443
+sudo ufw allow out 22/tcp
 ```
 
 ### Vultr
-
 ```bash
-# Check for custom firewall rules
-sudo iptables -L -n -v
-
-# Vultr often requires explicit outbound rules
-sudo iptables -A OUTPUT -j ACCEPT
+# Vultr may need bridge netfilter module
+sudo modprobe br_netfilter
+echo 'br_netfilter' >> /etc/modules-load.d/docker.conf
 ```
 
 ### Linode
-
 ```bash
-# Linode's network helper can interfere
-# Disable it in Linode Manager under Configuration Profiles
-
-# Fix IPv6 issues
-sudo sysctl -w net.ipv6.conf.all.disable_ipv6=1
+# Linode may require specific iptables configuration
+sudo iptables -I INPUT -i docker0 -j ACCEPT
+sudo iptables-save > /etc/iptables/rules.v4
 ```
 
 ### AWS EC2
-
 ```bash
-# Check Security Groups in AWS Console
-# Ensure outbound rules allow:
-# - All traffic to 0.0.0.0/0
-# - Or specific: HTTPS (443), HTTP (80), DNS (53)
-
-# Fix source/destination check for NAT
-# Disable in EC2 instance settings
+# AWS requires security group configuration
+# Add outbound rules for ports 80, 443, 53
+# Also check VPC routing tables
 ```
 
-### Hetzner Cloud
-
+### Hetzner
 ```bash
-# Hetzner has strict DDoS protection
-# May need to whitelist Discord IPs
-
-# Add to firewall
-sudo iptables -A INPUT -s 162.159.128.0/22 -j ACCEPT  # Discord
-sudo iptables -A INPUT -s 66.22.196.0/22 -j ACCEPT    # Discord Voice
+# Hetzner may need specific network interface configuration
+sudo ip route add default via $(ip route | grep default | head -1 | awk '{print $3}')
 ```
 
-## Docker Networking Best Practices
+## 🔧 Manual Debugging Steps
 
-### 1. Use Bridge Networks (Not Host)
-
-```yaml
-# docker-compose.yml
-networks:
-  robustty-network:
-    driver: bridge
-    ipam:
-      config:
-        - subnet: 172.20.0.0/16
-```
-
-### 2. Configure DNS in Compose
-
-```yaml
-services:
-  robustty:
-    dns:
-      - 1.1.1.1
-      - 1.0.0.1
-      - 8.8.8.8
-```
-
-### 3. Set Proper Health Checks
-
-```yaml
-healthcheck:
-  test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
-  interval: 30s
-  timeout: 10s
-  retries: 3
-```
-
-### 4. Resource Limits
-
-```yaml
-deploy:
-  resources:
-    limits:
-      memory: 2G
-    reservations:
-      memory: 512M
-```
-
-### 5. Logging Configuration
-
-```yaml
-logging:
-  driver: "json-file"
-  options:
-    max-size: "10m"
-    max-file: "3"
-```
-
-## Troubleshooting Commands
-
-### Check Container Network
-
+### 1. Test Container Networking
 ```bash
-# Inspect network configuration
-docker network inspect bridge
+# Test basic connectivity
+docker run --rm alpine ping -c 3 8.8.8.8
 
-# Test DNS from container
-docker exec robustty-bot nslookup discord.com
+# Test DNS resolution
+docker run --rm alpine nslookup discord.com
 
-# Test outbound connectivity
-docker exec robustty-bot curl -v https://discord.com/api/v10/gateway
-
-# Check container logs
-docker-compose logs -f robustty
+# Test HTTPS connectivity
+docker run --rm alpine wget -q --timeout=10 https://discord.com/api/v10/gateway -O -
 ```
 
-### Monitor Network Traffic
-
+### 2. Check iptables Rules
 ```bash
-# Watch network connections
-sudo netstat -tuln | grep ESTABLISHED
+# View current rules
+sudo iptables -L -n -v
+sudo iptables -t nat -L -n -v
 
-# Monitor Docker bridge traffic
-sudo tcpdump -i docker0 -n
-
-# Check connection tracking
-sudo conntrack -L
+# Check Docker chains
+sudo iptables -L DOCKER-USER -n -v
+sudo iptables -t nat -L DOCKER -n -v
 ```
 
-### Debug Voice Connection
-
+### 3. Monitor Network Traffic
 ```bash
-# Test UDP connectivity (Discord voice uses UDP)
-docker exec robustty-bot python3 -c "
-import socket
-s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-s.settimeout(5)
-try:
-    s.sendto(b'test', ('8.8.8.8', 53))
-    print('UDP works')
-except:
-    print('UDP blocked')
-"
+# Watch iptables counters
+sudo watch -n 1 'iptables -L DOCKER-USER -n -v'
+
+# Monitor container traffic
+sudo tcpdump -i docker0
+
+# Check Docker logs
+sudo journalctl -u docker.service -f
 ```
 
-## Emergency Recovery
-
-If all else fails:
-
+### 4. Test Discord Voice Connectivity
 ```bash
-# 1. Stop all services
-docker-compose down
-
-# 2. Reset Docker networking
-sudo systemctl stop docker
-sudo ip link delete docker0
-sudo systemctl start docker
-
-# 3. Clear all iptables rules (CAUTION!)
-sudo iptables -F
-sudo iptables -X
-sudo iptables -t nat -F
-sudo iptables -t nat -X
-
-# 4. Reboot VPS
-sudo reboot
-
-# 5. After reboot, run fix script
-cd ~/robustty-bot
-sudo ./scripts/fix-vps-network.sh --force
+# Test Discord voice regions
+for region in us-west us-east us-central europe asia; do
+  echo "Testing ${region}..."
+  timeout 5 bash -c "</dev/tcp/gateway-${region}-1.discord.gg/443" 2>/dev/null && echo "✓ ${region} OK" || echo "✗ ${region} FAIL"
+done
 ```
 
-## Getting Help
+## 🚑 Emergency Recovery
 
-If issues persist after trying these fixes:
+If the bot stops working completely:
 
-1. Run diagnostics and save output:
+1. **Reset Docker Networking:**
    ```bash
-   python3 scripts/diagnose-vps-network.py --json > diagnostic-report.json
+   sudo systemctl stop docker
+   sudo iptables -t nat -F DOCKER
+   sudo iptables -t filter -F DOCKER
+   sudo iptables -t filter -F DOCKER-USER
+   sudo systemctl start docker
    ```
 
-2. Check provider-specific documentation for network restrictions
+2. **Use Host Networking (temporary):**
+   ```yaml
+   # In docker-compose.yml
+   services:
+     robustty:
+       network_mode: host
+   ```
 
-3. Contact VPS support with diagnostic report
+3. **Minimal Configuration:**
+   ```bash
+   # Disable problematic platforms
+   export PEERTUBE_ENABLED=false
+   export ODYSEE_ENABLED=false
+   docker-compose restart robustty
+   ```
 
-4. Common questions for VPS support:
-   - Are there any outbound traffic restrictions?
-   - Is UDP traffic allowed?
-   - Are there DDoS protection rules that might block Discord?
-   - Can Docker containers access external DNS servers?
+## 📊 Health Monitoring
 
-## Prevention
+### Bot Commands
+- `!voicehealth` - Check voice connection status
+- `!voicediag` - Run voice diagnostics  
+- `!platform-stability` - Check platform health
+- `!enable-platform <name>` - Re-enable disabled platforms
 
-To avoid these issues in future deployments:
+### System Monitoring
+```bash
+# Check Docker service
+sudo systemctl status docker
 
-1. **Choose VPS carefully**: Some providers have restrictive default firewall rules
-2. **Test early**: Run diagnostics immediately after VPS setup
-3. **Document changes**: Keep track of any network modifications
-4. **Monitor regularly**: Set up alerts for connectivity issues
-5. **Keep backups**: Save working iptables rules and Docker configurations
+# Monitor bot logs
+docker-compose logs -f robustty
 
-Remember: VPS networking issues are common with Discord bots due to the combination of Docker networking, voice channel requirements (UDP), and various VPS provider restrictions. The diagnostic and fix tools provided should resolve most issues automatically.
+# Check network connectivity
+./scripts/diagnose-vps-network.sh
+```
+
+## 📞 Getting Help
+
+If issues persist after trying these solutions:
+
+1. **Run Full Diagnostic:**
+   ```bash
+   sudo ./scripts/diagnose-vps-network.sh > diagnostic-report.txt
+   ```
+
+2. **Collect System Information:**
+   ```bash
+   echo "System Info:" > system-info.txt
+   uname -a >> system-info.txt
+   docker version >> system-info.txt
+   docker-compose version >> system-info.txt
+   ip addr show >> system-info.txt
+   ```
+
+3. **Check Bot Logs:**
+   ```bash
+   docker-compose logs robustty > bot-logs.txt
+   ```
+
+4. **VPS Provider Support:**
+   - Check if your VPS provider blocks specific ports
+   - Verify no bandwidth restrictions
+   - Confirm Docker is allowed on your plan
+
+## 🎯 Prevention
+
+### Regular Maintenance
+```bash
+# Weekly network health check
+sudo ./scripts/diagnose-vps-network.sh
+
+# Monthly iptables rule cleanup
+sudo iptables -t nat -F DOCKER
+sudo systemctl restart docker
+
+# Keep Docker updated
+sudo apt update && sudo apt upgrade docker-ce
+```
+
+### Monitoring Setup
+```bash
+# Add to crontab for automated checks
+0 6 * * * /path/to/scripts/diagnose-vps-network.sh
+```
+
+This guide should resolve most VPS deployment issues. The key is identifying whether the problem is networking (most common), DNS resolution, or Discord-specific connectivity.
