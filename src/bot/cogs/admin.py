@@ -1124,6 +1124,21 @@ class Admin(Cog):
                     description=f"Multiple voice connection issues ({health_status['connection_rate']:.1%} success rate)",
                 )
 
+            # Add environment info
+            environment = health_status.get('environment', 'unknown')
+            env_emoji = {
+                'local': '💻',
+                'docker': '🐳',
+                'vps': '☁️'
+            }.get(environment, '❓')
+            
+            embed.add_field(
+                name=f"{env_emoji} Environment",
+                value=f"**Type:** {environment.upper()}\n"
+                f"**Detection:** Automatic",
+                inline=True,
+            )
+            
             # Add statistics
             embed.add_field(
                 name="📊 Connection Statistics",
@@ -1133,6 +1148,28 @@ class Admin(Cog):
                 f"**Success Rate:** {health_status['connection_rate']:.1%}",
                 inline=True,
             )
+            
+            # Add configuration info
+            if 'configuration' in health_status:
+                config = health_status['configuration']
+                embed.add_field(
+                    name="⚙️ Configuration",
+                    value=f"**Max Retries:** {config['max_retry_attempts']}\n"
+                    f"**Base Delay:** {config['base_retry_delay']}s\n"
+                    f"**Timeout:** {config['connection_timeout']}s\n"
+                    f"**Circuit Threshold:** {config['circuit_breaker_threshold']}",
+                    inline=True,
+                )
+            
+            # Add circuit breaker status
+            circuit_open_count = health_status.get('circuit_breakers_open', 0)
+            if circuit_open_count > 0:
+                embed.add_field(
+                    name="🚨 Circuit Breakers",
+                    value=f"**Open:** {circuit_open_count} guild(s)\n"
+                    f"These guilds are temporarily blocked from voice connections",
+                    inline=False,
+                )
 
             # Add per-guild status if any connections exist
             if health_status['states']:

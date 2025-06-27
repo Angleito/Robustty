@@ -7,6 +7,8 @@ import aiohttp
 if TYPE_CHECKING:
     from ..services.cache_manager import CacheManager
 
+from ..services.http_session_manager import get_session_manager
+
 logger = logging.getLogger(__name__)
 
 
@@ -50,45 +52,37 @@ class VideoPlatform(ABC):
 
     async def initialize(self):
         """Initialize platform resources"""
-        if self.session is None or self.session.closed:
-            # Create session with proper timeout and connection limits
-            timeout = aiohttp.ClientTimeout(total=30, connect=10)
-            connector = aiohttp.TCPConnector(
-                limit=100,  # Total connection pool size
-                limit_per_host=10,  # Connections per host
-                ttl_dns_cache=300,  # DNS cache TTL
-                use_dns_cache=True,
-                keepalive_timeout=30,
-                enable_cleanup_closed=True
-            )
-            self.session = aiohttp.ClientSession(
-                timeout=timeout,
-                connector=connector,
-                headers={'User-Agent': 'Robustty Bot/1.0'}
-            )
-            self._session_closed = False
-            logger.info(f"Initialized {self.name} platform with new HTTP session")
-        else:
-            logger.info(f"Reusing existing HTTP session for {self.name} platform")
+        # Use the global session manager for all HTTP connections
+        session_manager = get_session_manager()
+        
+        # Get platform-specific session configuration
+        timeout = aiohttp.ClientTimeout(
+            total=self.config.get('http_timeout', 30),
+            connect=self.config.get('http_connect_timeout', 10)
+        )
+        
+        connector_kwargs = {
+            'limit_per_host': self.config.get('connections_per_host', 10),
+            'ttl_dns_cache': self.config.get('dns_cache_ttl', 300)
+        }
+        
+        # Get or create session through the manager
+        self.session = await session_manager.get_session(
+            name=f"platform_{self.name}",
+            timeout=timeout,
+            connector_kwargs=connector_kwargs
+        )
+        self._session_closed = False
+        logger.info(f"Initialized {self.name} platform with managed HTTP session")
 
     async def cleanup(self):
         """Cleanup platform resources"""
-        if self.session and not self._session_closed:
-            try:
-                # Close the session gracefully
-                if not self.session.closed:
-                    await self.session.close()
-                
-                # Wait a bit for the underlying connections to close
-                import asyncio
-                await asyncio.sleep(0.1)
-                
-                self._session_closed = True
-                logger.info(f"Closed HTTP session for {self.name} platform")
-            except Exception as e:
-                logger.error(f"Error closing HTTP session for {self.name}: {e}")
-            finally:
-                self.session = None
+        # Session cleanup is now handled by the session manager
+        # Just mark our reference as closed
+        if self.session:
+            self._session_closed = True
+            self.session = None
+            logger.info(f"Released HTTP session reference for {self.name} platform")
         
         logger.info(f"Cleaned up {self.name} platform")
 

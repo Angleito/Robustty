@@ -17,6 +17,7 @@ from src.services.voice_connection_manager import VoiceConnectionManager
 from src.utils.config_loader import ConfigType
 from src.services.metrics_collector import get_metrics_collector
 from src.services.health_monitor import HealthMonitor
+from src.services.stability_monitor import StabilityMonitor
 # from src.utils.resilient_discord_client import add_resilient_connection_to_bot
 from src.utils.network_connectivity import get_connectivity_manager
 
@@ -49,6 +50,7 @@ class RobusttyBot(commands.Bot):
         self.voice_connection_manager: Optional[VoiceConnectionManager] = None
         self.metrics = get_metrics_collector()
         self.health_monitor: Optional[HealthMonitor] = None
+        self.stability_monitor: Optional[StabilityMonitor] = None
         self.connectivity_manager = get_connectivity_manager(config)
 
         # Temporarily disable resilient connection to fix infinite loop
@@ -90,6 +92,16 @@ class RobusttyBot(commands.Bot):
 
         # Load platforms from config
         await self.platform_registry.load_platforms(self.config["platforms"])
+        
+        # Initialize stability monitor
+        self.stability_monitor = StabilityMonitor(self.platform_registry)
+        
+        # Log platform status after loading
+        if self.stability_monitor.enabled:
+            enabled_platforms = list(self.platform_registry.get_enabled_platforms().keys())
+            logger.info(f"STABILITY MODE: Active platforms: {enabled_platforms}")
+            if self.stability_monitor.problematic_platforms:
+                logger.warning(f"STABILITY MODE: Problematic platforms disabled: {self.stability_monitor.problematic_platforms}")
 
         # Initialize cookie management services
         cookie_config = self.config.get("cookies", {})
@@ -131,6 +143,7 @@ class RobusttyBot(commands.Bot):
             cookie_manager=self.enhanced_cookie_manager,
             platform_registry=self.platform_registry,
             quota_monitor=self.quota_monitor,
+            stability_monitor=self.stability_monitor,
         )
         await self.health_endpoints.start()
 
@@ -184,6 +197,11 @@ class RobusttyBot(commands.Bot):
         ):
             await self.health_monitor.start()
             logger.info("Health monitor started")
+            
+        # Start stability monitor if enabled
+        if self.stability_monitor:
+            await self.stability_monitor.start()
+            logger.info("Stability monitor started")
 
         # Update metrics with active connections
         self._update_connection_metrics()

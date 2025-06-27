@@ -3,6 +3,23 @@ bot:
   description: "Multi-platform music bot"
   activity: "music from everywhere"
 
+# VPS Stability Mode Configuration
+# Enable this mode to automatically disable problematic platforms and optimize for stability
+stability_mode:
+  enabled: ${VPS_STABILITY_MODE:true}  # Enable stability mode for VPS deployments
+  auto_disable_failing_platforms: ${AUTO_DISABLE_FAILING_PLATFORMS:true}
+  failure_threshold: ${PLATFORM_FAILURE_THRESHOLD:5}  # Consecutive failures before disabling
+  recovery_check_interval: ${PLATFORM_RECOVERY_CHECK_INTERVAL:300}  # Check disabled platforms every 5 minutes
+  
+  # Platform-specific stability settings
+  stable_platforms: ["youtube", "rumble"]  # Platforms known to be stable
+  problematic_platforms: ["peertube", "odysee"]  # Platforms with known issues
+  
+  # Network optimization for VPS
+  use_simplified_networking: ${USE_SIMPLIFIED_NETWORKING:true}
+  disable_concurrent_requests: ${DISABLE_CONCURRENT_REQUESTS:true}
+  max_retry_attempts: ${STABILITY_MAX_RETRY:1}  # Minimal retries in stability mode
+
 platforms:
   youtube:
     enabled: true
@@ -23,7 +40,7 @@ platforms:
     serve_stale_on_error: true  # Serve stale cache on YouTube-specific errors
 
   peertube:
-    enabled: true
+    enabled: ${PEERTUBE_ENABLED:false}  # Disabled by default for stability
     instances:
       # Primary reliable instances (tested and verified)
       - https://tube.tchncs.de     # German instance, very reliable, federated content

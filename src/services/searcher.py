@@ -40,6 +40,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from src.services.cache_manager import CacheManager
+    from src.services.stability_monitor import StabilityMonitor
 
 try:
     from src.services.deduplication import CrossPlatformDeduplicator
@@ -57,11 +58,13 @@ class MultiPlatformSearcher:
         self,
         platform_registry: PlatformRegistry,
         config: Optional[Dict[str, Any]] = None,
+        stability_monitor: Optional['StabilityMonitor'] = None,
     ):
         self.platform_registry = platform_registry
         self.status_reporter = get_status_reporter()
         self._last_search_status: Optional[MultiPlatformStatus] = None
         self.config = config or {}
+        self.stability_monitor = stability_monitor
         
         # Task management for proper cleanup
         self._background_tasks: set[asyncio.Task] = set()
@@ -364,6 +367,12 @@ class MultiPlatformSearcher:
                     success=False,
                     response_time=response_time,
                     error_type="rate_limit",
+                )
+                
+            # Record failure in stability monitor
+            if self.stability_monitor:
+                await self.stability_monitor.record_platform_failure(
+                    platform.name, "rate_limit"
                 )
 
             # Check if we should serve stale cache

@@ -427,6 +427,7 @@ docker-compose exec robustty python -c "import redis; print(redis.from_url('redi
 ### VPS Deployment Issues
 - **Pre-deployment Failures**: Run `./scripts/validate-pre-deployment.sh` to identify missing requirements
 - **Network Issues**: Use `./scripts/diagnose-vps-network.sh` for comprehensive network troubleshooting
+- **Network Fixes**: Run `sudo ./scripts/fix-vps-network.sh` to automatically fix common Docker networking issues
 - **DNS Resolution**: Fix with `sudo echo 'nameserver 8.8.8.8' > /etc/resolv.conf`
 - **Docker Issues**: Install with `curl -fsSL https://get.docker.com | sh`
 - **Service Health**: Validate with `./scripts/validate-vps-core.sh` on VPS
