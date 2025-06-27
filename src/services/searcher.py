@@ -353,6 +353,10 @@ class MultiPlatformSearcher:
                 prioritization_manager.record_platform_operation(
                     platform.name, success=True, response_time=response_time
                 )
+                
+            # Record success in stability monitor
+            if self.stability_monitor:
+                await self.stability_monitor.record_platform_success(platform.name)
 
             return results
 
@@ -398,6 +402,12 @@ class MultiPlatformSearcher:
                     response_time=response_time,
                     error_type="circuit_breaker",
                 )
+                
+            # Record failure in stability monitor
+            if self.stability_monitor:
+                await self.stability_monitor.record_platform_failure(
+                    platform.name, "circuit_breaker"
+                )
 
             # Check if we should serve stale cache
             if await self._should_serve_stale_cache(
@@ -425,6 +435,12 @@ class MultiPlatformSearcher:
                     success=False,
                     response_time=response_time,
                     error_type="unavailable",
+                )
+                
+            # Record failure in stability monitor
+            if self.stability_monitor:
+                await self.stability_monitor.record_platform_failure(
+                    platform.name, "unavailable"
                 )
 
             # Check if we should serve stale cache
@@ -456,6 +472,12 @@ class MultiPlatformSearcher:
                     response_time=response_time,
                     error_type="platform_error",
                 )
+                
+            # Record failure in stability monitor
+            if self.stability_monitor:
+                await self.stability_monitor.record_platform_failure(
+                    platform.name, "platform_error"
+                )
 
             return []
 
@@ -473,6 +495,12 @@ class MultiPlatformSearcher:
                     success=False,
                     response_time=response_time,
                     error_type="unexpected_error",
+                )
+                
+            # Record failure in stability monitor
+            if self.stability_monitor:
+                await self.stability_monitor.record_platform_failure(
+                    platform.name, "unexpected_error"
                 )
 
             return []

@@ -32,6 +32,7 @@ class RobottyBot(Bot):
     """Type stub for our custom bot class"""
 
     platform_registry: PlatformRegistry
+    stability_monitor: Optional[Any]
 
 
 class Admin(Cog):
@@ -1260,11 +1261,28 @@ class Admin(Cog):
                     guild_name = guild.name if guild else f"Guild {guild_id}"
                     connection_info = voice_manager.get_connection_info(guild_id)
                     
-                    guild_issues.append(
-                        f"**{guild_name}**\n"
-                        f"State: {connection_info['state']}\n"
+                    issue_details = [
+                        f"**{guild_name}**",
+                        f"State: {connection_info['state']}",
                         f"Attempts: {connection_info['attempts']}/{connection_info['max_attempts']}"
-                    )
+                    ]
+                    
+                    # Add session info if available
+                    if 'session' in connection_info:
+                        session = connection_info['session']
+                        issue_details.append(f"Session: {session['id']}")
+                        issue_details.append(f"Session Age: {session['age_seconds']:.0f}s")
+                    
+                    # Add last error if available
+                    if connection_info.get('last_error'):
+                        error_msg = connection_info['last_error'][:50] + "..." if len(connection_info['last_error']) > 50 else connection_info['last_error']
+                        issue_details.append(f"Error: {error_msg}")
+                    
+                    # Add circuit breaker info if available
+                    if 'circuit_breaker' in connection_info and connection_info['circuit_breaker']['is_open']:
+                        issue_details.append(f"⚠️ Circuit breaker OPEN ({connection_info['circuit_breaker']['failures']} failures)")
+                    
+                    guild_issues.append("\n".join(issue_details))
                 
                 if guild_issues:
                     embed.add_field(
@@ -1297,6 +1315,377 @@ class Admin(Cog):
             embed = create_error_embed(
                 title="Voice Diagnostics Failed",
                 description=f"Could not run voice diagnostics: {str(e)[:100]}...",
+            )
+            await ctx.send(embed=embed)
+
+    @commands.command(name="voiceenv", aliases=["venv", "voice-env"])
+    @is_admin()
+    async def voice_environment(self, ctx: Context[RobottyBot], environment: Optional[str] = None) -> None:
+        """Show or set voice connection environment mode
+        
+        Usage:
+        - !voiceenv - Show current environment
+        - !voiceenv vps - Force VPS mode
+        - !voiceenv local - Force local mode
+        - !voiceenv auto - Re-detect environment
+        """
+        if not hasattr(self.bot, 'voice_connection_manager') or not self.bot.voice_connection_manager:
+            embed = create_warning_embed(
+                title="Voice Manager Unavailable",
+                description="Voice connection manager is not initialized",
+            )
+            await ctx.send(embed=embed)
+            return
+        
+        voice_manager = self.bot.voice_connection_manager
+        
+        # Show current environment if no argument
+        if environment is None:
+            current_env = voice_manager.environment.value
+            env_emoji = {
+                'local': '💻',
+                'docker': '🐳',
+                'vps': '☁️'
+            }.get(current_env, '❓')
+            
+            embed = create_embed(
+                title=f"{env_emoji} Voice Environment: {current_env.upper()}",
+                description="Current voice connection environment configuration",
+                color=discord.Color.blue()
+            )
+            
+            # Add detection info
+            embed.add_field(
+                name="🔍 Detection Method",
+                value="Automatic detection based on:\n"
+                "• Docker container presence\n"
+                "• Environment variables\n"
+                "• Network configuration\n"
+                "• System indicators",
+                inline=False
+            )
+            
+            # Add current configuration
+            embed.add_field(
+                name="⚙️ Current Settings",
+                value=f"**Max Retries:** {voice_manager.max_retry_attempts}\n"
+                f"**Base Delay:** {voice_manager.base_retry_delay}s\n"
+                f"**Max Delay:** {voice_manager.max_retry_delay}s\n"
+                f"**Connection Timeout:** {voice_manager.connection_timeout}s\n"
+                f"**Session Timeout:** {voice_manager.session_timeout}s\n"
+                f"**Circuit Breaker Threshold:** {voice_manager.circuit_breaker_threshold}",
+                inline=True
+            )
+            
+            # Add usage info
+            embed.add_field(
+                name="💡 Usage",
+                value="To change environment:\n"
+                "`!voiceenv vps` - Force VPS mode\n"
+                "`!voiceenv local` - Force local mode\n"
+                "`!voiceenv auto` - Re-detect environment",
+                inline=True
+            )
+            
+            await ctx.send(embed=embed)
+            return
+        
+        # Handle environment changes
+        environment = environment.lower()
+        
+        if environment == "auto":
+            # Re-detect environment
+            old_env = voice_manager.environment.value
+            voice_manager.environment = voice_manager._detect_environment()
+            new_env = voice_manager.environment.value
+            
+            if old_env == new_env:
+                embed = create_embed(
+                    title="🔍 Environment Re-detected",
+                    description=f"Environment remains: **{new_env.upper()}**",
+                    color=discord.Color.blue()
+                )
+            else:
+                embed = create_success_embed(
+                    title="🔄 Environment Changed",
+                    description=f"Environment changed from **{old_env.upper()}** to **{new_env.upper()}**"
+                )
+                # Reconfigure based on new environment
+                voice_manager.__init__(self.bot)
+            
+            await ctx.send(embed=embed)
+            
+        elif environment in ["vps", "local", "docker"]:
+            from ...services.voice_connection_manager import DeploymentEnvironment
+            
+            old_env = voice_manager.environment.value
+            
+            # Map string to enum
+            env_map = {
+                "vps": DeploymentEnvironment.VPS,
+                "local": DeploymentEnvironment.LOCAL,
+                "docker": DeploymentEnvironment.DOCKER
+            }
+            
+            voice_manager.environment = env_map[environment]
+            
+            # Reconfigure for new environment
+            if voice_manager.environment == DeploymentEnvironment.VPS:
+                # VPS-specific configuration
+                voice_manager.max_retry_attempts = 8
+                voice_manager.base_retry_delay = 5.0
+                voice_manager.max_retry_delay = 120.0
+                voice_manager.connection_timeout = 45.0
+                voice_manager.session_timeout = 300.0
+                voice_manager.circuit_breaker_threshold = 5
+                voice_manager.circuit_breaker_timeout = 300.0
+                voice_manager.network_check_interval = 10.0
+            else:
+                # Local/Docker configuration
+                voice_manager.max_retry_attempts = 5
+                voice_manager.base_retry_delay = 2.0
+                voice_manager.max_retry_delay = 60.0
+                voice_manager.connection_timeout = 30.0
+                voice_manager.session_timeout = 180.0
+                voice_manager.circuit_breaker_threshold = 3
+                voice_manager.circuit_breaker_timeout = 180.0
+                voice_manager.network_check_interval = 5.0
+            
+            embed = create_success_embed(
+                title="✅ Environment Updated",
+                description=f"Voice environment changed from **{old_env.upper()}** to **{environment.upper()}**"
+            )
+            
+            embed.add_field(
+                name="⚙️ New Configuration",
+                value=f"**Max Retries:** {voice_manager.max_retry_attempts}\n"
+                f"**Base Delay:** {voice_manager.base_retry_delay}s\n"
+                f"**Connection Timeout:** {voice_manager.connection_timeout}s\n"
+                f"**Circuit Breaker Threshold:** {voice_manager.circuit_breaker_threshold}",
+                inline=False
+            )
+            
+            if environment == "vps":
+                embed.add_field(
+                    name="☁️ VPS Optimizations",
+                    value="• Longer retry delays\n"
+                    "• Extended connection timeout\n"
+                    "• Higher circuit breaker threshold\n"
+                    "• Network stability checks enabled\n"
+                    "• Session recreation on error 4006",
+                    inline=False
+                )
+            
+            await ctx.send(embed=embed)
+            
+        else:
+            embed = create_error_embed(
+                title="Invalid Environment",
+                description=f"Unknown environment: `{environment}`\n\n"
+                "Valid options: `vps`, `local`, `docker`, `auto`"
+            )
+            await ctx.send(embed=embed)
+
+    @commands.command(name="platform-stability", aliases=["pstatus", "stability"])
+    @is_admin()
+    async def platform_stability(self, ctx: Context[RobottyBot]) -> None:
+        """Check platform stability status and health metrics"""
+        await ctx.trigger_typing()
+        
+        try:
+            # Check if stability monitor is available
+            if not hasattr(self.bot, 'stability_monitor') or not self.bot.stability_monitor:
+                embed = create_warning_embed(
+                    title="Stability Monitor Not Available",
+                    description="Stability monitoring is not enabled or not initialized"
+                )
+                await ctx.send(embed=embed)
+                return
+                
+            # Get platform status from stability monitor
+            platform_status = await self.bot.stability_monitor.get_platform_status()
+            
+            # Check if stability mode is enabled
+            stability_enabled = self.bot.stability_monitor.enabled
+            
+            # Create embed
+            if stability_enabled:
+                embed = create_embed(
+                    title="Platform Stability Status (STABILITY MODE ACTIVE)",
+                    description="Automatic platform disabling is enabled to maintain bot stability",
+                    color=discord.Color.orange()
+                )
+            else:
+                embed = create_embed(
+                    title="Platform Stability Status",
+                    description="Platform health monitoring (stability mode disabled)",
+                    color=discord.Color.blue()
+                )
+            
+            # Add stability mode configuration
+            config_info = []
+            if stability_enabled:
+                config_info.append(f"Failure Threshold: {self.bot.stability_monitor.failure_threshold}")
+                config_info.append(f"Recovery Check: {self.bot.stability_monitor.recovery_check_interval}s")
+                config_info.append(f"Auto-disable: {'Enabled' if self.bot.stability_monitor.auto_disable else 'Disabled'}")
+                
+                embed.add_field(
+                    name="⚙️ Configuration",
+                    value="\n".join(config_info),
+                    inline=False
+                )
+            
+            # Group platforms by status
+            enabled_platforms = []
+            disabled_platforms = []
+            problematic_platforms = []
+            
+            for name, status in platform_status.items():
+                if status['is_disabled']:
+                    disabled_platforms.append((name, status))
+                elif status['is_problematic']:
+                    problematic_platforms.append((name, status))
+                else:
+                    enabled_platforms.append((name, status))
+            
+            # Add enabled platforms
+            if enabled_platforms:
+                platform_info = []
+                for name, status in enabled_platforms:
+                    fail_rate = status['failure_rate'] * 100
+                    emoji = "✅" if status['consecutive_failures'] == 0 else "⚠️"
+                    protection = "🛡️" if status['is_protected'] else ""
+                    
+                    platform_info.append(
+                        f"{emoji} **{name.title()}** {protection}\n"
+                        f"   Failures: {status['consecutive_failures']}/{self.bot.stability_monitor.failure_threshold} "
+                        f"(Rate: {fail_rate:.1f}%)"
+                    )
+                
+                embed.add_field(
+                    name="✅ Active Platforms",
+                    value="\n".join(platform_info[:5]),  # Limit to 5
+                    inline=False
+                )
+            
+            # Add disabled platforms
+            if disabled_platforms:
+                platform_info = []
+                for name, status in disabled_platforms:
+                    fail_rate = status['failure_rate'] * 100
+                    disabled_time = status.get('disabled_at', 'Unknown')
+                    
+                    # Get top failure reason
+                    top_reason = "unknown"
+                    if status['top_failure_reasons']:
+                        top_reason = list(status['top_failure_reasons'].keys())[0]
+                    
+                    platform_info.append(
+                        f"❌ **{name.title()}**\n"
+                        f"   Disabled at: {disabled_time}\n"
+                        f"   Failure rate: {fail_rate:.1f}%\n"
+                        f"   Main issue: {top_reason}"
+                    )
+                
+                embed.add_field(
+                    name="❌ Disabled Platforms",
+                    value="\n".join(platform_info),
+                    inline=False
+                )
+            
+            # Add problematic platforms (marked but not disabled)
+            if problematic_platforms:
+                platform_info = []
+                for name, status in problematic_platforms:
+                    if not status['is_disabled']:  # Only show if not already disabled
+                        fail_rate = status['failure_rate'] * 100
+                        platform_info.append(
+                            f"⚠️ **{name.title()}** (marked problematic)\n"
+                            f"   Failures: {status['consecutive_failures']}/{self.bot.stability_monitor.failure_threshold} "
+                            f"(Rate: {fail_rate:.1f}%)"
+                        )
+                
+                if platform_info:
+                    embed.add_field(
+                        name="⚠️ Problematic Platforms",
+                        value="\n".join(platform_info),
+                        inline=False
+                    )
+            
+            # Add summary statistics
+            total_platforms = len(platform_status)
+            active_count = len(enabled_platforms)
+            disabled_count = len(disabled_platforms)
+            
+            stats = [
+                f"Total Platforms: {total_platforms}",
+                f"Active: {active_count}",
+                f"Disabled: {disabled_count}",
+            ]
+            
+            embed.add_field(
+                name="📊 Summary",
+                value="\n".join(stats),
+                inline=True
+            )
+            
+            # Add recovery info if platforms are disabled
+            if disabled_platforms and stability_enabled:
+                embed.set_footer(
+                    text=f"Disabled platforms will be checked for recovery every {self.bot.stability_monitor.recovery_check_interval}s"
+                )
+            
+            await ctx.send(embed=embed)
+            
+        except Exception as e:
+            logger.error(f"Error getting platform stability status: {e}")
+            embed = create_error_embed(
+                title="Stability Check Failed",
+                description=f"Could not retrieve platform stability status: {str(e)[:100]}..."
+            )
+            await ctx.send(embed=embed)
+
+    @commands.command(name="enable-platform", aliases=["ep"])
+    @is_admin()
+    async def enable_platform(self, ctx: Context[RobottyBot], platform_name: str) -> None:
+        """Manually enable a disabled platform"""
+        try:
+            if not hasattr(self.bot, 'stability_monitor') or not self.bot.stability_monitor:
+                embed = create_error_embed(
+                    title="Stability Monitor Not Available",
+                    description="Stability monitoring is not enabled"
+                )
+                await ctx.send(embed=embed)
+                return
+            
+            platform_name = platform_name.lower()
+            
+            # Try to enable the platform
+            success = await self.bot.stability_monitor.try_enable_platform(platform_name)
+            
+            if success:
+                embed = create_success_embed(
+                    title="Platform Enabled",
+                    description=f"Successfully re-enabled **{platform_name}** platform.\n\n"
+                    "The platform will be monitored for stability."
+                )
+            else:
+                embed = create_warning_embed(
+                    title="Platform Enable Failed",
+                    description=f"Could not enable **{platform_name}**.\n\n"
+                    "Possible reasons:\n"
+                    "• Platform doesn't exist\n"
+                    "• Platform is not disabled\n"
+                    "• Not enough time has passed since disabling"
+                )
+            
+            await ctx.send(embed=embed)
+            
+        except Exception as e:
+            logger.error(f"Error enabling platform: {e}")
+            embed = create_error_embed(
+                title="Enable Failed",
+                description=f"Failed to enable platform: {str(e)[:100]}..."
             )
             await ctx.send(embed=embed)
 

@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from typing import Dict, Optional
 
@@ -20,6 +21,7 @@ from src.services.health_monitor import HealthMonitor
 from src.services.stability_monitor import StabilityMonitor
 # from src.utils.resilient_discord_client import add_resilient_connection_to_bot
 from src.utils.network_connectivity import get_connectivity_manager
+from src.services.http_session_manager import cleanup_session_manager
 
 logger = logging.getLogger(__name__)
 
@@ -148,7 +150,7 @@ class RobusttyBot(commands.Bot):
         await self.health_endpoints.start()
 
         # Initialize services
-        self.searcher = MultiPlatformSearcher(self.platform_registry, self.config)
+        self.searcher = MultiPlatformSearcher(self.platform_registry, self.config, self.stability_monitor)
 
         # Load cookies
         await self.cookie_manager.load_cookies()
@@ -287,7 +289,15 @@ class RobusttyBot(commands.Bot):
             # Clear audio players dict
             self.audio_players.clear()
 
-            # Disconnect from all voice channels
+            # Cleanup voice connection manager
+            if self.voice_connection_manager:
+                try:
+                    await self.voice_connection_manager.cleanup()
+                    logger.info("Voice connection manager cleaned up")
+                except Exception as e:
+                    logger.error(f"Error cleaning up voice connection manager: {e}")
+
+            # Disconnect from all voice channels (backup in case voice manager didn't handle all)
             for guild in self.guilds:
                 try:
                     voice_client = guild.voice_client
@@ -344,12 +354,28 @@ class RobusttyBot(commands.Bot):
                 except Exception as e:
                     logger.error(f"Error cleaning up enhanced cookie manager: {e}")
 
+            # Clean up global HTTP session manager
+            try:
+                await cleanup_session_manager()
+                logger.info("HTTP session manager cleaned up")
+            except Exception as e:
+                logger.error(f"Error cleaning up HTTP session manager: {e}")
+            
+            # Add a small delay to ensure all connections are closed
+            await asyncio.sleep(1.0)
+
             # Call parent close
             await super().close()
             logger.info("Bot shutdown completed successfully")
             
         except Exception as e:
             logger.error(f"Error during bot shutdown: {e}")
+            # Still try to cleanup session manager if not done
+            try:
+                await cleanup_session_manager()
+            except Exception as cleanup_error:
+                logger.error(f"Error in emergency session cleanup: {cleanup_error}")
+            
             # Still try to call parent close
             try:
                 await super().close()

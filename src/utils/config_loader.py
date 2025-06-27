@@ -121,6 +121,13 @@ def process_config_dict(config: Dict[str, Any]):
                     config[key] = os.environ.get(var_name, default_value)
                 else:
                     config[key] = os.environ.get(var_name, value)
+            
+            # Convert string boolean values to actual booleans
+            elif value.lower() == "true":
+                config[key] = True
+            elif value.lower() == "false":
+                config[key] = False
+                
         elif isinstance(value, list):
             for i, item in enumerate(value):
                 if (
