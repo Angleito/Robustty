@@ -15,6 +15,15 @@ else
     exit 1
 fi
 
+# Source the SSH retry wrapper for network resilience
+SSH_RETRY_SCRIPT="$(dirname "$0")/scripts/ssh-retry-wrapper.sh"
+if [[ -f "$SSH_RETRY_SCRIPT" ]]; then
+    source "$SSH_RETRY_SCRIPT"
+    log INFO "✅ SSH retry wrapper loaded for network resilience"
+else
+    log WARN "SSH retry wrapper not found - SSH commands will run without retry logic"
+fi
+
 # Configuration
 VPS_HOST="${1:-your-vps-ip}"
 VPS_USER="${2:-ubuntu}"
@@ -50,14 +59,15 @@ validate_inputs() {
         exit 1
     fi
     
-    # Test SSH connectivity
+    # Test SSH connectivity with retry logic
     log INFO "Testing SSH connectivity to $VPS_USER@$VPS_HOST..."
-    if ! ssh -o ConnectTimeout=10 -o BatchMode=yes "$VPS_USER@$VPS_HOST" "echo 'SSH connection successful'" 2>/dev/null; then
-        log ERROR "Cannot connect to VPS via SSH. Please check:"
+    if ! ssh_retry -o ConnectTimeout=10 -o BatchMode=yes "$VPS_USER@$VPS_HOST" "echo 'SSH connection successful'" 2>/dev/null; then
+        log ERROR "Cannot connect to VPS via SSH after multiple retries. Please check:"
         echo "  - VPS IP/hostname: $VPS_HOST"
         echo "  - Username: $VPS_USER"
         echo "  - SSH key authentication is set up"
         echo "  - VPS firewall allows SSH on port 22"
+        echo "  - Network connectivity and potential rate limiting"
         exit 1
     fi
     log INFO "✅ SSH connectivity confirmed"

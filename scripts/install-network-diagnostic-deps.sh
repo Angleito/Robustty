@@ -1,8 +1,8 @@
 #!/bin/bash
-"""
-Install dependencies for network diagnostic script.
-This script installs the Python packages needed for comprehensive network testing.
-"""
+#
+# Install dependencies for network diagnostic script.
+# This script installs the Python packages needed for comprehensive network testing.
+#
 
 echo "Installing network diagnostic dependencies..."
 

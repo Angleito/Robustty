@@ -1,16 +1,16 @@
-"""Comprehensive tests for PeerTube platform implementation."""
+"""Comprehensive tests for PeerTube platform implementation with resilience features."""
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from aiohttp import ClientSession
 
-from src.platforms.peertube import PeerTubePlatform
+from src.platforms.peertube import PeerTubePlatform, InstanceHealthTracker
 from src.platforms.peertube_types import SearchData, VideoInfo
 
 
 class TestPeerTubePlatform:
-    """Test suite for PeerTube platform implementation."""
+    """Test suite for PeerTube platform implementation with resilience features."""
 
     @pytest.fixture
     def config(self):
@@ -24,7 +24,7 @@ class TestPeerTubePlatform:
     @pytest.fixture
     def platform(self, config):
         """Create a PeerTube platform instance."""
-        return PeerTubePlatform(config)
+        return PeerTubePlatform("peertube", config)
 
     @pytest.fixture
     def mock_video_info(self) -> VideoInfo:
@@ -76,6 +76,7 @@ class TestPeerTubePlatform:
         assert platform.instances == config["instances"]
         assert platform.max_results_per_instance == config["max_results_per_instance"]
         assert platform.url_pattern is not None
+        assert isinstance(platform.health_tracker, InstanceHealthTracker)
 
     @pytest.mark.asyncio
     async def test_search_videos_success(
@@ -84,24 +85,25 @@ class TestPeerTubePlatform:
         """Test successful video search across instances."""
         platform.instances = ["https://peertube.example.com"]  # Use only one instance for simpler testing
 
+        # Mock the safe_aiohttp_request function
         mock_response = AsyncMock()
         mock_response.status = 200
         mock_response.json = AsyncMock(return_value=mock_search_response)
 
-        mock_context = AsyncMock()
-        mock_context.__aenter__ = AsyncMock(return_value=mock_response)
-        mock_context.__aexit__ = AsyncMock()
-
         platform.session = MagicMock(spec=ClientSession)
-        platform.session.get = MagicMock(return_value=mock_context)
+        
+        # Mock the cache methods
+        platform.get_cached_search_results = AsyncMock(return_value=None)
+        platform.cache_search_results = AsyncMock()
+        
+        with patch('src.platforms.peertube.safe_aiohttp_request', return_value=mock_response):
+            results = await platform.search_videos("test query", max_results=10)
 
-        results = await platform.search_videos("test query", max_results=10)
-
-        assert len(results) == 1
-        assert results[0]["id"] == mock_video_info["uuid"]
-        assert results[0]["title"] == mock_video_info["name"]
-        assert results[0]["channel"] == "Test Channel"
-        assert results[0]["platform"] == "peertube"
+            assert len(results) == 1
+            assert results[0]["id"] == mock_video_info["uuid"]
+            assert results[0]["title"] == mock_video_info["name"]
+            assert results[0]["channel"] == "Test Channel"
+            assert results[0]["platform"] == "peertube"
 
     @pytest.mark.asyncio
     async def test_search_videos_no_instances(self, platform):
@@ -116,15 +118,13 @@ class TestPeerTubePlatform:
         mock_response = AsyncMock()
         mock_response.status = 403
 
-        mock_context = AsyncMock()
-        mock_context.__aenter__ = AsyncMock(return_value=mock_response)
-        mock_context.__aexit__ = AsyncMock()
-
         platform.session = MagicMock(spec=ClientSession)
-        platform.session.get = MagicMock(return_value=mock_context)
-
-        results = await platform.search_videos("test query")
-        assert results == []
+        platform.get_cached_search_results = AsyncMock(return_value=None)
+        platform.cache_search_results = AsyncMock()
+        
+        with patch('src.platforms.peertube.safe_aiohttp_request', return_value=mock_response):
+            results = await platform.search_videos("test query")
+            assert results == []
 
     @pytest.mark.asyncio
     async def test_search_videos_general_error(self, platform):
@@ -132,24 +132,30 @@ class TestPeerTubePlatform:
         mock_response = AsyncMock()
         mock_response.status = 500
 
-        mock_context = AsyncMock()
-        mock_context.__aenter__ = AsyncMock(return_value=mock_response)
-        mock_context.__aexit__ = AsyncMock()
-
         platform.session = MagicMock(spec=ClientSession)
-        platform.session.get = MagicMock(return_value=mock_context)
-
-        results = await platform.search_videos("test query")
-        assert results == []
+        platform.get_cached_search_results = AsyncMock(return_value=None)
+        platform.cache_search_results = AsyncMock()
+        
+        # Mock the safe_aiohttp_request to raise an exception for 500 errors
+        from src.platforms.peertube import PeerTubeInstanceUnavailableError
+        
+        with patch('src.platforms.peertube.safe_aiohttp_request', side_effect=PeerTubeInstanceUnavailableError("Server error", instance="https://peertube.example.com")):
+            results = await platform.search_videos("test query")
+            assert results == []
 
     @pytest.mark.asyncio
     async def test_search_videos_exception_handling(self, platform):
         """Test search exception handling."""
         platform.session = MagicMock(spec=ClientSession)
-        platform.session.get = MagicMock(side_effect=Exception("Network error"))
-
-        results = await platform.search_videos("test query")
-        assert results == []
+        platform.get_cached_search_results = AsyncMock(return_value=None)
+        platform.cache_search_results = AsyncMock()
+        
+        # Mock safe_aiohttp_request to raise a connection error
+        from src.platforms.peertube import PeerTubeConnectionError
+        
+        with patch('src.platforms.peertube.safe_aiohttp_request', side_effect=PeerTubeConnectionError("Network error")):
+            results = await platform.search_videos("test query")
+            assert results == []
 
     @pytest.mark.asyncio
     async def test_get_video_details_success(self, platform, mock_video_info):
@@ -266,7 +272,7 @@ class TestPeerTubePlatform:
     async def test_session_not_initialized(self, platform):
         """Test error handling when session is not initialized."""
         platform.session = None
-        results = await platform._search_instance("https://peertube.example.com", "test", 5)
+        results = await platform._search_instance_with_resilience("https://peertube.example.com", "test", 5)
         assert results == []
 
     @pytest.mark.asyncio
@@ -293,19 +299,17 @@ class TestPeerTubePlatform:
         mock_response.status = 200
         mock_response.json = AsyncMock(return_value=multi_search_response)
 
-        mock_context = AsyncMock()
-        mock_context.__aenter__ = AsyncMock(return_value=mock_response)
-        mock_context.__aexit__ = AsyncMock()
-
         platform.session = MagicMock(spec=ClientSession)
-        platform.session.get = MagicMock(return_value=mock_context)
+        platform.get_cached_search_results = AsyncMock(return_value=None)
+        platform.cache_search_results = AsyncMock()
+        
+        with patch('src.platforms.peertube.safe_aiohttp_request', return_value=mock_response):
+            results = await platform.search_videos("test query", max_results=3)
 
-        results = await platform.search_videos("test query", max_results=3)
-
-        # Should be sorted by views descending
-        assert results[0]["id"] == "video2"  # 500 views
-        assert results[1]["id"] == "video3"  # 300 views
-        assert results[2]["id"] == "video1"  # 100 views
+            # Should be sorted by views descending
+            assert results[0]["id"] == "video2"  # 500 views
+            assert results[1]["id"] == "video3"  # 300 views
+            assert results[2]["id"] == "video1"  # 100 views
 
     @pytest.mark.asyncio
     async def test_channel_name_fallback(self, platform, mock_video_info):
@@ -317,13 +321,185 @@ class TestPeerTubePlatform:
         mock_response.status = 200
         mock_response.json = AsyncMock(return_value={"data": [mock_video_info_no_channel], "total": 1})
 
-        mock_context = AsyncMock()
-        mock_context.__aenter__ = AsyncMock(return_value=mock_response)
-        mock_context.__aexit__ = AsyncMock()
-
         platform.session = MagicMock(spec=ClientSession)
-        platform.session.get = MagicMock(return_value=mock_context)
+        platform.get_cached_search_results = AsyncMock(return_value=None)
+        platform.cache_search_results = AsyncMock()
+        
+        with patch('src.platforms.peertube.safe_aiohttp_request', return_value=mock_response):
+            results = await platform.search_videos("test query")
 
-        results = await platform.search_videos("test query")
+            assert results[0]["channel"] == "Unknown"
 
-        assert results[0]["channel"] == "Unknown"
+    @pytest.mark.asyncio
+    async def test_instance_health_tracking(self, platform):
+        """Test instance health tracking functionality."""
+        tracker = platform.health_tracker
+        
+        # Initially all instances should be healthy
+        assert tracker.is_instance_healthy("https://test.com")
+        
+        # Record a failure
+        tracker.record_failure("https://test.com", "connection")
+        assert tracker.consecutive_failures["https://test.com"] == 1
+        assert tracker.is_instance_healthy("https://test.com")  # Still healthy after 1 failure
+        
+        # Record more failures to mark as unhealthy
+        tracker.record_failure("https://test.com", "timeout")
+        tracker.record_failure("https://test.com", "timeout")
+        
+        assert tracker.consecutive_failures["https://test.com"] == 3
+        assert "https://test.com" in tracker.unhealthy_instances
+        
+        # Record success to recover
+        tracker.record_success("https://test.com")
+        assert "https://test.com" not in tracker.unhealthy_instances
+        assert tracker.consecutive_failures["https://test.com"] == 0
+
+    @pytest.mark.asyncio
+    async def test_error_classification(self, platform):
+        """Test error classification for health tracking."""
+        from src.platforms.peertube import (
+            PeerTubeTimeoutError, 
+            PeerTubeDNSError, 
+            PeerTubeConnectionError,
+            PeerTubeInstanceUnavailableError
+        )
+        from src.platforms.errors import PlatformRateLimitError
+        
+        # Test timeout error classification
+        timeout_error = PeerTubeTimeoutError("Timeout")
+        assert platform._classify_error(timeout_error) == "timeout"
+        
+        # Test DNS error classification
+        dns_error = PeerTubeDNSError("DNS failed")
+        assert platform._classify_error(dns_error) == "dns"
+        
+        # Test connection error classification
+        conn_error = PeerTubeConnectionError("Connection failed")
+        assert platform._classify_error(conn_error) == "connection"
+        
+        # Test rate limit error classification
+        rate_error = PlatformRateLimitError("Rate limited")
+        assert platform._classify_error(rate_error) == "rate_limit"
+        
+        # Test instance unavailable error classification
+        unavailable_error = PeerTubeInstanceUnavailableError("Unavailable", instance="test")
+        assert platform._classify_error(unavailable_error) == "instance_unavailable"
+        
+        # Test unknown error classification
+        unknown_error = Exception("Unknown")
+        assert platform._classify_error(unknown_error) == "unknown"
+
+    @pytest.mark.asyncio
+    async def test_healthy_instance_filtering(self, platform):
+        """Test filtering of healthy instances before search."""
+        instances = ["https://good.com", "https://bad.com", "https://ugly.com"]
+        platform.instances = instances
+        
+        # Mark one instance as unhealthy
+        for _ in range(3):
+            platform.health_tracker.record_failure("https://bad.com", "connection")
+        
+        # Get healthy instances
+        healthy = platform.health_tracker.get_healthy_instances(instances)
+        assert len(healthy) == 2
+        assert "https://bad.com" not in healthy
+        assert "https://good.com" in healthy
+        assert "https://ugly.com" in healthy
+
+    @pytest.mark.asyncio
+    async def test_search_with_mixed_instance_health(self, platform, mock_search_response):
+        """Test search behavior when some instances are unhealthy."""
+        platform.instances = ["https://good.com", "https://bad.com"]
+        
+        # Mark one instance as unhealthy
+        for _ in range(3):
+            platform.health_tracker.record_failure("https://bad.com", "connection")
+        
+        # Mock successful response from good instance
+        mock_response = AsyncMock()
+        mock_response.status = 200
+        mock_response.json = AsyncMock(return_value=mock_search_response)
+        
+        platform.session = MagicMock(spec=ClientSession)
+        platform.get_cached_search_results = AsyncMock(return_value=None)
+        platform.cache_search_results = AsyncMock()
+        
+        with patch('src.platforms.peertube.safe_aiohttp_request', return_value=mock_response):
+            results = await platform.search_videos("test query")
+            
+            # Should get results from the healthy instance
+            assert len(results) >= 1
+            
+            # Should have attempted to call cache methods
+            platform.get_cached_search_results.assert_called_once()
+            platform.cache_search_results.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_dns_error_handling(self, platform):
+        """Test handling of DNS resolution errors."""
+        from src.platforms.peertube import PeerTubeDNSError
+        import aiohttp
+        
+        platform.session = MagicMock(spec=ClientSession)
+        platform.get_cached_search_results = AsyncMock(return_value=None)
+        
+        # Simulate DNS error
+        dns_error = aiohttp.ClientConnectorError(None, OSError("Name or service not known"))
+        
+        with patch('src.platforms.peertube.safe_aiohttp_request', side_effect=dns_error):
+            results = await platform.search_videos("test query")
+            
+            # Should handle gracefully and return empty results
+            assert results == []
+
+    @pytest.mark.asyncio
+    async def test_timeout_error_handling(self, platform):
+        """Test handling of timeout errors."""
+        from src.platforms.peertube import PeerTubeTimeoutError
+        
+        platform.session = MagicMock(spec=ClientSession)
+        platform.get_cached_search_results = AsyncMock(return_value=None)
+        
+        # Simulate timeout error
+        with patch('src.platforms.peertube.safe_aiohttp_request', side_effect=asyncio.TimeoutError()):
+            results = await platform.search_videos("test query")
+            
+            # Should handle gracefully and return empty results
+            assert results == []
+
+    @pytest.mark.asyncio
+    async def test_get_health_status(self, platform):
+        """Test getting health status of all instances."""
+        # Record some health data
+        platform.health_tracker.record_success("https://good.com")
+        platform.health_tracker.record_failure("https://bad.com", "timeout")
+        
+        health_status = platform.get_health_status()
+        
+        assert health_status["platform"] == "PeerTube"
+        assert health_status["total_instances"] == len(platform.instances)
+        assert "instance_health" in health_status
+        assert "circuit_breakers" in health_status
+
+    def test_new_error_types(self):
+        """Test that new error types are properly defined."""
+        from src.platforms.peertube import (
+            PeerTubeConnectionError,
+            PeerTubeInstanceUnavailableError,
+            PeerTubeDNSError,
+            PeerTubeTimeoutError
+        )
+        
+        # Test error instantiation
+        conn_error = PeerTubeConnectionError("Connection failed")
+        assert str(conn_error) == "Connection failed"
+        
+        instance_error = PeerTubeInstanceUnavailableError("Server error", instance="test.com")
+        assert instance_error.instance == "test.com"
+        
+        dns_error = PeerTubeDNSError("DNS failed")
+        assert str(dns_error) == "DNS failed"
+        
+        timeout_error = PeerTubeTimeoutError("Timeout")
+        assert str(timeout_error) == "Timeout"
