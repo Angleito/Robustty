@@ -37,11 +37,13 @@ logger = logging.getLogger(__name__)
 
 # Import CacheManager if it's a separate type hint
 from typing import TYPE_CHECKING
+
 if TYPE_CHECKING:
     from src.services.cache_manager import CacheManager
 
 try:
     from src.services.deduplication import CrossPlatformDeduplicator
+
     DEDUPLICATION_AVAILABLE = True
 except ImportError:
     DEDUPLICATION_AVAILABLE = False
@@ -51,30 +53,42 @@ except ImportError:
 class MultiPlatformSearcher:
     """Searches across multiple video platforms with enhanced caching and fallback strategies"""
 
-    def __init__(self, platform_registry: PlatformRegistry, config: Optional[Dict[str, Any]] = None):
+    def __init__(
+        self,
+        platform_registry: PlatformRegistry,
+        config: Optional[Dict[str, Any]] = None,
+    ):
         self.platform_registry = platform_registry
         self.status_reporter = get_status_reporter()
         self._last_search_status: Optional[MultiPlatformStatus] = None
         self.config = config or {}
-        
+
         # Enhanced cache configuration
-        cache_config = self.config.get('cache', {})
-        self.cache_first_enabled = cache_config.get('cache_first_search', True)
-        self.stale_cache_threshold_minutes = cache_config.get('stale_cache_threshold_minutes', 60)
-        self.serve_stale_on_failure = cache_config.get('serve_stale_on_failure', True)
-        self.cache_enrichment_enabled = cache_config.get('enrich_cached_results', True)
-        
+        cache_config = self.config.get("cache", {})
+        self.cache_first_enabled = cache_config.get("cache_first_search", True)
+        self.stale_cache_threshold_minutes = cache_config.get(
+            "stale_cache_threshold_minutes", 60
+        )
+        self.serve_stale_on_failure = cache_config.get("serve_stale_on_failure", True)
+        self.cache_enrichment_enabled = cache_config.get("enrich_cached_results", True)
+
         # YouTube-specific fallback configuration
-        youtube_config = self.config.get('platforms', {}).get('youtube', {})
-        self.youtube_fallback_timeout = youtube_config.get('fallback_timeout_seconds', 15)
-        self.youtube_concurrent_fallbacks = youtube_config.get('concurrent_fallbacks', False)
-        self.youtube_max_fallback_strategies = youtube_config.get('max_fallback_strategies', 3)
-        
+        youtube_config = self.config.get("platforms", {}).get("youtube", {})
+        self.youtube_fallback_timeout = youtube_config.get(
+            "fallback_timeout_seconds", 15
+        )
+        self.youtube_concurrent_fallbacks = youtube_config.get(
+            "concurrent_fallbacks", False
+        )
+        self.youtube_max_fallback_strategies = youtube_config.get(
+            "max_fallback_strategies", 3
+        )
+
         # Initialize deduplication if available
         self.deduplicator = None
         if DEDUPLICATION_AVAILABLE and config:
-            dedup_config = config.get('deduplication', {})
-            if dedup_config.get('enabled', False):
+            dedup_config = config.get("deduplication", {})
+            if dedup_config.get("enabled", False):
                 self.deduplicator = CrossPlatformDeduplicator(dedup_config)
                 logger.info("Cross-platform deduplication enabled")
 
@@ -86,7 +100,7 @@ class MultiPlatformSearcher:
         platforms = self.platform_registry.get_enabled_platforms()
         platform_reports: Dict[str, StatusReport] = {}
         cache_manager = self._get_cache_manager()
-        
+
         # Step 1: Check cache first (before anything else)
         if self.cache_first_enabled and cache_manager:
             cached_results = await self._check_all_platform_caches(query, platforms)
@@ -94,25 +108,35 @@ class MultiPlatformSearcher:
                 logger.info(f"Found cached results for query: {query}")
                 # Enrich cache results with metadata
                 if self.cache_enrichment_enabled:
-                    cached_results = await self._enrich_cache_results(cached_results, is_stale=False)
-                
+                    cached_results = await self._enrich_cache_results(
+                        cached_results, is_stale=False
+                    )
+
                 # Create cache hit reports
                 for platform_name, platform_results in cached_results.items():
                     if platform_results:
-                        platform_reports[platform_name] = StatusReport.create_search_success(
-                            platform_name,
-                            SearchMethod.CACHE_HIT,
-                            len(platform_results),
-                            "Results served from cache (fresh)"
+                        platform_reports[platform_name] = (
+                            StatusReport.create_search_success(
+                                platform_name,
+                                SearchMethod.CACHE_HIT,
+                                len(platform_results),
+                                "Results served from cache (fresh)",
+                            )
                         )
-                
+
                 # Still check for new results in background if configured
-                if self.config.get('background_refresh_cache', True):
-                    asyncio.create_task(self._background_refresh_search(query, platforms, max_results))
-                
+                if self.config.get("background_refresh_cache", True):
+                    asyncio.create_task(
+                        self._background_refresh_search(query, platforms, max_results)
+                    )
+
                 # Store status and return early
-                self._last_search_status = self.status_reporter.create_multi_platform_status(
-                    query, platform_reports, sum(len(r) for r in cached_results.values())
+                self._last_search_status = (
+                    self.status_reporter.create_multi_platform_status(
+                        query,
+                        platform_reports,
+                        sum(len(r) for r in cached_results.values()),
+                    )
                 )
                 return cached_results
 
@@ -136,31 +160,41 @@ class MultiPlatformSearcher:
             results = await self._search_for_mirrors_with_fallback(
                 video_info, max_results
             )
-            
+
             # Create status reports for URL-based search
             for platform_name, platform_results in results.items():
                 if platform_results:
-                    if platform_name == video_info['platform']:
+                    if platform_name == video_info["platform"]:
                         # Original platform - direct URL processing
-                        platform_reports[platform_name] = StatusReport.create_direct_url_success(
-                            platform_name,
-                            f"Direct URL processing successful",
-                            details={'results_count': len(platform_results)}
+                        platform_reports[platform_name] = (
+                            StatusReport.create_direct_url_success(
+                                platform_name,
+                                f"Direct URL processing successful",
+                                details={"results_count": len(platform_results)},
+                            )
                         )
                     else:
                         # Mirror search on other platforms
-                        platform_reports[platform_name] = StatusReport.create_search_success(
-                            platform_name,
-                            SearchMethod.MIRROR_SEARCH,
-                            len(platform_results),
-                            f"Mirror search successful"
+                        platform_reports[platform_name] = (
+                            StatusReport.create_search_success(
+                                platform_name,
+                                SearchMethod.MIRROR_SEARCH,
+                                len(platform_results),
+                                f"Mirror search successful",
+                            )
                         )
                 else:
-                    platform_reports[platform_name] = StatusReport.create_platform_error(
-                        platform_name,
-                        SearchMethod.MIRROR_SEARCH if platform_name != video_info['platform'] else SearchMethod.DIRECT_URL,
-                        "No results found",
-                        f"No results found for {platform_name}"
+                    platform_reports[platform_name] = (
+                        StatusReport.create_platform_error(
+                            platform_name,
+                            (
+                                SearchMethod.MIRROR_SEARCH
+                                if platform_name != video_info["platform"]
+                                else SearchMethod.DIRECT_URL
+                            ),
+                            "No results found",
+                            f"No results found for {platform_name}",
+                        )
                     )
         else:
             # Text-based search with parallel execution and fallback
@@ -187,7 +221,7 @@ class MultiPlatformSearcher:
         multi_status = self.status_reporter.create_multi_platform_status(
             query, platform_reports, total_results
         )
-        
+
         # Store the multi-platform status for later retrieval
         self._last_search_status = multi_status
 
@@ -195,35 +229,40 @@ class MultiPlatformSearcher:
         if self.deduplicator and total_results > 1:
             try:
                 dedup_result = self.deduplicator.deduplicate_search_results(results)
-                
+
                 # Reorganize deduplicated results back into platform format
                 deduplicated_by_platform = {}
                 for video in dedup_result.deduplicated_videos:
-                    platform = video.get('platform', 'unknown')
+                    platform = video.get("platform", "unknown")
                     if platform not in deduplicated_by_platform:
                         deduplicated_by_platform[platform] = []
-                    
+
                     # Remove platform tag and quality metadata before returning
-                    clean_video = {k: v for k, v in video.items() 
-                                 if not k.startswith('_') and k != 'platform'}
+                    clean_video = {
+                        k: v
+                        for k, v in video.items()
+                        if not k.startswith("_") and k != "platform"
+                    }
                     deduplicated_by_platform[platform].append(clean_video)
-                
+
                 # Log deduplication summary
-                dedup_summary = self.deduplicator.get_deduplication_summary(dedup_result)
+                dedup_summary = self.deduplicator.get_deduplication_summary(
+                    dedup_result
+                )
                 logger.info(f"Deduplication applied: {dedup_summary}")
-                
+
                 return deduplicated_by_platform
-                
+
             except Exception as e:
                 logger.warning(f"Deduplication failed, returning original results: {e}")
                 return results
 
         return results
-    
+
     def get_last_search_status(self) -> Optional[MultiPlatformStatus]:
         """Get the status of the last search operation"""
         return self._last_search_status
-    
+
     async def search_all_platforms_with_deduplication(
         self, query: str, max_results: int = 10, enable_deduplication: bool = True
     ) -> Tuple[Dict[str, List[Dict[str, Any]]], Optional[Dict[str, Any]]]:
@@ -232,37 +271,39 @@ class MultiPlatformSearcher:
         original_deduplicator = self.deduplicator
         if not enable_deduplication:
             self.deduplicator = None
-        
+
         try:
             results = await self.search_all_platforms(query, max_results)
-            
+
             # If deduplication was applied, get the summary
             dedup_info = None
             if self.deduplicator and enable_deduplication:
                 # Run deduplication again to get detailed info
                 dedup_result = self.deduplicator.deduplicate_search_results(results)
                 dedup_info = {
-                    'summary': self.deduplicator.get_deduplication_summary(dedup_result),
-                    'stats': dedup_result.deduplication_stats,
-                    'duplicate_groups_count': len(dedup_result.duplicate_groups),
-                    'removed_count': len(dedup_result.removed_duplicates)
+                    "summary": self.deduplicator.get_deduplication_summary(
+                        dedup_result
+                    ),
+                    "stats": dedup_result.deduplication_stats,
+                    "duplicate_groups_count": len(dedup_result.duplicate_groups),
+                    "removed_count": len(dedup_result.removed_duplicates),
                 }
-            
+
             return results, dedup_info
-            
+
         finally:
             # Restore original deduplicator
             self.deduplicator = original_deduplicator
-    
+
     def configure_deduplication(self, config: Dict[str, Any]):
         """Update deduplication configuration"""
         if self.deduplicator:
             self.deduplicator.update_config(config)
             logger.info("Deduplication configuration updated")
-        elif DEDUPLICATION_AVAILABLE and config.get('enabled', False):
+        elif DEDUPLICATION_AVAILABLE and config.get("enabled", False):
             self.deduplicator = CrossPlatformDeduplicator(config)
             logger.info("Deduplication enabled with new configuration")
-    
+
     def get_deduplication_config(self) -> Optional[Dict[str, Any]]:
         """Get current deduplication configuration"""
         if self.deduplicator:
@@ -282,61 +323,77 @@ class MultiPlatformSearcher:
         """Search on a specific platform with enhanced error handling and fallback"""
         start_time = time.time()
         prioritization_manager = get_prioritization_manager()
-        
+
         # Special handling for YouTube with full fallback chain
-        if platform.name.lower() == 'youtube':
-            return await self._search_youtube_with_fallback(platform, query, max_results)
-        
+        if platform.name.lower() == "youtube":
+            return await self._search_youtube_with_fallback(
+                platform, query, max_results
+            )
+
         try:
             logger.debug(f"Searching {platform.name} for: {query}")
             results = await platform.search_videos(query, max_results)
             response_time = time.time() - start_time
-            
-            logger.debug(f"{platform.name} returned {len(results)} results in {response_time:.2f}s")
-            
+
+            logger.debug(
+                f"{platform.name} returned {len(results)} results in {response_time:.2f}s"
+            )
+
             # Record successful operation for prioritization
             if prioritization_manager:
                 prioritization_manager.record_platform_operation(
                     platform.name, success=True, response_time=response_time
                 )
-            
+
             return results
 
         except PlatformRateLimitError as e:
             response_time = time.time() - start_time
             logger.warning(f"Rate limit hit on {platform.name}: {e.user_message}")
-            
+
             # Record failure for prioritization
             if prioritization_manager:
                 prioritization_manager.record_platform_operation(
-                    platform.name, success=False, response_time=response_time, error_type="rate_limit"
+                    platform.name,
+                    success=False,
+                    response_time=response_time,
+                    error_type="rate_limit",
                 )
-            
+
             # Check if we should serve stale cache
-            if await self._should_serve_stale_cache(platform.name, 'rate_limit'):
-                stale_results = await self._get_stale_cache_results(platform.name, query)
+            if await self._should_serve_stale_cache(platform.name, "rate_limit"):
+                stale_results = await self._get_stale_cache_results(
+                    platform.name, query
+                )
                 if stale_results:
                     return stale_results
-            
+
             # Don't retry rate limits, return empty results
             return []
 
         except CircuitBreakerOpenError as e:
             response_time = time.time() - start_time
             logger.warning(f"Circuit breaker open for {platform.name}: {e}")
-            
+
             # Record failure for prioritization
             if prioritization_manager:
                 prioritization_manager.record_platform_operation(
-                    platform.name, success=False, response_time=response_time, error_type="circuit_breaker"
+                    platform.name,
+                    success=False,
+                    response_time=response_time,
+                    error_type="circuit_breaker",
                 )
-            
+
             # Check if we should serve stale cache
-            if await self._should_serve_stale_cache(platform.name, 'circuit_breaker_open'):
-                stale_results = await self._get_stale_cache_results(platform.name, query)
+            if await self._should_serve_stale_cache(
+                platform.name, "circuit_breaker_open"
+            ):
+                stale_results = await self._get_stale_cache_results(
+                    platform.name, query
+                )
                 if stale_results:
                     return stale_results
-            
+
             # Service temporarily unavailable
             return []
 
@@ -345,36 +402,46 @@ class MultiPlatformSearcher:
             logger.warning(
                 f"Platform {platform.name} temporarily unavailable: {e.user_message}"
             )
-            
+
             # Record failure for prioritization
             if prioritization_manager:
                 prioritization_manager.record_platform_operation(
-                    platform.name, success=False, response_time=response_time, error_type="unavailable"
+                    platform.name,
+                    success=False,
+                    response_time=response_time,
+                    error_type="unavailable",
                 )
-            
+
             # Check if we should serve stale cache
-            if await self._should_serve_stale_cache(platform.name, 'platform_unavailable'):
-                stale_results = await self._get_stale_cache_results(platform.name, query)
+            if await self._should_serve_stale_cache(
+                platform.name, "platform_unavailable"
+            ):
+                stale_results = await self._get_stale_cache_results(
+                    platform.name, query
+                )
                 if stale_results:
                     return stale_results
-            
+
             # Platform is down, log but don't fail entire search
             return []
 
         except PlatformError as e:
             response_time = time.time() - start_time
             logger.error(f"Platform error on {platform.name}: {e.user_message}")
-            
+
             # Platform-specific error, log details for debugging
             if hasattr(e, "original_error") and e.original_error:
                 logger.debug(f"Original error: {e.original_error}")
-            
+
             # Record failure for prioritization
             if prioritization_manager:
                 prioritization_manager.record_platform_operation(
-                    platform.name, success=False, response_time=response_time, error_type="platform_error"
+                    platform.name,
+                    success=False,
+                    response_time=response_time,
+                    error_type="platform_error",
                 )
-            
+
             return []
 
         except Exception as e:
@@ -383,13 +450,16 @@ class MultiPlatformSearcher:
             import traceback
 
             logger.debug(f"Full traceback: {traceback.format_exc()}")
-            
+
             # Record failure for prioritization
             if prioritization_manager:
                 prioritization_manager.record_platform_operation(
-                    platform.name, success=False, response_time=response_time, error_type="unexpected_error"
+                    platform.name,
+                    success=False,
+                    response_time=response_time,
+                    error_type="unexpected_error",
                 )
-            
+
             return []
 
     def _extract_video_info(self, url: str) -> Optional[Dict[str, Any]]:
@@ -425,9 +495,13 @@ class MultiPlatformSearcher:
         prioritization_manager = get_prioritization_manager()
         if prioritization_manager and prioritization_manager.enabled:
             # Get dynamically prioritized platform order
-            priority_order = prioritization_manager.get_platform_priority_order(platforms)
+            priority_order = prioritization_manager.get_platform_priority_order(
+                platforms
+            )
             logger.debug(f"Using dynamic platform prioritization: {priority_order}")
-            sorted_platforms = [(name, platforms[name]) for name in priority_order if name in platforms]
+            sorted_platforms = [
+                (name, platforms[name]) for name in priority_order if name in platforms
+            ]
         else:
             # Fall back to static prioritization
             platform_priority = ["youtube", "odysee", "peertube", "rumble"]
@@ -439,7 +513,9 @@ class MultiPlatformSearcher:
                     else len(platform_priority)
                 ),
             )
-            logger.debug(f"Using static platform prioritization: {[name for name, _ in sorted_platforms]}")
+            logger.debug(
+                f"Using static platform prioritization: {[name for name, _ in sorted_platforms]}"
+            )
 
         # Execute searches with controlled concurrency
         semaphore = asyncio.Semaphore(3)  # Limit concurrent platform searches
@@ -474,7 +550,7 @@ class MultiPlatformSearcher:
                         name,
                         SearchMethod.API_SEARCH,
                         str(platform_results),
-                        f"{name} search failed: {str(platform_results)[:100]}"
+                        f"{name} search failed: {str(platform_results)[:100]}",
                     )
                 else:
                     results[name] = platform_results
@@ -483,14 +559,14 @@ class MultiPlatformSearcher:
                             name,
                             SearchMethod.API_SEARCH,
                             len(platform_results),
-                            f"Search successful - found {len(platform_results)} results"
+                            f"Search successful - found {len(platform_results)} results",
                         )
                     else:
                         platform_reports[name] = StatusReport.create_platform_error(
                             name,
                             SearchMethod.API_SEARCH,
                             "No results found",
-                            f"Search completed but no results found"
+                            f"Search completed but no results found",
                         )
 
         except asyncio.TimeoutError:
@@ -505,33 +581,37 @@ class MultiPlatformSearcher:
                         name,
                         SearchMethod.API_SEARCH,
                         "Search timeout",
-                        f"{name} search timed out"
+                        f"{name} search timed out",
                     )
 
         return results, platform_reports
-    
-    def _get_cache_manager(self) -> Optional['CacheManager']:
+
+    def _get_cache_manager(self) -> Optional["CacheManager"]:
         """Get cache manager from platform registry or configuration"""
         # Try to get from any platform that has it
         platforms = self.platform_registry.get_all_platforms()
         for platform in platforms.values():
-            if hasattr(platform, 'cache_manager') and platform.cache_manager:
+            if hasattr(platform, "cache_manager") and platform.cache_manager:
                 return platform.cache_manager
         return None
-        
-    async def _check_all_platform_caches(self, query: str, platforms: Dict[str, VideoPlatform]) -> Dict[str, List[Dict[str, Any]]]:
+
+    async def _check_all_platform_caches(
+        self, query: str, platforms: Dict[str, VideoPlatform]
+    ) -> Dict[str, List[Dict[str, Any]]]:
         """Check cache for all platforms in parallel"""
         cache_manager = self._get_cache_manager()
         if not cache_manager:
             return {}
-            
+
         cached_results = {}
         cache_tasks = []
-        
+
         for platform_name in platforms:
-            task = asyncio.create_task(cache_manager.get_search_results(platform_name, query))
+            task = asyncio.create_task(
+                cache_manager.get_search_results(platform_name, query)
+            )
             cache_tasks.append((platform_name, task))
-        
+
         # Check all caches in parallel
         for platform_name, task in cache_tasks:
             try:
@@ -540,172 +620,208 @@ class MultiPlatformSearcher:
                     cached_results[platform_name] = results
             except Exception as e:
                 logger.debug(f"Cache check failed for {platform_name}: {e}")
-                
+
         return cached_results
-        
-    async def _enrich_cache_results(self, results: Dict[str, List[Dict[str, Any]]], is_stale: bool) -> Dict[str, List[Dict[str, Any]]]:
+
+    async def _enrich_cache_results(
+        self, results: Dict[str, List[Dict[str, Any]]], is_stale: bool
+    ) -> Dict[str, List[Dict[str, Any]]]:
         """Add cache metadata to results"""
         enriched_results = {}
-        
+
         for platform_name, platform_results in results.items():
             enriched_results[platform_name] = []
             for result in platform_results:
                 enriched_result = result.copy()
-                enriched_result['_cache_metadata'] = {
-                    'from_cache': True,
-                    'is_stale': is_stale,
-                    'cached_at': result.get('_cached_at', 'unknown')
+                enriched_result["_cache_metadata"] = {
+                    "from_cache": True,
+                    "is_stale": is_stale,
+                    "cached_at": result.get("_cached_at", "unknown"),
                 }
                 enriched_results[platform_name].append(enriched_result)
-                
+
         return enriched_results
-    
-    async def _should_serve_stale_cache(self, platform_name: str, error_type: str) -> bool:
+
+    async def _should_serve_stale_cache(
+        self, platform_name: str, error_type: str
+    ) -> bool:
         """Determine if stale cache should be served based on error type"""
         # Always serve stale cache for these error types
         critical_errors = {
-            'quota_exceeded', 'rate_limit', 'authentication_error',
-            'circuit_breaker_open', 'platform_unavailable'
+            "quota_exceeded",
+            "rate_limit",
+            "authentication_error",
+            "circuit_breaker_open",
+            "platform_unavailable",
         }
-        
+
         if error_type in critical_errors:
             return True
-            
+
         # Check platform-specific configuration
-        platform_config = self.config.get('platforms', {}).get(platform_name, {})
-        return platform_config.get('serve_stale_on_error', self.serve_stale_on_failure)
-    
-    async def _get_stale_cache_results(self, platform_name: str, query: str, max_age_minutes: Optional[int] = None) -> Optional[List[Dict[str, Any]]]:
+        platform_config = self.config.get("platforms", {}).get(platform_name, {})
+        return platform_config.get("serve_stale_on_error", self.serve_stale_on_failure)
+
+    async def _get_stale_cache_results(
+        self, platform_name: str, query: str, max_age_minutes: Optional[int] = None
+    ) -> Optional[List[Dict[str, Any]]]:
         """Get potentially stale cache results within acceptable age"""
         cache_manager = self._get_cache_manager()
         if not cache_manager:
             return None
-            
+
         max_age = max_age_minutes or self.stale_cache_threshold_minutes
-        
+
         # For now, just try to get from cache (could be enhanced with timestamp checking)
         try:
             results = await cache_manager.get_search_results(platform_name, query)
             if results:
-                logger.info(f"Serving stale cache for {platform_name} due to platform errors")
+                logger.info(
+                    f"Serving stale cache for {platform_name} due to platform errors"
+                )
                 return results
         except Exception as e:
             logger.debug(f"Failed to get stale cache for {platform_name}: {e}")
-            
+
         return None
-    
-    async def _search_youtube_with_fallback(self, platform: VideoPlatform, query: str, max_results: int) -> List[Dict[str, Any]]:
+
+    async def _search_youtube_with_fallback(
+        self, platform: VideoPlatform, query: str, max_results: int
+    ) -> List[Dict[str, Any]]:
         """Enhanced YouTube search with full fallback chain"""
         logger.info(f"Starting YouTube search with enhanced fallback for: {query}")
-        
+
         # Track which strategy succeeded
         successful_strategy = None
         error_details = {}
-        
+
         # Strategy 1: Check cache first (freshest data)
         cache_manager = self._get_cache_manager()
         if cache_manager:
             try:
-                cached_results = await cache_manager.get_search_results('youtube', query)
+                cached_results = await cache_manager.get_search_results(
+                    "youtube", query
+                )
                 if cached_results:
                     logger.info("YouTube search: Using fresh cached results")
-                    successful_strategy = 'cache'
+                    successful_strategy = "cache"
                     return cached_results
             except Exception as e:
                 logger.debug(f"Cache check failed: {e}")
-                error_details['cache'] = str(e)
-        
+                error_details["cache"] = str(e)
+
         # Strategy 2: Try normal API search
         try:
             results = await platform.search_videos(query, max_results)
             if results:
                 logger.info("YouTube search: API search successful")
-                successful_strategy = 'api'
+                successful_strategy = "api"
                 # Cache the results
                 if cache_manager:
-                    await cache_manager.set_search_results('youtube', query, results)
+                    await cache_manager.set_search_results("youtube", query, results)
                 return results
         except Exception as e:
             logger.warning(f"YouTube API search failed: {e}")
-            error_details['api'] = str(e)
-            
+            error_details["api"] = str(e)
+
             # Check if it's a quota error
-            if 'quota' in str(e).lower():
-                report_api_quota_exceeded('YouTube', 'API quota exceeded, trying fallback strategies')
-        
+            if "quota" in str(e).lower():
+                report_api_quota_exceeded(
+                    "YouTube", "API quota exceeded, trying fallback strategies"
+                )
+
         # Strategy 3: Try yt-dlp fallback (if available)
-        if hasattr(platform, '_search_with_ytdlp'):
+        if hasattr(platform, "_search_with_ytdlp"):
             try:
                 logger.info("YouTube search: Attempting yt-dlp fallback")
                 ytdlp_results = await platform._search_with_ytdlp(query, max_results)
                 if ytdlp_results:
-                    logger.info(f"YouTube search: yt-dlp fallback successful, found {len(ytdlp_results)} results")
-                    successful_strategy = 'ytdlp'
+                    logger.info(
+                        f"YouTube search: yt-dlp fallback successful, found {len(ytdlp_results)} results"
+                    )
+                    successful_strategy = "ytdlp"
                     report_fallback_success(
-                        'YouTube',
+                        "YouTube",
                         SearchMethod.YTDLP_SEARCH,
                         f"yt-dlp fallback successful after API failure",
-                        details={'results_count': len(ytdlp_results), 'errors': error_details}
+                        details={
+                            "results_count": len(ytdlp_results),
+                            "errors": error_details,
+                        },
                     )
                     # Cache the results
                     if cache_manager:
-                        await cache_manager.set_search_results('youtube', query, ytdlp_results)
+                        await cache_manager.set_search_results(
+                            "youtube", query, ytdlp_results
+                        )
                     return ytdlp_results
             except Exception as e:
                 logger.warning(f"yt-dlp fallback failed: {e}")
-                error_details['ytdlp'] = str(e)
-        
+                error_details["ytdlp"] = str(e)
+
         # Strategy 4: Try stale cache (older but still useful)
         if cache_manager and self.serve_stale_on_failure:
             try:
                 # Try to get any cached results, even if stale
-                stale_results = await self._get_stale_cache_results('youtube', query, max_age_minutes=24*60)  # Up to 24 hours old
+                stale_results = await self._get_stale_cache_results(
+                    "youtube", query, max_age_minutes=24 * 60
+                )  # Up to 24 hours old
                 if stale_results:
-                    logger.info("YouTube search: Using stale cache due to all strategies failing")
-                    successful_strategy = 'stale_cache'
+                    logger.info(
+                        "YouTube search: Using stale cache due to all strategies failing"
+                    )
+                    successful_strategy = "stale_cache"
                     # Enrich with stale metadata
                     if self.cache_enrichment_enabled:
-                        enriched_results = await self._enrich_cache_results({'youtube': stale_results}, is_stale=True)
-                        stale_results = enriched_results.get('youtube', stale_results)
-                    
+                        enriched_results = await self._enrich_cache_results(
+                            {"youtube": stale_results}, is_stale=True
+                        )
+                        stale_results = enriched_results.get("youtube", stale_results)
+
                     report_fallback_success(
-                        'YouTube',
+                        "YouTube",
                         SearchMethod.CACHE_HIT,
                         "Serving stale cache after all strategies failed",
-                        details={'is_stale': True, 'errors': error_details}
+                        details={"is_stale": True, "errors": error_details},
                     )
                     return stale_results
             except Exception as e:
                 logger.debug(f"Stale cache retrieval failed: {e}")
-                error_details['stale_cache'] = str(e)
-        
+                error_details["stale_cache"] = str(e)
+
         # All strategies failed
         logger.error(f"All YouTube search strategies failed for query: {query}")
         logger.debug(f"Error details: {error_details}")
-        
+
         report_platform_error(
-            'YouTube',
+            "YouTube",
             SearchMethod.API_SEARCH,
             "All search strategies failed",
-            f"Unable to search YouTube. Errors: {', '.join(f'{k}: {v[:50]}' for k, v in error_details.items())}"
+            f"Unable to search YouTube. Errors: {', '.join(f'{k}: {v[:50]}' for k, v in error_details.items())}",
         )
-        
+
         return []
-    
-    async def _background_refresh_search(self, query: str, platforms: Dict[str, VideoPlatform], max_results: int):
+
+    async def _background_refresh_search(
+        self, query: str, platforms: Dict[str, VideoPlatform], max_results: int
+    ):
         """Background task to refresh cached search results"""
         try:
             logger.debug(f"Starting background refresh for query: {query}")
             # Perform actual search
-            results, _ = await self._search_all_platforms_with_fallback(platforms, query, max_results)
-            
+            results, _ = await self._search_all_platforms_with_fallback(
+                platforms, query, max_results
+            )
+
             # Update cache with fresh results
             cache_manager = self._get_cache_manager()
             if cache_manager:
                 for platform_name, platform_results in results.items():
                     if platform_results:
-                        await cache_manager.set_search_results(platform_name, query, platform_results)
-                        
+                        await cache_manager.set_search_results(
+                            platform_name, query, platform_results
+                        )
+
             logger.debug(f"Background refresh completed for query: {query}")
         except Exception as e:
             logger.debug(f"Background refresh failed for query '{query}': {e}")

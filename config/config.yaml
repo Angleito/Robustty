@@ -147,6 +147,25 @@ health_monitor:
     exponential_backoff: true
     max_delay: ${MAX_RECOVERY_DELAY:300}  # seconds (5 minutes)
 
+# Cookie management for VPS deployments
+cookies:
+  vps_mode: ${VPS_MODE:true}  # Enable VPS-optimized cookie handling
+  cookie_optional_platforms: ${COOKIE_OPTIONAL_PLATFORMS:["peertube", "odysee"]}  # Platforms that work without authentication cookies
+  cookie_max_age_hours: ${COOKIE_MAX_AGE_HOURS:12}  # Default maximum cookie age
+  
+  # Platform-specific cookie age thresholds (in hours)
+  platform_cookie_thresholds:
+    youtube: ${YOUTUBE_COOKIE_MAX_AGE:12}    # YouTube benefits from authenticated cookies
+    rumble: ${RUMBLE_COOKIE_MAX_AGE:24}      # Rumble can work longer without fresh cookies  
+    peertube: ${PEERTUBE_COOKIE_MAX_AGE:72}  # PeerTube instances usually don't require authentication
+    odysee: ${ODYSEE_COOKIE_MAX_AGE:48}      # Odysee can work with older cookies or no cookies
+  
+  # Cookie extraction and management
+  max_retry_attempts: ${COOKIE_MAX_RETRY_ATTEMPTS:3}
+  retry_delay: ${COOKIE_RETRY_DELAY:1.0}
+  enable_fallback_mode: ${COOKIE_ENABLE_FALLBACK_MODE:true}
+  enable_health_monitoring: ${COOKIE_ENABLE_HEALTH_MONITORING:true}
+
 network:
   # DNS server fallbacks (in priority order)
   dns_servers:

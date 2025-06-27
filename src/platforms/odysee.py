@@ -71,16 +71,16 @@ class OdyseePlatform(VideoPlatform):
         super().__init__(name, config, cache_manager)
         self.api_url = config.get("api_url", "https://api.lbry.tv/api/v1")
         self.stream_url = config.get("stream_url", "https://api.lbry.tv")
-        
+
         # Enhanced timeout configuration for Odysee
         self.api_timeout = config.get("api_timeout", 30)  # Longer default timeout
         self.stream_timeout = config.get("stream_timeout", 20)
         self.search_timeout = config.get("search_timeout", 25)
-        
+
         # Connection pool settings for better reliability
         self.max_connections = config.get("max_connections", 10)
         self.max_connections_per_host = config.get("max_connections_per_host", 5)
-        
+
         # Failure tracking for adaptive behavior
         self.consecutive_failures = 0
         self.last_success_time = None
@@ -133,9 +133,13 @@ class OdyseePlatform(VideoPlatform):
 
             try:
                 # Calculate adaptive timeout based on recent failures
-                adaptive_timeout = int(self.search_timeout * self.adaptive_timeout_multiplier)
-                logger.debug(f"Odysee search timeout: {adaptive_timeout}s (multiplier: {self.adaptive_timeout_multiplier:.2f})")
-                
+                adaptive_timeout = int(
+                    self.search_timeout * self.adaptive_timeout_multiplier
+                )
+                logger.debug(
+                    f"Odysee search timeout: {adaptive_timeout}s (multiplier: {self.adaptive_timeout_multiplier:.2f})"
+                )
+
                 response = await safe_aiohttp_request(
                     self.session, "POST", url, json=params, timeout=adaptive_timeout
                 )
@@ -160,11 +164,13 @@ class OdyseePlatform(VideoPlatform):
 
             except NetworkTimeoutError as e:
                 await self._handle_network_failure("search timeout")
-                logger.warning(f"Odysee search timed out for query: {query} (timeout: {adaptive_timeout}s)")
+                logger.warning(
+                    f"Odysee search timed out for query: {query} (timeout: {adaptive_timeout}s)"
+                )
                 raise PlatformNotAvailableError(
-                    f"Odysee search timed out after {adaptive_timeout}s - service may be slow", 
+                    f"Odysee search timed out after {adaptive_timeout}s - service may be slow",
                     platform="Odysee",
-                    original_error=e
+                    original_error=e,
                 )
             except aiohttp.ClientConnectionError as e:
                 await self._handle_network_failure("connection error")
@@ -254,7 +260,7 @@ class OdyseePlatform(VideoPlatform):
             )
             # Record successful operation
             await self._handle_network_success()
-            
+
             # Cache the results
             await self.cache_search_results(query, results)
             return results
@@ -334,9 +340,11 @@ class OdyseePlatform(VideoPlatform):
 
             try:
                 # Use adaptive timeout for metadata requests
-                adaptive_timeout = int(self.api_timeout * self.adaptive_timeout_multiplier)
+                adaptive_timeout = int(
+                    self.api_timeout * self.adaptive_timeout_multiplier
+                )
                 logger.debug(f"Odysee metadata timeout: {adaptive_timeout}s")
-                
+
                 response = await safe_aiohttp_request(
                     self.session, "POST", url, json=params, timeout=adaptive_timeout
                 )
@@ -369,7 +377,9 @@ class OdyseePlatform(VideoPlatform):
 
             except NetworkTimeoutError as e:
                 await self._handle_network_failure("metadata timeout")
-                logger.warning(f"Odysee video details timed out for: {video_id} (timeout: {adaptive_timeout}s)")
+                logger.warning(
+                    f"Odysee video details timed out for: {video_id} (timeout: {adaptive_timeout}s)"
+                )
                 # Return basic info as fallback
                 return {
                     "id": video_id,
@@ -381,7 +391,9 @@ class OdyseePlatform(VideoPlatform):
                     "description": f"Video details unavailable - request timed out after {adaptive_timeout}s",
                 }
             except (aiohttp.ClientConnectionError, aiohttp.ServerConnectionError) as e:
-                await self._handle_network_failure(f"connection error: {type(e).__name__}")
+                await self._handle_network_failure(
+                    f"connection error: {type(e).__name__}"
+                )
                 logger.error(f"Odysee connection error getting video details: {e}")
                 # Return basic info as fallback
                 return {
@@ -490,7 +502,8 @@ class OdyseePlatform(VideoPlatform):
         retry_config=ODYSEE_RETRY_CONFIG,
         circuit_breaker_config=ODYSEE_CIRCUIT_BREAKER_CONFIG,
         service_name="odysee_stream_url",
-        exceptions=ODYSEE_RETRYABLE_ERRORS + (PlatformAPIError,),  # Include PlatformAPIError for stream URL retries
+        exceptions=ODYSEE_RETRYABLE_ERRORS
+        + (PlatformAPIError,),  # Include PlatformAPIError for stream URL retries
         exclude_exceptions=ODYSEE_NON_RETRYABLE_ERRORS,
     )
     async def get_stream_url(self, video_id: str) -> Optional[str]:
@@ -529,9 +542,13 @@ class OdyseePlatform(VideoPlatform):
             for stream_url in stream_urls:
                 try:
                     # Verify the stream URL is accessible with adaptive timeout
-                    stream_check_timeout = int(self.stream_timeout * self.adaptive_timeout_multiplier)
-                    logger.debug(f"Checking Odysee stream URL with timeout: {stream_check_timeout}s")
-                    
+                    stream_check_timeout = int(
+                        self.stream_timeout * self.adaptive_timeout_multiplier
+                    )
+                    logger.debug(
+                        f"Checking Odysee stream URL with timeout: {stream_check_timeout}s"
+                    )
+
                     response = await safe_aiohttp_request(
                         self.session, "HEAD", stream_url, timeout=stream_check_timeout
                     )
@@ -551,9 +568,14 @@ class OdyseePlatform(VideoPlatform):
                         continue
 
                 except NetworkTimeoutError as e:
-                    logger.warning(f"Timeout checking stream URL: {stream_url} (timeout: {stream_check_timeout}s)")
+                    logger.warning(
+                        f"Timeout checking stream URL: {stream_url} (timeout: {stream_check_timeout}s)"
+                    )
                     continue
-                except (aiohttp.ClientConnectionError, aiohttp.ServerConnectionError) as e:
+                except (
+                    aiohttp.ClientConnectionError,
+                    aiohttp.ServerConnectionError,
+                ) as e:
                     logger.warning(
                         f"Connection error checking stream URL {stream_url}: {e}"
                     )
@@ -695,33 +717,40 @@ class OdyseePlatform(VideoPlatform):
     async def _handle_network_success(self):
         """Handle successful network operation for adaptive behavior"""
         import time
+
         self.consecutive_failures = 0
         self.last_success_time = time.time()
-        
+
         # Gradually reduce timeout multiplier on success
         if self.adaptive_timeout_multiplier > 1.0:
-            self.adaptive_timeout_multiplier = max(1.0, self.adaptive_timeout_multiplier * 0.9)
-            logger.debug(f"Reduced Odysee timeout multiplier to {self.adaptive_timeout_multiplier:.2f}")
-    
+            self.adaptive_timeout_multiplier = max(
+                1.0, self.adaptive_timeout_multiplier * 0.9
+            )
+            logger.debug(
+                f"Reduced Odysee timeout multiplier to {self.adaptive_timeout_multiplier:.2f}"
+            )
+
     async def _handle_network_failure(self, failure_type: str):
         """Handle network failure for adaptive behavior"""
         self.consecutive_failures += 1
-        
+
         # Increase timeout multiplier on consecutive failures
         if self.consecutive_failures >= 2:
             old_multiplier = self.adaptive_timeout_multiplier
-            self.adaptive_timeout_multiplier = min(3.0, self.adaptive_timeout_multiplier * 1.2)
+            self.adaptive_timeout_multiplier = min(
+                3.0, self.adaptive_timeout_multiplier * 1.2
+            )
             if old_multiplier != self.adaptive_timeout_multiplier:
                 logger.info(
                     f"Increased Odysee timeout multiplier to {self.adaptive_timeout_multiplier:.2f} "
                     f"after {self.consecutive_failures} consecutive failures ({failure_type})"
                 )
-    
+
     async def _configure_optimized_session(self):
         """Configure aiohttp session with Odysee-specific optimizations"""
         if self.session and not self.session.closed:
             return
-            
+
         # Create optimized connector for Odysee
         connector = aiohttp.TCPConnector(
             limit=self.max_connections,
@@ -732,14 +761,14 @@ class OdyseePlatform(VideoPlatform):
             enable_cleanup_closed=True,
             force_close=False,  # Reuse connections
         )
-        
+
         # Enhanced timeout configuration
         timeout = aiohttp.ClientTimeout(
             total=None,  # No total timeout (handled per request)
             connect=10,  # Connection timeout
             sock_read=30,  # Socket read timeout
         )
-        
+
         # Custom headers for better compatibility
         headers = {
             "User-Agent": "Mozilla/5.0 (compatible; RobusttyBot/1.0; +https://github.com/robustty)",
@@ -747,16 +776,18 @@ class OdyseePlatform(VideoPlatform):
             "Accept-Encoding": "gzip, deflate",
             "Connection": "keep-alive",
         }
-        
+
         self.session = aiohttp.ClientSession(
             connector=connector,
             timeout=timeout,
             headers=headers,
             raise_for_status=False,  # Handle status codes manually
         )
-        
-        logger.debug("Configured optimized aiohttp session for Odysee with enhanced connection pooling")
-    
+
+        logger.debug(
+            "Configured optimized aiohttp session for Odysee with enhanced connection pooling"
+        )
+
     async def initialize(self):
         """Initialize platform resources with enhanced configuration"""
         await super().initialize()
@@ -770,27 +801,29 @@ class OdyseePlatform(VideoPlatform):
         """Cleanup platform resources with proper session handling"""
         if self.session and not self.session.closed:
             # Close connector first
-            if hasattr(self.session, '_connector') and self.session._connector:
+            if hasattr(self.session, "_connector") and self.session._connector:
                 await self.session._connector.close()
             # Then close session
             await self.session.close()
             # Wait a bit for cleanup
             await asyncio.sleep(0.1)
         logger.info("Cleaned up Odysee platform with optimized session closure")
-    
+
     def get_platform_status(self) -> Dict[str, Any]:
         """Get current platform status and health metrics"""
         import time
+
         current_time = time.time()
-        
+
         return {
             "platform": "odysee",
             "api_url": self.api_url,
             "consecutive_failures": self.consecutive_failures,
             "adaptive_timeout_multiplier": self.adaptive_timeout_multiplier,
             "last_success_age_seconds": (
-                current_time - self.last_success_time 
-                if self.last_success_time else None
+                current_time - self.last_success_time
+                if self.last_success_time
+                else None
             ),
             "configured_timeouts": {
                 "search": self.search_timeout,
@@ -803,7 +836,6 @@ class OdyseePlatform(VideoPlatform):
                 "stream": int(self.stream_timeout * self.adaptive_timeout_multiplier),
             },
             "session_status": (
-                "active" if self.session and not self.session.closed 
-                else "inactive"
+                "active" if self.session and not self.session.closed else "inactive"
             ),
         }

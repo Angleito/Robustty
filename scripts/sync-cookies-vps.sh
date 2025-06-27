@@ -3,6 +3,18 @@
 # Cookie Sync Script - Local to VPS
 # Run this script to sync cookies from local machine to VPS
 
+# Source the SSH retry wrapper for network resilience
+SSH_RETRY_SCRIPT="$(dirname "$0")/ssh-retry-wrapper.sh"
+if [[ -f "$SSH_RETRY_SCRIPT" ]]; then
+    source "$SSH_RETRY_SCRIPT"
+    echo "✅ SSH retry wrapper loaded for network resilience"
+else
+    echo "⚠️  SSH retry wrapper not found - using standard commands"
+    # Fallback functions if retry wrapper is not available
+    ssh_retry() { ssh "$@"; }
+    scp_retry() { scp "$@"; }
+fi
+
 VPS_HOST="${1:-your-vps-ip}"
 VPS_USER="${2:-ubuntu}"
 SYNC_INTERVAL="${3:-3600}"  # 1 hour default
@@ -30,11 +42,11 @@ sync_cookies() {
     docker-compose -f docker-compose.cookies.yml exec -T cookie-extractor cat /tmp/cookies.tar.gz > /tmp/local-cookies.tar.gz
     
     if [ $? -eq 0 ]; then
-        # Upload to VPS
-        scp /tmp/local-cookies.tar.gz $VPS_USER@$VPS_HOST:~/robustty-cookies.tar.gz
+        # Upload to VPS with retry
+        scp_retry /tmp/local-cookies.tar.gz $VPS_USER@$VPS_HOST:~/robustty-cookies.tar.gz
         
-        # Extract on VPS
-        ssh $VPS_USER@$VPS_HOST "
+        # Extract on VPS with retry
+        ssh_retry $VPS_USER@$VPS_HOST "
             cd ~/robustty-bot
             tar -xzf ~/robustty-cookies.tar.gz
             rm ~/robustty-cookies.tar.gz

@@ -55,6 +55,18 @@ class EnhancedCookieManager:
         self.cookie_max_age_hours = config.get("cookie_max_age_hours", 12)
         self.enable_health_monitoring = config.get("enable_health_monitoring", True)
         self.fallback_mode = config.get("enable_fallback_mode", True)
+        
+        # VPS mode configuration - platforms that don't require authentication cookies
+        self.vps_mode = config.get("vps_mode", True)
+        self.cookie_optional_platforms = config.get("cookie_optional_platforms", ["peertube", "odysee"])
+        
+        # Platform-specific cookie age thresholds (in hours)
+        self.platform_cookie_thresholds = config.get("platform_cookie_thresholds", {
+            "youtube": 12,  # YouTube benefits from authenticated cookies
+            "rumble": 24,   # Rumble can work longer without fresh cookies
+            "peertube": 72, # PeerTube instances usually don't require authentication
+            "odysee": 48    # Odysee can work with older cookies or no cookies
+        })
 
     async def load_cookies(self) -> Dict[str, bool]:
         """Load cookies from storage with comprehensive validation"""
@@ -89,8 +101,12 @@ class EnhancedCookieManager:
         }
 
         if not cookie_file.exists():
-            logger.info(f"No cookie file found for {platform}")
-            self.cookie_health[platform]["error"] = "File not found"
+            if platform in self.cookie_optional_platforms:
+                logger.debug(f"No cookie file found for {platform} - platform works without authentication")
+                self.cookie_health[platform]["error"] = "File not found (optional for this platform)"
+            else:
+                logger.info(f"No cookie file found for {platform}")
+                self.cookie_health[platform]["error"] = "File not found"
             return False
 
         try:
@@ -105,11 +121,19 @@ class EnhancedCookieManager:
             age_hours = file_age.total_seconds() / 3600
             self.cookie_health[platform]["file_age_hours"] = age_hours
 
-            # Warn about old cookies but don't fail completely
-            if age_hours > self.cookie_max_age_hours:
-                logger.warning(
-                    f"{platform} cookies are {age_hours:.1f} hours old (recommended max: {self.cookie_max_age_hours}h)"
-                )
+            # Warn about old cookies but don't fail completely, using platform-specific thresholds
+            platform_threshold = self.platform_cookie_thresholds.get(platform, self.cookie_max_age_hours)
+            
+            if age_hours > platform_threshold:
+                if platform in self.cookie_optional_platforms:
+                    logger.debug(
+                        f"{platform} cookies are {age_hours:.1f} hours old (max: {platform_threshold}h) - "
+                        f"platform works without authentication cookies"
+                    )
+                else:
+                    logger.warning(
+                        f"{platform} cookies are {age_hours:.1f} hours old (recommended max: {platform_threshold}h)"
+                    )
 
             # Load and validate content
             async with aiofiles.open(cookie_file, "r") as f:
@@ -234,10 +258,19 @@ class EnhancedCookieManager:
             return bool(self.cookies.get(platform))
 
         health = self.cookie_health.get(platform, {})
+        
+        # For optional platforms, consider them healthy even without cookies
+        if platform in self.cookie_optional_platforms:
+            error = health.get("error", "")
+            if "File not found (optional for this platform)" in error:
+                return True
+        
+        platform_threshold = self.platform_cookie_thresholds.get(platform, self.cookie_max_age_hours)
+        
         return (
             health.get("loaded", False)
             and not health.get("error")
-            and health.get("file_age_hours", float("inf")) <= self.cookie_max_age_hours
+            and health.get("file_age_hours", float("inf")) <= platform_threshold
         )
 
     def get_platform_health_status(self, platform: str) -> Dict:

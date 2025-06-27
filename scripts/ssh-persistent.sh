@@ -122,14 +122,47 @@ ssh_connect_persistent() {
     # Execute the connection in background
     log DEBUG "SSH command: $ssh_cmd -N -f"
     
-    # Use eval to properly handle quoted arguments
-    if eval "$ssh_cmd -N -f"; then
+    # Create temporary file for error capture
+    local error_file=$(mktemp)
+    local exit_code=0
+    
+    # Use eval to properly handle quoted arguments and capture errors
+    if ! eval "$ssh_cmd -N -f" 2>"$error_file"; then
+        exit_code=$?
+        local error_output=""
+        
+        if [[ -s "$error_file" ]]; then
+            error_output=$(cat "$error_file")
+        fi
+        
+        log ERROR "❌ Failed to establish SSH connection to $user@$host:$port (exit code: $exit_code)"
+        
+        if [[ -n "$error_output" ]]; then
+            log ERROR "Error details: $error_output"
+        fi
+        
+        # Provide specific troubleshooting based on error patterns
+        if [[ -n "$error_output" ]]; then
+            if echo "$error_output" | grep -qi "connection refused"; then
+                log ERROR "Connection refused - SSH service may not be running on port $port"
+            elif echo "$error_output" | grep -qi "host key verification failed"; then
+                log ERROR "Host key verification failed - try: ssh-keygen -R $host"
+            elif echo "$error_output" | grep -qi "permission denied"; then
+                log ERROR "Permission denied - check SSH key or password authentication"
+            elif echo "$error_output" | grep -qi "network unreachable"; then
+                log ERROR "Network unreachable - check network connectivity to $host"
+            elif echo "$error_output" | grep -qi "timeout"; then
+                log ERROR "Connection timeout - host may be down or firewall blocking"
+            fi
+        fi
+        
+        rm -f "$error_file"
+        return $exit_code
+    else
         log INFO "✅ Persistent SSH connection established to $user@$host:$port"
         log INFO "📍 Control socket: $control_path"
+        rm -f "$error_file"
         return 0
-    else
-        log ERROR "❌ Failed to establish SSH connection to $user@$host:$port"
-        return 1
     fi
 }
 

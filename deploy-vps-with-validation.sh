@@ -4,6 +4,15 @@
 
 set -e
 
+# Source the SSH retry wrapper for network resilience
+SSH_RETRY_SCRIPT="$(dirname "$0")/scripts/ssh-retry-wrapper.sh"
+if [[ -f "$SSH_RETRY_SCRIPT" ]]; then
+    source "$SSH_RETRY_SCRIPT"
+    echo "✅ SSH retry wrapper loaded for network resilience"
+else
+    echo "⚠️  SSH retry wrapper not found - SSH commands will run without retry logic"
+fi
+
 # Configuration
 VPS_HOST="${1:-your-vps-ip}"
 VPS_USER="${2:-ubuntu}"
@@ -161,14 +170,15 @@ pre_deployment_validation() {
         exit 1
     fi
     
-    # Test SSH connectivity
+    # Test SSH connectivity with retry
     log INFO "Testing SSH connectivity to $VPS_USER@$VPS_HOST..."
-    if ! ssh -o ConnectTimeout=10 -o BatchMode=yes "$VPS_USER@$VPS_HOST" "echo 'SSH connection successful'" 2>/dev/null; then
-        log ERROR "Cannot connect to VPS via SSH. Please check:"
+    if ! ssh_retry -o ConnectTimeout=10 -o BatchMode=yes "$VPS_USER@$VPS_HOST" "echo 'SSH connection successful'" 2>/dev/null; then
+        log ERROR "Cannot connect to VPS via SSH after multiple retries. Please check:"
         echo "  - VPS IP/hostname: $VPS_HOST"
         echo "  - Username: $VPS_USER"
         echo "  - SSH key authentication is set up"
         echo "  - VPS firewall allows SSH on port 22"
+        echo "  - Network connectivity and potential rate limiting"
         exit 1
     fi
     log PASS "SSH connectivity confirmed"
@@ -182,8 +192,8 @@ vps_environment_validation() {
     
     # Copy validation scripts to VPS
     log INFO "Copying validation scripts to VPS..."
-    scp scripts/validate-vps-core.sh "$VPS_USER@$VPS_HOST:/tmp/"
-    ssh "$VPS_USER@$VPS_HOST" "chmod +x /tmp/validate-vps-core.sh"
+    scp_retry scripts/validate-vps-core.sh "$VPS_USER@$VPS_HOST:/tmp/"
+    ssh_retry "$VPS_USER@$VPS_HOST" "chmod +x /tmp/validate-vps-core.sh"
     
     # Run remote validation
     log INFO "Running VPS environment validation..."

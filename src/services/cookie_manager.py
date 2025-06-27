@@ -52,6 +52,18 @@ class CookieManager:
         self.retry_delay = config.get("retry_delay", 1.0)
         self.cookie_max_age_hours = config.get("cookie_max_age_hours", 12)
         self.fallback_mode = config.get("enable_fallback_mode", True)
+        
+        # VPS mode configuration - platforms that don't require authentication cookies
+        self.vps_mode = config.get("vps_mode", True)
+        self.cookie_optional_platforms = config.get("cookie_optional_platforms", ["peertube", "odysee"])
+        
+        # Platform-specific cookie age thresholds (in hours)
+        self.platform_cookie_thresholds = config.get("platform_cookie_thresholds", {
+            "youtube": 12,  # YouTube benefits from authenticated cookies
+            "rumble": 24,   # Rumble can work longer without fresh cookies
+            "peertube": 72, # PeerTube instances usually don't require authentication
+            "odysee": 48    # Odysee can work with older cookies or no cookies
+        })
 
     async def load_cookies(self):
         """Load cookies from storage with enhanced error handling"""
@@ -74,8 +86,12 @@ class CookieManager:
         }
 
         if not cookie_file.exists():
-            logger.info(f"No cookie file found for {platform}, will use fallback mode")
-            self.cookie_status[platform]["error"] = "File not found"
+            if platform in self.cookie_optional_platforms:
+                logger.debug(f"No cookie file found for {platform} - platform works without authentication")
+                self.cookie_status[platform]["error"] = "File not found (optional for this platform)"
+            else:
+                logger.info(f"No cookie file found for {platform}, will use fallback mode")
+                self.cookie_status[platform]["error"] = "File not found"
             return False
 
         try:
@@ -85,12 +101,22 @@ class CookieManager:
             age_hours = file_age.total_seconds() / 3600
             self.cookie_status[platform]["file_age_hours"] = age_hours
 
-            # Check if cookies are too old
-            if age_hours > self.cookie_max_age_hours:
-                logger.warning(
-                    f"{platform} cookies are {age_hours:.1f} hours old (max: {self.cookie_max_age_hours}h)"
-                )
-                if not self.fallback_mode:
+            # Check if cookies are too old using platform-specific thresholds
+            platform_threshold = self.platform_cookie_thresholds.get(platform, self.cookie_max_age_hours)
+            
+            if age_hours > platform_threshold:
+                # Different warning levels based on platform criticality
+                if platform in self.cookie_optional_platforms:
+                    logger.debug(
+                        f"{platform} cookies are {age_hours:.1f} hours old (max: {platform_threshold}h) - "
+                        f"platform works without authentication cookies"
+                    )
+                else:
+                    logger.warning(
+                        f"{platform} cookies are {age_hours:.1f} hours old (max: {platform_threshold}h)"
+                    )
+                
+                if not self.fallback_mode and platform not in self.cookie_optional_platforms:
                     self.cookie_status[platform][
                         "error"
                     ] = f"Cookies too old ({age_hours:.1f}h)"
@@ -273,6 +299,13 @@ class CookieManager:
     def is_platform_healthy(self, platform: str) -> bool:
         """Check if platform cookies are healthy and available"""
         status = self.cookie_status.get(platform, {})
+        
+        # For optional platforms, consider them healthy even without cookies
+        if platform in self.cookie_optional_platforms:
+            error = status.get("error", "")
+            if "File not found (optional for this platform)" in error:
+                return True
+        
         return status.get("loaded", False) and status.get("error") is None
 
     def get_platform_status(self, platform: str) -> Dict:

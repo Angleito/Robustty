@@ -75,6 +75,31 @@ is_retryable_command() {
     esac
 }
 
+# Get detailed error description for exit codes
+get_error_description() {
+    local exit_code=$1
+    local command_type="$2"
+    
+    case $exit_code in
+        0)   echo "Success" ;;
+        1)   echo "General error (possibly network-related for $command_type)" ;;
+        2)   echo "Protocol incompatibility or misuse of shell command" ;;
+        5)   echo "Error starting client-server protocol (rsync)" ;;
+        10)  echo "Error in socket I/O (rsync)" ;;
+        11)  echo "Error in file I/O (rsync)" ;;
+        12)  echo "Error in rsync protocol data stream" ;;
+        30)  echo "Timeout in data send/receive (rsync)" ;;
+        35)  echo "Timeout waiting for daemon response (rsync)" ;;
+        124) echo "Command timeout" ;;
+        126) echo "Command invoked cannot execute (permission denied)" ;;
+        127) echo "Command not found" ;;
+        128) echo "Invalid argument to exit" ;;
+        130) echo "Script terminated by Control-C" ;;
+        255) echo "SSH connection failure or network error" ;;
+        *)   echo "Unknown error (exit code: $exit_code)" ;;
+    esac
+}
+
 # Check if exit code indicates a retryable failure
 is_retryable_error() {
     local exit_code=$1
@@ -108,7 +133,7 @@ is_retryable_error() {
     esac
 }
 
-# Enhanced retry function with exponential backoff
+# Enhanced retry function with exponential backoff and detailed error logging
 retry_with_exponential_backoff() {
     local max_retries=${1:-$DEFAULT_MAX_RETRIES}
     local base_delay=${2:-$DEFAULT_BASE_DELAY}
@@ -136,28 +161,59 @@ retry_with_exponential_backoff() {
     
     local attempt=1
     local last_exit_code=0
+    local error_log=""
+    local all_errors=""
+    
+    # Create temporary files for capturing stderr
+    local error_file=$(mktemp)
+    local debug_file=$(mktemp)
+    
+    # Cleanup function
+    cleanup_temp_files() {
+        [[ -f "$error_file" ]] && rm -f "$error_file"
+        [[ -f "$debug_file" ]] && rm -f "$debug_file"
+    }
+    
+    # Set up trap to cleanup on exit
+    trap cleanup_temp_files EXIT
     
     while [ $attempt -le $max_retries ]; do
         log INFO "Attempt $attempt/$max_retries"
         
-        # Execute the command
-        if eval "$command"; then
+        # Execute the command and capture stderr
+        if eval "$command" 2>"$error_file"; then
             log PASS "Command succeeded on attempt $attempt"
+            cleanup_temp_files
             return 0
         else
             last_exit_code=$?
-            log FAIL "Command failed on attempt $attempt (exit code: $last_exit_code)"
+            
+            # Capture error output
+            if [[ -s "$error_file" ]]; then
+                error_log=$(cat "$error_file")
+                all_errors="${all_errors}Attempt $attempt (exit $last_exit_code): ${error_log}\n"
+            else
+                all_errors="${all_errors}Attempt $attempt (exit $last_exit_code): No error output captured\n"
+            fi
+            
+            local error_desc=$(get_error_description $last_exit_code "$cmd_name")
+            log FAIL "Command failed on attempt $attempt (exit code: $last_exit_code) - $error_desc"
+            
+            # Log the actual error if available
+            if [[ -n "$error_log" ]] && [[ "$error_log" != *"No error output"* ]]; then
+                log ERROR "Error details: $(echo "$error_log" | head -n 3 | tr '\n' ' ')"
+            fi
             
             # Check if the error is retryable
             if ! is_retryable_error $last_exit_code "$command"; then
-                log ERROR "Non-retryable error detected (exit code: $last_exit_code)"
+                log ERROR "Non-retryable error detected (exit code: $last_exit_code) - $error_desc"
+                cleanup_temp_files
                 return $last_exit_code
             fi
             
             # If this was the last attempt, don't wait
             if [ $attempt -eq $max_retries ]; then
-                log ERROR "All retry attempts exhausted"
-                return $last_exit_code
+                break
             fi
             
             # Calculate delay for next attempt
@@ -171,8 +227,151 @@ retry_with_exponential_backoff() {
         fi
     done
     
-    log ERROR "Command failed after $max_retries attempts"
+    # All retries exhausted - provide comprehensive failure information
+    log ERROR "❌ Command failed after $max_retries attempts"
+    log ERROR "Final exit code: $last_exit_code - $(get_error_description $last_exit_code "$cmd_name")"
+    
+    # Display all error logs
+    echo -e "\n${RED}🔍 DETAILED ERROR LOG:${NC}"
+    echo -e "Command: $command"
+    echo -e "All attempts and errors:"
+    echo -e "$all_errors"
+    
+    # Provide next steps based on the command type and error
+    provide_next_steps "$cmd_name" "$last_exit_code" "$command" "$error_log"
+    
+    cleanup_temp_files
     return $last_exit_code
+}
+
+# Provide next steps and troubleshooting guidance when all retries fail
+provide_next_steps() {
+    local cmd_name="$1"
+    local exit_code="$2"
+    local command="$3"
+    local error_log="$4"
+    
+    echo -e "\n${YELLOW}🛠️  TROUBLESHOOTING NEXT STEPS:${NC}"
+    echo -e "Command type: $cmd_name (exit code: $exit_code)"
+    
+    case $cmd_name in
+        ssh)
+            echo -e "\n${CYAN}SSH Connection Troubleshooting:${NC}"
+            case $exit_code in
+                255)
+                    echo "• Check if the target host is reachable: ping <hostname>"
+                    echo "• Verify SSH service is running: ssh -v <user@host> (verbose mode)"
+                    echo "• Check firewall rules on target host (port 22 or custom port)"
+                    echo "• Verify SSH key permissions: chmod 600 ~/.ssh/id_rsa"
+                    echo "• Test network connectivity: telnet <hostname> <port>"
+                    ;;
+                126|127)
+                    echo "• Check if SSH client is installed: which ssh"
+                    echo "• Verify PATH includes SSH binary location"
+                    echo "• Try absolute path: /usr/bin/ssh or /usr/local/bin/ssh"
+                    ;;
+                1)
+                    echo "• Check SSH configuration: ~/.ssh/config"
+                    echo "• Verify host key in ~/.ssh/known_hosts"
+                    echo "• Try with StrictHostKeyChecking disabled: ssh -o StrictHostKeyChecking=no"
+                    echo "• Check authentication: ssh-add -l (list loaded keys)"
+                    ;;
+                *)
+                    echo "• Enable verbose SSH logging: ssh -vvv <user@host>"
+                    echo "• Check system logs: journalctl -u ssh or /var/log/auth.log"
+                    echo "• Verify DNS resolution: nslookup <hostname>"
+                    ;;
+            esac
+            
+            # Extract hostname for additional checks
+            if echo "$command" | grep -oE '[a-zA-Z0-9.-]+@[a-zA-Z0-9.-]+' > /dev/null; then
+                local connection=$(echo "$command" | grep -oE '[a-zA-Z0-9.-]+@[a-zA-Z0-9.-]+')
+                echo -e "\n${BLUE}Quick diagnostic commands to try:${NC}"
+                echo "  ping \$(echo '$connection' | cut -d@ -f2)"
+                echo "  ssh -v $connection"
+                echo "  ssh -o ConnectTimeout=10 -o BatchMode=yes $connection 'echo test'"
+            fi
+            ;;
+            
+        scp)
+            echo -e "\n${CYAN}SCP Transfer Troubleshooting:${NC}"
+            echo "• Verify source file exists and is readable"
+            echo "• Check destination directory exists and is writable"
+            echo "• Ensure sufficient disk space on destination"
+            echo "• Test basic SSH connectivity first: ssh <user@host> 'echo test'"
+            echo "• Try with verbose mode: scp -v <source> <destination>"
+            if [[ $exit_code -eq 1 ]]; then
+                echo "• Check file permissions: ls -la <source_file>"
+                echo "• Verify destination path is correct"
+            fi
+            ;;
+            
+        rsync)
+            echo -e "\n${CYAN}Rsync Synchronization Troubleshooting:${NC}"
+            case $exit_code in
+                5)
+                    echo "• Check if rsync daemon is running on remote host"
+                    echo "• Verify rsync is installed on both source and destination"
+                    echo "• Try with SSH transport: rsync -e ssh <source> <destination>"
+                    ;;
+                10|11|12)
+                    echo "• Check network stability and bandwidth"
+                    echo "• Try with smaller batch size: rsync --max-size=100M"
+                    echo "• Use compression: rsync -z for slow connections"
+                    ;;
+                30|35)
+                    echo "• Increase timeout values: rsync --timeout=300"
+                    echo "• Check for network congestion or rate limiting"
+                    echo "• Consider running during off-peak hours"
+                    ;;
+                *)
+                    echo "• Test with minimal options: rsync -v <source> <destination>"
+                    echo "• Check available disk space on destination"
+                    echo "• Verify file permissions and ownership"
+                    ;;
+            esac
+            ;;
+            
+        *)
+            echo -e "\n${CYAN}General Network Command Troubleshooting:${NC}"
+            echo "• Check network connectivity: ping 8.8.8.8"
+            echo "• Verify DNS resolution: nslookup google.com"
+            echo "• Test with different network interface or connection"
+            echo "• Check for proxy or firewall interference"
+            ;;
+    esac
+    
+    # Common suggestions for all command types
+    echo -e "\n${GREEN}General Recovery Options:${NC}"
+    echo "• Wait and try again later (temporary network issues)"
+    echo "• Try from a different network location"
+    echo "• Contact system administrator if persistent"
+    echo "• Check system resources: df -h, free -m, top"
+    
+    # If error log contains specific patterns, provide targeted advice
+    if [[ -n "$error_log" ]]; then
+        echo -e "\n${YELLOW}Specific Error Analysis:${NC}"
+        
+        if echo "$error_log" | grep -qi "connection refused"; then
+            echo "• 'Connection refused' - Service not running or wrong port"
+            echo "• Check if SSH daemon is active: systemctl status ssh"
+        elif echo "$error_log" | grep -qi "host key verification failed"; then
+            echo "• 'Host key verification failed' - Remove old key: ssh-keygen -R <hostname>"
+        elif echo "$error_log" | grep -qi "permission denied"; then
+            echo "• 'Permission denied' - Check SSH key authentication or password"
+        elif echo "$error_log" | grep -qi "network is unreachable"; then
+            echo "• 'Network unreachable' - Check routing and network configuration"
+        elif echo "$error_log" | grep -qi "timeout"; then
+            echo "• 'Timeout' - Increase timeout values or check network latency"
+        elif echo "$error_log" | grep -qi "no such file"; then
+            echo "• 'No such file' - Verify source file path and permissions"
+        fi
+    fi
+    
+    echo -e "\n${BLUE}💡 For immediate retry with different parameters:${NC}"
+    echo "  SSH_MAX_RETRIES=8 SSH_BASE_DELAY=5 SSH_MAX_DELAY=120 <retry_command>"
+    echo -e "\n${BLUE}📋 To save this log for analysis:${NC}"
+    echo "  <your_command> 2>&1 | tee ssh_error_$(date +%Y%m%d_%H%M%S).log"
 }
 
 # Wrapper for SSH commands with retry

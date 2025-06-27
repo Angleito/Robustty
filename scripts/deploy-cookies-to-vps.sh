@@ -4,6 +4,18 @@
 
 set -e
 
+# Source the SSH retry wrapper for network resilience
+SSH_RETRY_SCRIPT="$(dirname "$0")/ssh-retry-wrapper.sh"
+if [[ -f "$SSH_RETRY_SCRIPT" ]]; then
+    source "$SSH_RETRY_SCRIPT"
+    echo "✅ SSH retry wrapper loaded for network resilience"
+else
+    echo "⚠️  SSH retry wrapper not found - SSH commands will run without retry logic"
+    # Fallback functions if retry wrapper is not available
+    ssh_retry() { ssh "$@"; }
+    scp_retry() { scp "$@"; }
+fi
+
 # Color output
 RED='\033[0;31m'
 GREEN='\033[0;32m'

@@ -144,14 +144,19 @@ def save_cookies_to_files(cookies: Dict[str, List[dict]]) -> None:
     
     logger.info(f"Using cookie directory: {cookie_dir}")
     
-    for platform, platform_cookies in cookies.items():
+    # Ensure all platforms have cookie files (create empty ones if needed)
+    for platform in PLATFORM_DOMAINS.keys():
         output_file = cookie_dir / f'{platform}_cookies.json'
+        platform_cookies = cookies.get(platform, [])
         
         try:
             with open(output_file, 'w') as f:
                 json.dump(platform_cookies, f, indent=2)
             
-            logger.info(f"Saved {len(platform_cookies)} {platform} cookies to {output_file}")
+            if platform_cookies:
+                logger.info(f"Saved {len(platform_cookies)} {platform} cookies to {output_file}")
+            else:
+                logger.info(f"Created empty {platform} cookie file at {output_file}")
             
         except Exception as e:
             logger.error(f"Failed to save {platform} cookies: {e}")

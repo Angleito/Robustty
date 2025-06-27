@@ -82,6 +82,18 @@ class CookieHealthMonitor:
             "cookie_refresh_threshold_hours", 8
         )  # 8 hours
         self.validation_timeout = config.get("validation_timeout", 10)  # 10 seconds
+        
+        # VPS mode configuration - platforms that don't require authentication cookies
+        self.vps_mode = config.get("vps_mode", True)
+        self.cookie_optional_platforms = config.get("cookie_optional_platforms", ["peertube", "odysee"])
+        
+        # Platform-specific cookie age thresholds (in hours)
+        self.platform_cookie_thresholds = config.get("platform_cookie_thresholds", {
+            "youtube": 12,  # YouTube benefits from authenticated cookies
+            "rumble": 24,   # Rumble can work longer without fresh cookies
+            "peertube": 72, # PeerTube instances usually don't require authentication
+            "odysee": 48    # Odysee can work with older cookies or no cookies
+        })
 
         # Validation URLs for testing cookie validity
         self.validation_urls = {
@@ -153,9 +165,15 @@ class CookieHealthMonitor:
 
             if not cookie_file.exists():
                 status.is_healthy = False
-                status.validation_error = "Cookie file not found"
                 status.cookie_count = 0
-                logger.warning(f"No cookie file found for {platform}")
+                if platform in self.cookie_optional_platforms:
+                    status.validation_error = "Cookie file not found (optional for this platform)"
+                    logger.debug(f"No cookie file found for {platform} - platform works without authentication")
+                    # Mark as healthy since cookies are optional for this platform
+                    status.is_healthy = True
+                else:
+                    status.validation_error = "Cookie file not found"
+                    logger.warning(f"No cookie file found for {platform}")
                 return status
 
             # Check file age
@@ -193,18 +211,30 @@ class CookieHealthMonitor:
                 status.cookie_count = 0
                 return status
 
-            # Check if cookies are too old
-            if status.age_hours > self.cookie_max_age_hours:
-                status.is_healthy = False
-                status.validation_error = (
-                    f"Cookies too old ({status.age_hours:.1f} hours)"
-                )
-                status.needs_refresh = True
-                return status
+            # Check if cookies are too old using platform-specific thresholds
+            platform_threshold = self.platform_cookie_thresholds.get(platform, self.cookie_max_age_hours)
+            refresh_threshold = min(platform_threshold * 0.75, self.cookie_refresh_threshold_hours)
+            
+            if status.age_hours > platform_threshold:
+                if platform in self.cookie_optional_platforms:
+                    logger.debug(
+                        f"{platform} cookies are {status.age_hours:.1f} hours old (max: {platform_threshold}h) - "
+                        f"platform works without authentication cookies"
+                    )
+                    # Don't mark as unhealthy for optional platforms
+                    status.is_healthy = True
+                    status.needs_refresh = True
+                else:
+                    status.is_healthy = False
+                    status.validation_error = (
+                        f"Cookies too old ({status.age_hours:.1f} hours, max: {platform_threshold}h)"
+                    )
+                    status.needs_refresh = True
+                    return status
 
             # Check if cookies need refresh soon
             status.needs_refresh = (
-                status.age_hours > self.cookie_refresh_threshold_hours
+                status.age_hours > refresh_threshold
             )
 
             # Check cookie expiration

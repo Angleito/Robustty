@@ -147,11 +147,11 @@ validate_vps_network() {
 setup_vps_networking() {
     log INFO "🔧 Setting up VPS networking automatically..."
     
-    # Copy networking setup script to VPS
-    scp scripts/setup-vps-networking.sh "$VPS_USER@$VPS_HOST:/tmp/"
+    # Copy networking setup script to VPS with retry
+    scp_retry scripts/setup-vps-networking.sh "$VPS_USER@$VPS_HOST:/tmp/"
     
-    # Execute networking setup on VPS
-    ssh "$VPS_USER@$VPS_HOST" "
+    # Execute networking setup on VPS with retry
+    ssh_retry "$VPS_USER@$VPS_HOST" "
         chmod +x /tmp/setup-vps-networking.sh
         sudo /tmp/setup-vps-networking.sh
     "
@@ -317,8 +317,8 @@ EOF
 # Copy validation script to VPS for post-deployment validation
 if [ -f scripts/validate-vps-core.sh ]; then
     echo "📋 Copying validation tools to VPS..."
-    scp scripts/validate-vps-core.sh $VPS_USER@$VPS_HOST:~/robustty-bot/scripts/
-    ssh $VPS_USER@$VPS_HOST "chmod +x ~/robustty-bot/scripts/validate-vps-core.sh"
+    scp_retry scripts/validate-vps-core.sh $VPS_USER@$VPS_HOST:~/robustty-bot/scripts/
+    ssh_retry $VPS_USER@$VPS_HOST "chmod +x ~/robustty-bot/scripts/validate-vps-core.sh"
 fi
 
 echo "✅ VPS deployment prepared!"
