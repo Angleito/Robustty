@@ -1,10 +1,11 @@
 import asyncio
 import logging
 import time
-from typing import Any, Coroutine, Dict, List, Optional, Tuple
+from typing import Any, Coroutine, Dict, List, Optional, Tuple, TYPE_CHECKING
 
-from src.platforms.base import VideoPlatform
-from src.platforms.registry import PlatformRegistry
+if TYPE_CHECKING:
+    from src.platforms.base import 'VideoPlatform'
+    from src.platforms.registry import PlatformRegistry
 from src.platforms.errors import (
     PlatformError,
     PlatformNotAvailableError,
@@ -35,9 +36,6 @@ from src.services.platform_prioritization import get_prioritization_manager
 
 logger = logging.getLogger(__name__)
 
-# Import CacheManager if it's a separate type hint
-from typing import TYPE_CHECKING
-
 if TYPE_CHECKING:
     from src.services.cache_manager import CacheManager
     from src.services.stability_monitor import StabilityMonitor
@@ -56,7 +54,7 @@ class MultiPlatformSearcher:
 
     def __init__(
         self,
-        platform_registry: PlatformRegistry,
+        platform_registry: 'PlatformRegistry',
         config: Optional[Dict[str, Any]] = None,
         stability_monitor: Optional['StabilityMonitor'] = None,
     ):
@@ -327,7 +325,7 @@ class MultiPlatformSearcher:
         exclude_exceptions=(PlatformRateLimitError, CircuitBreakerOpenError),
     )
     async def _search_single_platform(
-        self, platform: VideoPlatform, query: str, max_results: int
+        self, platform: 'VideoPlatform', query: str, max_results: int
     ) -> List[Dict[str, Any]]:
         """Search on a specific platform with enhanced error handling and fallback"""
         start_time = time.time()
@@ -528,7 +526,7 @@ class MultiPlatformSearcher:
         }
 
     async def _search_all_platforms_with_fallback(
-        self, platforms: Dict[str, VideoPlatform], query: str, max_results: int
+        self, platforms: Dict[str, 'VideoPlatform'], query: str, max_results: int
     ) -> Tuple[Dict[str, List[Dict[str, Any]]], Dict[str, StatusReport]]:
         """Search all platforms with fallback and prioritization"""
         results: Dict[str, List[Dict[str, Any]]] = {}
@@ -563,7 +561,7 @@ class MultiPlatformSearcher:
         # Execute searches with controlled concurrency
         semaphore = asyncio.Semaphore(3)  # Limit concurrent platform searches
 
-        async def search_with_semaphore(name: str, platform: VideoPlatform):
+        async def search_with_semaphore(name: str, platform: 'VideoPlatform'):
             async with semaphore:
                 return name, await self._search_single_platform(
                     platform, query, max_results
@@ -639,7 +637,7 @@ class MultiPlatformSearcher:
         return None
 
     async def _check_all_platform_caches(
-        self, query: str, platforms: Dict[str, VideoPlatform]
+        self, query: str, platforms: Dict[str, 'VideoPlatform']
     ) -> Dict[str, List[Dict[str, Any]]]:
         """Check cache for all platforms in parallel"""
         cache_manager = self._get_cache_manager()
@@ -729,7 +727,7 @@ class MultiPlatformSearcher:
         return None
 
     async def _search_youtube_with_fallback(
-        self, platform: VideoPlatform, query: str, max_results: int
+        self, platform: 'VideoPlatform', query: str, max_results: int
     ) -> List[Dict[str, Any]]:
         """Enhanced YouTube search with full fallback chain"""
         logger.info(f"Starting YouTube search with enhanced fallback for: {query}")
@@ -846,7 +844,7 @@ class MultiPlatformSearcher:
         return []
 
     async def _background_refresh_search(
-        self, query: str, platforms: Dict[str, VideoPlatform], max_results: int
+        self, query: str, platforms: Dict[str, 'VideoPlatform'], max_results: int
     ):
         """Background task to refresh cached search results"""
         try:

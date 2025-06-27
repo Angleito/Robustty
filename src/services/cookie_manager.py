@@ -124,7 +124,7 @@ class CookieManager:
 
             # Load and validate cookie content
             async with aiofiles.open(cookie_file, "r") as f:
-                content = await f.read().strip()
+                content = (await f.read()).strip()
 
                 if not content:
                     logger.warning(f"Empty cookie file for {platform}")

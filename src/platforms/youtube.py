@@ -2641,7 +2641,6 @@ class YouTubePlatform(VideoPlatform):
                 "player_client": ["web"],
                 "skip_dash_manifest": False,
                 "geo_bypass_country": self.default_region,
-                "hl": self.interface_language,
             }
             logger.debug("Using English language preferences for search")
         else:
