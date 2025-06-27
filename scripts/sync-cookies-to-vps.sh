@@ -1,14 +1,30 @@
 #!/bin/bash
-# Cookie Sync Script - Mac to VPS
-# Extracts cookies on Mac and syncs them to VPS
+# Cookie Sync Script - Mac to VPS (with Persistent SSH)
+# Extracts cookies on Mac and syncs them to VPS using SSH multiplexing
 
 set -e
+
+# Source the SSH persistent connection manager
+SSH_PERSISTENT_SCRIPT="$(dirname "$0")/ssh-persistent.sh"
+if [[ -f "$SSH_PERSISTENT_SCRIPT" ]]; then
+    source "$SSH_PERSISTENT_SCRIPT"
+else
+    echo "Error: SSH persistent script not found at $SSH_PERSISTENT_SCRIPT"
+    exit 1
+fi
+
+# Load environment variables from .env if it exists
+if [ -f ".env" ]; then
+    set -a  # automatically export all variables
+    source .env
+    set +a  # disable automatic export
+fi
 
 # Configuration (can be overridden by environment variables)
 VPS_HOST="${VPS_HOST:-your-vps-ip}"
 VPS_USER="${VPS_USER:-root}"
 VPS_PATH="${VPS_PATH:-~/Robustty/cookies}"
-SSH_KEY="${SSH_KEY:-~/.ssh/id_rsa}"
+SSH_KEY="${SSH_KEY_PATH:-~/.ssh/yeet}"
 LOCAL_COOKIE_DIR="./cookies"
 
 # Colors for output
@@ -68,12 +84,12 @@ fi
 
 echo -e "${GREEN}📦 Found $cookie_files cookie files to sync${NC}"
 
-# Step 3: Test SSH connection
-echo -e "${BLUE}🔗 Step 2: Testing SSH connection to VPS...${NC}"
-if ssh -i "$SSH_KEY" -o ConnectTimeout=10 -o BatchMode=yes "$VPS_USER@$VPS_HOST" 'echo "SSH connection successful"'; then
-    echo -e "${GREEN}✅ SSH connection successful${NC}"
+# Step 3: Establish persistent SSH connection
+echo -e "${BLUE}🔗 Step 2: Establishing persistent SSH connection to VPS...${NC}"
+if ssh_connect_persistent "$VPS_HOST" "$VPS_USER" "22" "$SSH_KEY"; then
+    echo -e "${GREEN}✅ Persistent SSH connection established${NC}"
 else
-    echo -e "${RED}❌ SSH connection failed${NC}"
+    echo -e "${RED}❌ Failed to establish SSH connection${NC}"
     echo "Please check:"
     echo "  - VPS is running and accessible"
     echo "  - SSH key is correct and added to VPS"
@@ -83,25 +99,25 @@ fi
 
 # Step 4: Create remote directory if it doesn't exist
 echo -e "${BLUE}📁 Step 3: Ensuring remote directory exists...${NC}"
-ssh -i "$SSH_KEY" "$VPS_USER@$VPS_HOST" "mkdir -p $VPS_PATH"
+ssh_exec_persistent "$VPS_HOST" "$VPS_USER" "22" "$SSH_KEY" "mkdir -p $VPS_PATH"
 
-# Step 5: Sync cookies to VPS
-echo -e "${BLUE}🚀 Step 4: Syncing cookies to VPS...${NC}"
-if rsync -avz --progress -e "ssh -i $SSH_KEY" "$LOCAL_COOKIE_DIR/" "$VPS_USER@$VPS_HOST:$VPS_PATH/"; then
+# Step 5: Sync cookies to VPS using persistent connection
+echo -e "${BLUE}🚀 Step 4: Syncing cookies to VPS using persistent SSH...${NC}"
+if ssh_copy_persistent "to" "$VPS_HOST" "$VPS_USER" "22" "$SSH_KEY" "$LOCAL_COOKIE_DIR/" "$VPS_PATH/"; then
     echo -e "${GREEN}✅ Cookie sync completed successfully${NC}"
 else
     echo -e "${RED}❌ Cookie sync failed${NC}"
     exit 1
 fi
 
-# Step 6: Verify sync
+# Step 6: Verify sync using persistent connection
 echo -e "${BLUE}🔍 Step 5: Verifying sync...${NC}"
-remote_files=$(ssh -i "$SSH_KEY" "$VPS_USER@$VPS_HOST" "find $VPS_PATH -name '*.json' 2>/dev/null | wc -l")
+remote_files=$(ssh_exec_persistent "$VPS_HOST" "$VPS_USER" "22" "$SSH_KEY" "find $VPS_PATH -name '*.json' 2>/dev/null | wc -l")
 echo -e "${GREEN}📊 Remote VPS now has $remote_files cookie files${NC}"
 
 # Step 7: Restart VPS bot to pick up new cookies
 echo -e "${BLUE}🔄 Step 6: Restarting bot on VPS to pick up new cookies...${NC}"
-if ssh -i "$SSH_KEY" "$VPS_USER@$VPS_HOST" "cd ~/Robustty && docker-compose restart robustty"; then
+if ssh_exec_persistent "$VPS_HOST" "$VPS_USER" "22" "$SSH_KEY" "cd ~/Robustty && docker-compose restart robustty"; then
     echo -e "${GREEN}✅ VPS bot restarted successfully${NC}"
 else
     echo -e "${YELLOW}⚠️  Failed to restart VPS bot (cookies synced but bot may need manual restart)${NC}"

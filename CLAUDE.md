@@ -51,6 +51,12 @@ docker-compose down && docker-compose up -d --build  # Rebuild and restart
 # Cookie extraction logs
 docker-compose exec robustty tail -f /var/log/cron.log
 
+# macOS Cookie System (for VPS sync)
+./check-cookie-system.sh                     # Check entire cookie system status
+./scripts/sync-cookies-to-vps.sh             # Manual cookie sync to VPS
+./setup-mac-cookie-cron.sh                   # Setup automatic cookie sync cron job
+tail -f logs/cookie-sync-cron.log            # View automatic sync logs
+
 # Redis operations (using host network)
 redis-cli FLUSHALL                        # Clear cache (direct host access)
 docker-compose exec redis redis-cli info # Redis info via container

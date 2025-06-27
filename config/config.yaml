@@ -25,9 +25,10 @@ platforms:
   peertube:
     enabled: true
     instances:
-      - https://framatube.org
-      - https://video.ploud.fr
-      - https://peertube.social
+      - https://tube.tchncs.de  # German instance, usually reliable
+      - https://peertube.tv     # Main peertube instance
+      - https://framatube.org   # French instance
+      - https://video.ploud.fr  # Alternative French instance  
     max_results_per_instance: 5
 
   odysee:
@@ -35,6 +36,15 @@ platforms:
     api_url: https://api.lbry.tv/api/v1/proxy
     stream_url: https://api.lbry.tv
     max_results: 10
+    
+    # Enhanced timeout configuration for connection stability
+    api_timeout: ${ODYSEE_API_TIMEOUT:30}        # API request timeout (seconds)
+    search_timeout: ${ODYSEE_SEARCH_TIMEOUT:25}  # Search request timeout (seconds)  
+    stream_timeout: ${ODYSEE_STREAM_TIMEOUT:20}  # Stream URL check timeout (seconds)
+    
+    # Connection pool optimization
+    max_connections: ${ODYSEE_MAX_CONNECTIONS:10}              # Total connection pool size
+    max_connections_per_host: ${ODYSEE_MAX_CONNECTIONS_PER_HOST:5}  # Per-host connection limit
 
   rumble:
     enabled: ${RUMBLE_ENABLED:false}

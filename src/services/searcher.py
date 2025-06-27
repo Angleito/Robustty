@@ -510,7 +510,7 @@ class MultiPlatformSearcher:
 
         return results, platform_reports
     
-    async def _get_cache_manager(self) -> Optional['CacheManager']:
+    def _get_cache_manager(self) -> Optional['CacheManager']:
         """Get cache manager from platform registry or configuration"""
         # Try to get from any platform that has it
         platforms = self.platform_registry.get_all_platforms()
@@ -529,7 +529,7 @@ class MultiPlatformSearcher:
         cache_tasks = []
         
         for platform_name in platforms:
-            task = cache_manager.get_search_results(platform_name, query)
+            task = asyncio.create_task(cache_manager.get_search_results(platform_name, query))
             cache_tasks.append((platform_name, task))
         
         # Check all caches in parallel

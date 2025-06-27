@@ -84,24 +84,40 @@ class ConnectivityCheckResult:
 class NetworkConnectivityChecker:
     """Network connectivity checker with fallback mechanisms"""
 
-    # Default DNS servers with priorities
+    # Default DNS servers with priorities - prioritize reliable public DNS
     DEFAULT_DNS_SERVERS = [
-        DNSServer("8.8.8.8", "Google Primary", timeout=3, priority=1),
-        DNSServer("8.8.4.4", "Google Secondary", timeout=3, priority=2),
-        DNSServer("1.1.1.1", "Cloudflare Primary", timeout=3, priority=3),
-        DNSServer("1.0.0.1", "Cloudflare Secondary", timeout=3, priority=4),
-        DNSServer("208.67.222.222", "OpenDNS Primary", timeout=3, priority=5),
-        DNSServer("208.67.220.220", "OpenDNS Secondary", timeout=3, priority=6),
+        # Primary tier - fastest and most reliable
+        DNSServer("1.1.1.1", "Cloudflare Primary", timeout=3, priority=1),
+        DNSServer("8.8.8.8", "Google Primary", timeout=3, priority=2),
+        DNSServer("9.9.9.9", "Quad9 Primary", timeout=3, priority=3),
+        
+        # Secondary tier - backup for primary services
+        DNSServer("1.0.0.1", "Cloudflare Secondary", timeout=4, priority=4),
+        DNSServer("8.8.4.4", "Google Secondary", timeout=4, priority=5),
+        DNSServer("149.112.112.112", "Quad9 Secondary", timeout=4, priority=6),
+        
+        # Tertiary tier - additional fallbacks
+        DNSServer("208.67.222.222", "OpenDNS Primary", timeout=5, priority=7),
+        DNSServer("208.67.220.220", "OpenDNS Secondary", timeout=5, priority=8),
     ]
 
-    # Default Discord gateways with priorities
+    # Default Discord gateways with priorities - prioritize main gateway with regional fallbacks
     DEFAULT_DISCORD_GATEWAYS = [
-        DiscordGateway("us-west", "gateway-us-west-1.discord.gg", priority=1),
+        # Primary Discord gateway (most reliable)
+        DiscordGateway("global", "gateway.discord.gg", priority=1),
+        
+        # Regional fallbacks - main regions
         DiscordGateway("us-east", "gateway-us-east-1.discord.gg", priority=2),
-        DiscordGateway("us-central", "gateway-us-central-1.discord.gg", priority=3),
-        DiscordGateway("europe", "gateway-europe-1.discord.gg", priority=4),
-        DiscordGateway("asia", "gateway-asia-1.discord.gg", priority=5),
-        DiscordGateway("sydney", "gateway-sydney-1.discord.gg", priority=6),
+        DiscordGateway("us-west", "gateway-us-west-1.discord.gg", priority=3),
+        DiscordGateway("us-central", "gateway-us-central-1.discord.gg", priority=4),
+        
+        # International fallbacks
+        DiscordGateway("europe", "gateway-europe-1.discord.gg", priority=5),
+        DiscordGateway("asia", "gateway-asia-1.discord.gg", priority=6),
+        DiscordGateway("sydney", "gateway-sydney-1.discord.gg", priority=7),
+        
+        # Additional fallback using generic gateway
+        DiscordGateway("fallback", "gateway.discord.gg", priority=8),
     ]
 
     def __init__(self, config: Optional[Dict[str, Any]] = None):
@@ -206,48 +222,83 @@ class NetworkConnectivityChecker:
     async def check_dns_resolution(
         self, domain: str, dns_server: DNSServer
     ) -> Tuple[bool, float, Optional[str]]:
-        """Check DNS resolution with specific DNS server"""
+        """Check DNS resolution with specific DNS server with enhanced error handling"""
         start_time = time.time()
 
         try:
             resolver = dns.asyncresolver.Resolver()
             resolver.nameservers = [dns_server.address]
             resolver.timeout = dns_server.timeout
-            resolver.lifetime = dns_server.timeout
+            resolver.lifetime = dns_server.timeout * 2  # Allow more time for lifetime
+            # Configure for reliability
+            resolver.use_edns = False  # Some restrictive networks block EDNS
+            resolver.retry_servfail = True  # Retry on SERVFAIL
+            resolver.ndots = 1  # Reduce unnecessary queries
 
-            await resolver.resolve(domain, "A")
+            # Try A record first, then AAAA as fallback
+            try:
+                await resolver.resolve(domain, "A")
+            except (dns.exception.NXDOMAIN, dns.exception.NoAnswer):
+                # Try AAAA if A record fails
+                await resolver.resolve(domain, "AAAA")
+            
             response_time = time.time() - start_time
             return True, response_time, None
 
         except dns.exception.Timeout:
             response_time = time.time() - start_time
-            return False, response_time, f"DNS timeout ({dns_server.name})"
+            return False, response_time, f"DNS timeout after {dns_server.timeout}s ({dns_server.name})"
+        except dns.exception.NXDOMAIN:
+            response_time = time.time() - start_time
+            return False, response_time, f"Domain '{domain}' not found ({dns_server.name})"
+        except dns.exception.NoNameservers:
+            response_time = time.time() - start_time
+            return False, response_time, f"No nameservers available ({dns_server.name})"
+        except dns.exception.NoAnswer:
+            response_time = time.time() - start_time
+            return False, response_time, f"No answer for domain '{domain}' ({dns_server.name})"
         except Exception as e:
             response_time = time.time() - start_time
+            error_type = type(e).__name__
             return (
                 False,
                 response_time,
-                f"DNS resolution failed ({dns_server.name}): {str(e)}",
+                f"DNS resolution failed ({dns_server.name}): {error_type}: {str(e)}",
             )
 
     async def find_working_dns_server(
-        self, test_domain: str = "discord.com"
+        self, test_domains: List[str] = None
     ) -> Optional[DNSServer]:
-        """Find the first working DNS server"""
+        """Find the first working DNS server using multiple test domains"""
+        if test_domains is None:
+            test_domains = ["discord.com", "google.com", "cloudflare.com"]
+        
         for dns_server in self.dns_servers:
-            success, response_time, error = await self.check_dns_resolution(
-                test_domain, dns_server
-            )
-            if success:
+            dns_success = False
+            best_response_time = float('inf')
+            
+            # Test multiple domains to ensure DNS server is actually working
+            for test_domain in test_domains:
+                success, response_time, error = await self.check_dns_resolution(
+                    test_domain, dns_server
+                )
+                if success:
+                    dns_success = True
+                    best_response_time = min(best_response_time, response_time)
+                    break  # Found working domain, no need to test others
+                else:
+                    logger.debug(f"DNS server {dns_server.name} failed for {test_domain}: {error}")
+            
+            if dns_success:
                 logger.info(
-                    f"Using DNS server: {dns_server.name} ({dns_server.address}) - {response_time:.2f}s"
+                    f"Using DNS server: {dns_server.name} ({dns_server.address}) - {best_response_time:.2f}s"
                 )
                 self.current_dns_server = dns_server
                 return dns_server
             else:
-                logger.warning(f"DNS server {dns_server.name} failed: {error}")
+                logger.warning(f"DNS server {dns_server.name} failed for all test domains")
 
-        logger.error("No working DNS servers found")
+        logger.error("No working DNS servers found - this indicates severe network connectivity issues")
         return None
 
     async def check_endpoint_connectivity(
@@ -275,35 +326,67 @@ class NetworkConnectivityChecker:
     async def check_discord_gateway(
         self, gateway: DiscordGateway
     ) -> Tuple[bool, float, Optional[str]]:
-        """Check Discord gateway connectivity"""
+        """Check Discord gateway connectivity with enhanced error handling"""
         start_time = time.time()
 
         try:
+            # First try DNS resolution for the gateway
+            if self.current_dns_server:
+                dns_success, _, dns_error = await self.check_dns_resolution(
+                    gateway.endpoint, self.current_dns_server
+                )
+                if not dns_success:
+                    response_time = time.time() - start_time
+                    return False, response_time, f"DNS resolution failed: {dns_error}"
+            
             # Try to connect to the WebSocket gateway
             url = f"wss://{gateway.endpoint}/?v=10&encoding=json"
-            timeout = aiohttp.ClientTimeout(total=10)
+            timeout = aiohttp.ClientTimeout(total=10, connect=5)
 
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.ws_connect(url) as ws:
-                    # Wait for hello message
-                    msg = await asyncio.wait_for(ws.receive(), timeout=5)
+            async with aiohttp.ClientSession(
+                timeout=timeout,
+                connector=aiohttp.TCPConnector(limit=1, ttl_dns_cache=30)
+            ) as session:
+                try:
+                    async with session.ws_connect(
+                        url,
+                        heartbeat=30,
+                        compress=0  # Disable compression for faster connection
+                    ) as ws:
+                        # Wait for hello message with timeout
+                        msg = await asyncio.wait_for(ws.receive(), timeout=5)
+                        response_time = time.time() - start_time
+
+                        if msg.type == aiohttp.WSMsgType.TEXT:
+                            return True, response_time, None
+                        elif msg.type == aiohttp.WSMsgType.ERROR:
+                            return False, response_time, f"WebSocket error: {ws.exception()}"
+                        else:
+                            return (
+                                False,
+                                response_time,
+                                f"Unexpected message type: {msg.type}",
+                            )
+                except aiohttp.WSServerHandshakeError as e:
                     response_time = time.time() - start_time
-
-                    if msg.type == aiohttp.WSMsgType.TEXT:
-                        return True, response_time, None
-                    else:
-                        return (
-                            False,
-                            response_time,
-                            f"Unexpected message type: {msg.type}",
-                        )
+                    return False, response_time, f"WebSocket handshake failed: {e.status} {e.message}"
 
         except asyncio.TimeoutError:
             response_time = time.time() - start_time
-            return False, response_time, "Gateway connection timeout"
+            return False, response_time, f"Gateway connection timeout after 10s"
+        except aiohttp.ClientConnectorError as e:
+            response_time = time.time() - start_time
+            return False, response_time, f"Connection error: {str(e)}"
+        except OSError as e:
+            response_time = time.time() - start_time
+            # Handle "No address associated with hostname" and similar OS errors
+            if "No address associated with hostname" in str(e):
+                return False, response_time, f"DNS resolution failed for {gateway.endpoint}"
+            return False, response_time, f"Network error: {str(e)}"
         except Exception as e:
             response_time = time.time() - start_time
-            return False, response_time, str(e)
+            error_type = type(e).__name__
+            return False, response_time, f"{error_type}: {str(e)}"
 
     async def find_working_discord_gateway(self) -> Optional[DiscordGateway]:
         """Find the best working Discord gateway"""
@@ -429,19 +512,41 @@ class NetworkConnectivityChecker:
         return result
 
     async def check_basic_connectivity(self) -> bool:
-        """Quick basic connectivity check"""
+        """Quick basic connectivity check with DNS fallback"""
+        # First try using our DNS resolution system
+        if self.current_dns_server:
+            success, _, _ = await self.check_dns_resolution(
+                "discord.com", self.current_dns_server
+            )
+            if success:
+                try:
+                    # Try a quick HTTP request
+                    timeout = aiohttp.ClientTimeout(total=5, connect=3)
+                    async with aiohttp.ClientSession(timeout=timeout) as session:
+                        async with session.get(
+                            "https://discord.com/api/v10/gateway"
+                        ) as response:
+                            return response.status < 500
+                except Exception as e:
+                    logger.debug(f"HTTP check failed but DNS worked: {e}")
+                    return True  # DNS working is a good sign
+        
+        # Fallback to system DNS resolution
         try:
-            # Try to resolve Discord's domain
+            # Try to resolve Discord's domain using system DNS
             socket.gethostbyname("discord.com")
 
             # Try a quick HTTP request
-            timeout = aiohttp.ClientTimeout(total=5)
+            timeout = aiohttp.ClientTimeout(total=5, connect=3)
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.get(
                     "https://discord.com/api/v10/gateway"
                 ) as response:
                     return response.status < 500
 
+        except socket.gaierror as e:
+            logger.warning(f"DNS resolution failed in basic connectivity check: {e}")
+            return False
         except Exception as e:
             logger.warning(f"Basic connectivity check failed: {e}")
             return False

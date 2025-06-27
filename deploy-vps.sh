@@ -1,9 +1,19 @@
 #!/bin/bash
 
-# VPS Deployment Script for Robustty Discord Bot
+# VPS Deployment Script for Robustty Discord Bot (with Persistent SSH)
 # This script sets up the bot on a VPS to use cookies from a remote machine
+# Uses SSH multiplexing for efficient connection management
 
 set -e
+
+# Source the SSH persistent connection manager
+SSH_PERSISTENT_SCRIPT="$(dirname "$0")/scripts/ssh-persistent.sh"
+if [[ -f "$SSH_PERSISTENT_SCRIPT" ]]; then
+    source "$SSH_PERSISTENT_SCRIPT"
+else
+    echo "Error: SSH persistent script not found at $SSH_PERSISTENT_SCRIPT"
+    exit 1
+fi
 
 # Configuration
 VPS_HOST="${1:-your-vps-ip}"
@@ -63,7 +73,7 @@ validate_vps_network() {
     
     # Test 1: DNS resolution
     log INFO "Testing DNS resolution on VPS..."
-    if ssh "$VPS_USER@$VPS_HOST" "nslookup discord.com > /dev/null 2>&1"; then
+    if ssh_exec_persistent "$VPS_HOST" "$VPS_USER" "22" "" "nslookup discord.com > /dev/null 2>&1"; then
         log INFO "✅ DNS resolution working"
         ((network_checks_passed++))
     else
@@ -72,7 +82,7 @@ validate_vps_network() {
     
     # Test 2: Discord API connectivity
     log INFO "Testing Discord API connectivity..."
-    if ssh "$VPS_USER@$VPS_HOST" "curl -s --max-time 10 https://discord.com/api/v10/gateway > /dev/null"; then
+    if ssh_exec_persistent "$VPS_HOST" "$VPS_USER" "22" "" "curl -s --max-time 10 https://discord.com/api/v10/gateway > /dev/null"; then
         log INFO "✅ Discord API accessible"
         ((network_checks_passed++))
     else
@@ -81,7 +91,7 @@ validate_vps_network() {
     
     # Test 3: Required ports availability
     log INFO "Checking required ports..."
-    if ssh "$VPS_USER@$VPS_HOST" "! ss -tlnp | grep -q ':8080 '"; then
+    if ssh_exec_persistent "$VPS_HOST" "$VPS_USER" "22" "" "! ss -tlnp | grep -q ':8080 '"; then
         log INFO "✅ Port 8080 available for health checks"
         ((network_checks_passed++))
     else
@@ -90,7 +100,7 @@ validate_vps_network() {
     
     # Test 4: Outbound HTTPS connectivity
     log INFO "Testing outbound HTTPS connectivity..."
-    if ssh "$VPS_USER@$VPS_HOST" "curl -s --max-time 10 https://googleapis.com > /dev/null"; then
+    if ssh_exec_persistent "$VPS_HOST" "$VPS_USER" "22" "" "curl -s --max-time 10 https://googleapis.com > /dev/null"; then
         log INFO "✅ Outbound HTTPS working"
         ((network_checks_passed++))
     else
@@ -99,7 +109,7 @@ validate_vps_network() {
     
     # Test 5: Check if Docker networking will work
     log INFO "Testing Docker prerequisites..."
-    if ssh "$VPS_USER@$VPS_HOST" "ip route show | grep -q default"; then
+    if ssh_exec_persistent "$VPS_HOST" "$VPS_USER" "22" "" "ip route show | grep -q default"; then
         log INFO "✅ Default route configured"
         ((network_checks_passed++))
     else
@@ -160,36 +170,41 @@ fi
 # Validate inputs and connectivity
 validate_inputs
 
+# Establish persistent SSH connection
+log INFO "🔗 Establishing persistent SSH connection to VPS..."
+if ! ssh_connect_persistent "$VPS_HOST" "$VPS_USER" "22"; then
+    log ERROR "Failed to establish SSH connection to VPS"
+    exit 1
+fi
+
 # Perform network validation
 validate_vps_network
 
 # Create deployment directory on VPS
 echo "📁 Creating deployment directory..."
-ssh $VPS_USER@$VPS_HOST "mkdir -p ~/robustty-bot"
+ssh_exec_persistent "$VPS_HOST" "$VPS_USER" "22" "" "mkdir -p ~/robustty-bot"
 
-# Copy necessary files to VPS
-echo "📤 Copying project files..."
-rsync -av --exclude='venv' --exclude='__pycache__' --exclude='.git' --exclude='logs' \
-    --exclude='data' --exclude='cookies' \
-    ./ $VPS_USER@$VPS_HOST:~/robustty-bot/
+# Copy necessary files to VPS using persistent connection
+echo "📤 Copying project files using persistent SSH..."
+ssh_copy_persistent "to" "$VPS_HOST" "$VPS_USER" "22" "" "." "~/robustty-bot/" "--exclude='venv' --exclude='__pycache__' --exclude='.git' --exclude='logs' --exclude='data' --exclude='cookies'"
 
 # Copy VPS-specific docker-compose
 echo "📋 Setting up VPS configuration..."
-scp docker-compose.vps.yml $VPS_USER@$VPS_HOST:~/robustty-bot/docker-compose.yml
+ssh_copy_persistent "to" "$VPS_HOST" "$VPS_USER" "22" "" "docker-compose.vps.yml" "~/robustty-bot/docker-compose.yml"
 
 # Copy environment file
 if [ -f .env ]; then
-    scp .env $VPS_USER@$VPS_HOST:~/robustty-bot/
+    ssh_copy_persistent "to" "$VPS_HOST" "$VPS_USER" "22" "" ".env" "~/robustty-bot/.env"
 else
     echo "⚠️  No .env file found. You'll need to create one on the VPS."
 fi
 
 # Create necessary directories on VPS
-ssh $VPS_USER@$VPS_HOST "cd ~/robustty-bot && mkdir -p logs data cookies"
+ssh_exec_persistent "$VPS_HOST" "$VPS_USER" "22" "" "cd ~/robustty-bot && mkdir -p logs data cookies"
 
-# Run network diagnostics
+# Run network diagnostics using persistent connection
 echo "🔍 Running network diagnostics on VPS..."
-ssh $VPS_USER@$VPS_HOST "
+ssh_exec_persistent "$VPS_HOST" "$VPS_USER" "22" "" "
     # Test basic connectivity first
     echo '⚡ Testing basic network connectivity...'
     
@@ -248,9 +263,9 @@ ssh $VPS_USER@$VPS_HOST "
     fi
 "
 
-# Install Docker if not present
+# Install Docker if not present using persistent connection
 echo "🐳 Checking Docker installation..."
-ssh $VPS_USER@$VPS_HOST "
+ssh_exec_persistent "$VPS_HOST" "$VPS_USER" "22" "" "
     if ! command -v docker &> /dev/null; then
         echo 'Installing Docker...'
         curl -fsSL https://get.docker.com | sh
@@ -262,9 +277,9 @@ ssh $VPS_USER@$VPS_HOST "
         echo 'Installing Docker Compose...'
         sudo curl -L \"https://github.com/docker/compose/releases/latest/download/docker-compose-\$(uname -s)-\$(uname -m)\" -o /usr/local/bin/docker-compose
         sudo chmod +x /usr/local/bin/docker-compose
-    fi
-"
+    fi"
 
+# Set up cookie sync (choose one method below)
 # Set up cookie sync (choose one method below)
 cat << 'EOF'
 

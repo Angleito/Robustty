@@ -28,16 +28,18 @@ services:
       - ./config:/app/config:ro
       - ./logs:/app/logs
       - ./data:/app/data
-      - robustty-cookies:/app/cookies
+      # Cookie files - direct bind mount for VPS sync compatibility
+      - ./cookies:/app/cookies
       # Conditional mount for macOS Brave browser data (only if path exists)
       # On Ubuntu VPS, this will fallback to empty-cookies directory
       - ${BRAVE_BROWSER_PATH:-./empty-cookies}:/host-brave:ro
     networks:
       - robustty-network
     dns:
-      - 8.8.8.8
-      - 8.8.4.4
-      - 1.1.1.1
+      - 1.1.1.1      # Cloudflare primary (fast)
+      - 1.0.0.1      # Cloudflare secondary
+      - 8.8.8.8      # Google primary
+      - 8.8.4.4      # Google secondary
     healthcheck:
       test: ["CMD", "python3", "/app/scripts/health-check.py", "basic"]
       interval: 30s
@@ -79,7 +81,5 @@ networks:
     driver: bridge
 
 volumes:
-  robustty-cookies:
-    driver: local
   robustty-redis-data:
     driver: local
