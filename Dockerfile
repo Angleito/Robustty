@@ -47,27 +47,29 @@ set -e\n\
 echo "Starting Robustty Discord Bot..."\n\
 \n\
 # Check if running in environment with Brave browser support\n\
-if [ -d "/host-brave" ] || [ -d "$HOME/Library/Application Support/BraveSoftware/Brave-Browser" ]; then\n\
+if [ -d "/host-brave" ] && [ "$(ls -A /host-brave 2>/dev/null)" ]; then\n\
     echo "Brave browser detected - enabling cookie extraction"\n\
     \n\
-    # Create log file for cron\n\
-    touch /var/log/cron.log\n\
+    # Create log file for cron (as root first, then fix permissions)\n\
+    sudo touch /var/log/cron.log\n\
+    sudo chmod 666 /var/log/cron.log\n\
     \n\
     # Setup cron job for cookie extraction (every 2 hours)\n\
-    echo "0 */2 * * * cd /app && /usr/local/bin/python scripts/extract-brave-cookies.py >> /var/log/cron.log 2>&1" > /etc/cron.d/brave-cookie-extraction\n\
-    echo "@reboot cd /app && /usr/local/bin/python scripts/extract-brave-cookies.py >> /var/log/cron.log 2>&1" >> /etc/cron.d/brave-cookie-extraction\n\
-    chmod 0644 /etc/cron.d/brave-cookie-extraction\n\
-    crontab /etc/cron.d/brave-cookie-extraction\n\
+    echo "0 */2 * * * cd /app && /usr/local/bin/python scripts/extract-brave-cookies.py >> /app/logs/cookie-extraction.log 2>&1" > /tmp/cookie-cron\n\
+    echo "@reboot cd /app && /usr/local/bin/python scripts/extract-brave-cookies.py >> /app/logs/cookie-extraction.log 2>&1" >> /tmp/cookie-cron\n\
+    sudo cp /tmp/cookie-cron /etc/cron.d/brave-cookie-extraction\n\
+    sudo chmod 0644 /etc/cron.d/brave-cookie-extraction\n\
+    sudo crontab /etc/cron.d/brave-cookie-extraction\n\
     \n\
     # Extract cookies immediately on startup\n\
     echo "Running initial cookie extraction..."\n\
-    cd /app && /usr/local/bin/python scripts/extract-brave-cookies.py || echo "Cookie extraction failed, continuing without cookies"\n\
+    cd /app && /usr/local/bin/python scripts/extract-brave-cookies.py 2>&1 | tee /app/logs/cookie-extraction.log || echo "Cookie extraction failed, continuing without cookies"\n\
     \n\
     # Start cron daemon for scheduled extractions\n\
     echo "Starting cron daemon for scheduled cookie extraction..."\n\
-    cron\n\
+    sudo cron\n\
 else\n\
-    echo "No Brave browser detected - running in VPS mode without cookie extraction"\n\
+    echo "No Brave browser detected or empty - running in VPS mode without cookie extraction"\n\
     echo "Bot will use API keys and public access for video platforms"\n\
 fi\n\
 \n\
@@ -79,6 +81,9 @@ sudo chmod 755 /app/cookies /app/data /app/logs || true\n\
 # Start the bot\n\
 echo "Starting Discord bot..."\n\
 exec /usr/local/bin/python -m src.main' > /app/start.sh && chmod +x /app/start.sh
+
+# Create log directory with proper permissions  
+RUN mkdir -p /app/logs && chown -R robustty:robustty /app/logs
 
 # Switch to non-root user for security
 USER robustty
