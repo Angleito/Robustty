@@ -14,6 +14,8 @@ from typing import Dict, List, Optional, Tuple, Any
 import aiofiles
 import aiohttp
 
+from .http_session_manager import get_session_manager
+
 logger = logging.getLogger(__name__)
 
 
@@ -308,15 +310,21 @@ class CookieHealthMonitor:
                     )
                     continue
 
-            # Make test request
+            # Get session from manager
+            session_manager = get_session_manager()
             timeout = aiohttp.ClientTimeout(total=self.validation_timeout)
-            async with aiohttp.ClientSession(
-                cookie_jar=cookie_jar,
+            
+            # Get a dedicated session for cookie validation
+            session = await session_manager.get_session(
+                name=f"cookie_validator_{platform}",
                 timeout=timeout,
+                cookie_jar=cookie_jar,
                 headers={
                     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-                },
-            ) as session:
+                }
+            )
+            
+            try:
                 async with session.get(validation_url) as response:
                     if response.status == 200:
                         status.is_healthy = True

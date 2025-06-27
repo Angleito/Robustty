@@ -10,6 +10,8 @@ from typing import Optional, Dict, Any
 
 from aiohttp import web
 
+from .http_session_manager import get_session_manager
+
 logger = logging.getLogger(__name__)
 
 
@@ -59,6 +61,10 @@ class HealthEndpoints:
         
         # Quota monitoring endpoint
         self.app.router.add_get('/health/quota/youtube', self.youtube_quota_status)
+        
+        # HTTP session health endpoints
+        self.app.router.add_get('/health/http-sessions', self.http_session_health)
+        self.app.router.add_get('/health/http-sessions/stats', self.http_session_stats)
     
     async def start(self):
         """Start the health check web server"""
@@ -296,6 +302,29 @@ class HealthEndpoints:
             else:
                 report['issues'].append('Platform registry not available')
             
+            # HTTP session health
+            try:
+                session_manager = get_session_manager()
+                session_health = await session_manager.health_check()
+                report['http_sessions'] = session_health
+                
+                # Check for unhealthy sessions
+                if not session_health.get('healthy', True):
+                    unhealthy_sessions = [
+                        name for name, info in session_health.get('sessions', {}).items()
+                        if info.get('status') == 'unhealthy'
+                    ]
+                    if unhealthy_sessions:
+                        report['issues'].append(f"Unhealthy HTTP sessions: {', '.join(unhealthy_sessions)}")
+                
+                # Check for leaked connections
+                stats = session_health.get('stats', {}).get('stats', {})
+                if stats.get('leaked', 0) > 0:
+                    report['issues'].append(f"HTTP connection leaks detected: {stats['leaked']} leaked connections")
+            except Exception as e:
+                logger.error(f"Error checking HTTP session health: {e}")
+                report['issues'].append(f"HTTP session health check error: {e}")
+            
             # Set overall status
             if report['issues']:
                 report['overall_status'] = 'degraded' if len(report['issues']) < 3 else 'unhealthy'
@@ -417,6 +446,44 @@ class HealthEndpoints:
             
         except Exception as e:
             logger.error(f"YouTube quota status error: {e}")
+            return web.json_response(
+                {'error': str(e)},
+                status=500
+            )
+    
+    async def http_session_health(self, request):
+        """Get HTTP session manager health status"""
+        try:
+            session_manager = get_session_manager()
+            health_status = await session_manager.health_check()
+            
+            return web.json_response({
+                'success': True,
+                'timestamp': datetime.now().isoformat(),
+                'health': health_status
+            })
+            
+        except Exception as e:
+            logger.error(f"HTTP session health check error: {e}")
+            return web.json_response(
+                {'error': str(e)},
+                status=500
+            )
+    
+    async def http_session_stats(self, request):
+        """Get HTTP session manager statistics"""
+        try:
+            session_manager = get_session_manager()
+            stats = session_manager.get_stats()
+            
+            return web.json_response({
+                'success': True,
+                'timestamp': datetime.now().isoformat(),
+                'stats': stats
+            })
+            
+        except Exception as e:
+            logger.error(f"HTTP session stats error: {e}")
             return web.json_response(
                 {'error': str(e)},
                 status=500

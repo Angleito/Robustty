@@ -993,13 +993,17 @@ class YouTubePlatform(VideoPlatform):
     async def _validate_stream_url_async(self, url: str) -> bool:
         """Validate that the stream URL is accessible (async version)"""
         try:
-            import aiohttp
             import asyncio
-
-            timeout = aiohttp.ClientTimeout(total=10)
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                try:
-                    async with session.head(url, allow_redirects=True) as response:
+            
+            # Use the platform's existing session instead of creating a new one
+            if not self.session:
+                logger.warning("No HTTP session available for URL validation")
+                return True  # Assume valid if no session
+            
+            try:
+                # Use a shorter timeout for validation
+                async with asyncio.timeout(10):
+                    async with self.session.head(url, allow_redirects=True) as response:
                         is_valid = response.status < 400
 
                         if not is_valid:
@@ -1008,16 +1012,10 @@ class YouTubePlatform(VideoPlatform):
                             )
 
                         return is_valid
-                except asyncio.TimeoutError:
-                    logger.warning("Stream URL validation timed out")
-                    return True  # Assume valid on timeout
+            except asyncio.TimeoutError:
+                logger.warning("Stream URL validation timed out")
+                return True  # Assume valid on timeout
 
-        except ImportError:
-            # Fallback to sync validation if aiohttp not available
-            import asyncio
-
-            loop = asyncio.get_event_loop()
-            return await loop.run_in_executor(None, self._validate_stream_url, url)
         except Exception as e:
             logger.warning(f"Stream URL validation error: {e}")
             # Return True on validation error to avoid blocking valid URLs

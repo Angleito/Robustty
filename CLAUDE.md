@@ -123,6 +123,7 @@ ssh user@vps 'cd ~/robustty-bot && ./scripts/validate-vps-deployment.sh'
 - **Audio Player**: Queue management with Redis persistence
 - **Cache Manager**: Redis-backed caching for search results and metadata
 - **Metrics**: Prometheus metrics collection for monitoring
+- **Voice Connection Manager**: Enhanced voice connection handling with VPS optimizations
 
 ## Ubuntu VPS Deployment Optimizations
 
@@ -373,6 +374,30 @@ python -m src.main                        # Start bot
 docker-compose up -d
 ```
 
+## Recent Fixes (2025-01-27)
+
+### Enhanced Voice Connection Management for VPS
+- **Environment Detection**: Automatic detection of deployment environment (Local/Docker/VPS)
+- **VPS-Specific Optimizations**: 
+  - Longer retry delays (5s base, up to 120s max) for unstable VPS networks
+  - Extended connection timeout (45s) and session timeout (5 minutes)
+  - Higher circuit breaker threshold (5 failures) before disabling connections
+  - Network stability checks before attempting voice connections
+- **Session Management**: 
+  - Proper session recreation for WebSocket error 4006 ("Session no longer valid")
+  - Session state tracking with unique IDs and age monitoring
+  - Automatic session invalidation after timeout periods
+- **Circuit Breaker Pattern**: Prevents repeated connection attempts after multiple failures
+- **Error Recovery**: 
+  - Specific handling for all Discord WebSocket error codes (4006-4015)
+  - Different retry strategies based on error type and environment
+  - Exponential backoff with jitter for VPS deployments
+- **Health Monitoring**: Background task monitors voice connection health every minute
+- **Admin Commands**:
+  - `!voicehealth` - Shows voice connection status, environment, and configuration
+  - `!voicediag` - Runs diagnostics and shows detailed connection info
+  - `!voiceenv [vps|local|auto]` - View or change voice environment settings
+
 ## Recent Fixes (2025-01-25)
 
 ### YouTube Streaming & Cookie Integration
@@ -404,6 +429,11 @@ python scripts/extract-brave-cookies.py
 # Test VPS deployment optimizations
 docker-compose -f docker-compose.yml up -d --build
 docker-compose exec robustty python -c "import redis; print(redis.from_url('redis://redis:6379').ping())"
+
+# Test voice connection enhancements
+python test_voice_connection_fix.py              # Test with auto-detected environment
+python test_voice_connection_fix.py vps          # Force VPS environment for testing
+python test_voice_connection_fix.py local        # Force local environment for testing
 ```
 
 ## Debugging
@@ -417,6 +447,15 @@ docker-compose exec robustty python -c "import redis; print(redis.from_url('redi
 - **No Audio**: Verify FFmpeg installed and voice channel permissions
 - **Stream Failures**: Test stream URLs directly with `yt-dlp`
 
+### Voice Connection Issues (VPS)
+- **Error 4006**: Session invalid - bot will automatically create new session and retry
+- **Repeated Failures**: Check `!voicehealth` to see if circuit breakers are open
+- **VPS Detection**: Use `!voiceenv` to verify environment is correctly detected
+- **Force VPS Mode**: Run `!voiceenv vps` to manually enable VPS optimizations
+- **Network Issues**: Bot performs network stability checks on VPS before connecting
+- **Connection Logs**: Look for "Voice Connection Manager initialized in X environment" in logs
+- **Session Management**: Check session age with `!voicediag` - sessions expire after 5 minutes on VPS
+
 ### Cookie Extraction Issues
 - **No Cookies Found**: Ensure Brave browser data is mounted correctly at `/host-brave`
 - **Permission Errors**: Check that Docker has access to `~/Library/Application Support/BraveSoftware/Brave-Browser`
@@ -426,8 +465,9 @@ docker-compose exec robustty python -c "import redis; print(redis.from_url('redi
 
 ### VPS Deployment Issues
 - **Pre-deployment Failures**: Run `./scripts/validate-pre-deployment.sh` to identify missing requirements
-- **Network Issues**: Use `./scripts/diagnose-vps-network.sh` for comprehensive network troubleshooting
+- **Network Issues**: Use `python3 ./scripts/diagnose-vps-network.py` for comprehensive network troubleshooting
 - **Network Fixes**: Run `sudo ./scripts/fix-vps-network.sh` to automatically fix common Docker networking issues
+- **Detailed Troubleshooting**: See `VPS_TROUBLESHOOTING.md` for provider-specific fixes and best practices
 - **DNS Resolution**: Fix with `sudo echo 'nameserver 8.8.8.8' > /etc/resolv.conf`
 - **Docker Issues**: Install with `curl -fsSL https://get.docker.com | sh`
 - **Service Health**: Validate with `./scripts/validate-vps-core.sh` on VPS

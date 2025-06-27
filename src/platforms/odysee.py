@@ -885,12 +885,16 @@ class OdyseePlatform(VideoPlatform):
             "Cache-Control": "no-cache",  # Avoid stale responses
         }
 
-        self.session = aiohttp.ClientSession(
-            connector=connector,
-            timeout=timeout,
-            headers=headers,
-            raise_for_status=False,  # Handle status codes manually
-        )
+        # Note: Session will be created by parent class using session manager
+        self._odysee_headers = headers
+        self._odysee_connector_config = {
+            'limit': 20,
+            'limit_per_host': 5,
+            'ttl_dns_cache': 600,
+            'use_dns_cache': True,
+            'enable_cleanup_closed': True,
+            'force_close': True,
+        }
 
         logger.debug(
             f"Configured optimized aiohttp session for Odysee with {len(headers)} custom headers"
@@ -898,8 +902,25 @@ class OdyseePlatform(VideoPlatform):
 
     async def initialize(self):
         """Initialize platform resources with enhanced configuration"""
+        # Store original config
+        original_config = self.config.copy()
+        
+        # Update config with Odysee-specific settings
+        self.config['http_timeout'] = self.api_timeout
+        self.config['http_connect_timeout'] = 10
+        self.config['connections_per_host'] = 5
+        self.config['dns_cache_ttl'] = 600
+        
+        # Initialize parent (which will create session via manager)
         await super().initialize()
-        await self._configure_optimized_session()
+        
+        # Apply custom headers to the session
+        if self.session and hasattr(self, '_odysee_headers'):
+            self.session.headers.update(self._odysee_headers)
+        
+        # Restore original config
+        self.config = original_config
+        
         logger.info(
             f"Initialized Odysee platform with API URL: {self.api_url}, "
             f"timeouts: search={self.search_timeout}s, api={self.api_timeout}s, stream={self.stream_timeout}s"
@@ -907,15 +928,9 @@ class OdyseePlatform(VideoPlatform):
 
     async def cleanup(self):
         """Cleanup platform resources with proper session handling"""
-        if self.session and not self.session.closed:
-            # Close connector first
-            if hasattr(self.session, "_connector") and self.session._connector:
-                await self.session._connector.close()
-            # Then close session
-            await self.session.close()
-            # Wait a bit for cleanup
-            await asyncio.sleep(0.1)
-        logger.info("Cleaned up Odysee platform with optimized session closure")
+        # Use parent class cleanup which handles session manager
+        await super().cleanup()
+        logger.info("Cleaned up Odysee platform")
 
     def get_platform_status(self) -> Dict[str, Any]:
         """Get current platform status and health metrics"""

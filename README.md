@@ -141,6 +141,20 @@ See [docs/INTEGRATION_TESTING.md](docs/INTEGRATION_TESTING.md) for integration t
 docker-compose up -d
 ```
 
+### VPS Deployment
+
+For VPS deployments, use the provided diagnostic and fix tools:
+
+```bash
+# Diagnose network issues
+python3 scripts/diagnose-vps-network.py
+
+# Automatically fix common VPS networking problems
+sudo ./scripts/fix-vps-network.sh
+```
+
+See [VPS_TROUBLESHOOTING.md](VPS_TROUBLESHOOTING.md) for detailed VPS deployment guidance.
+
 ### Manual Deployment
 
 1. Install dependencies:
