@@ -279,4 +279,6 @@ dump.rdb
 # Custom project specific
 robustty-data/
 downloads/
-stream-cache/
+stream-cache/# Cookie files - contain sensitive data and change frequently
+cookies/*.json
+cookies/*.txt
