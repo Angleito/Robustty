@@ -344,14 +344,13 @@ class CookieHealthMonitor:
                         status.validation_error = (
                             f"Unexpected response: {response.status}"
                         )
-
-        except asyncio.TimeoutError:
-            status.is_healthy = False
-            status.validation_error = "Validation request timed out"
-        except Exception as e:
-            # Don't fail validation on network errors - cookies might still be good
-            logger.debug(f"Cookie validation request failed for {platform}: {e}")
-            status.is_healthy = True  # Assume healthy if we can't validate
+            except asyncio.TimeoutError:
+                status.is_healthy = False
+                status.validation_error = "Validation request timed out"
+            except Exception as e:
+                # Don't fail validation on network errors - cookies might still be good
+                logger.debug(f"Cookie validation request failed for {platform}: {e}")
+                status.is_healthy = True  # Assume healthy if we can't validate
 
     async def _monitor_loop(self):
         """Background monitoring loop"""
