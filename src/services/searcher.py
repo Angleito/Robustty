@@ -4,7 +4,7 @@ import time
 from typing import Any, Coroutine, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from src.platforms.base import 'VideoPlatform'
+    from src.platforms.base import VideoPlatform
     from src.platforms.registry import PlatformRegistry
 from src.platforms.errors import (
     PlatformError,
