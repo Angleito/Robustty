@@ -244,11 +244,11 @@ class MultiPlatformSearcher:
                     if platform not in deduplicated_by_platform:
                         deduplicated_by_platform[platform] = []
 
-                    # Remove platform tag and quality metadata before returning
+                    # Remove quality metadata before returning (keep platform field)
                     clean_video = {
                         k: v
                         for k, v in video.items()
-                        if not k.startswith("_") and k != "platform"
+                        if not k.startswith("_")
                     }
                     deduplicated_by_platform[platform].append(clean_video)
 
