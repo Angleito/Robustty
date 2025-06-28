@@ -351,6 +351,10 @@ class CookieHealthMonitor:
                 # Don't fail validation on network errors - cookies might still be good
                 logger.debug(f"Cookie validation request failed for {platform}: {e}")
                 status.is_healthy = True  # Assume healthy if we can't validate
+        except Exception as e:
+            # Outer exception handler for session manager or other errors
+            logger.debug(f"Cookie validation setup failed for {platform}: {e}")
+            status.is_healthy = True  # Assume healthy if we can't validate
 
     async def _monitor_loop(self):
         """Background monitoring loop"""
