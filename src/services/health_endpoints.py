@@ -35,13 +35,15 @@ class HealthEndpoints:
         self._setup_routes()
     
     def set_services(self, cookie_health_monitor=None, fallback_manager=None, 
-                    cookie_manager=None, platform_registry=None, quota_monitor=None):
+                    cookie_manager=None, platform_registry=None, quota_monitor=None,
+                    stability_monitor=None):
         """Set service dependencies"""
         self.cookie_health_monitor = cookie_health_monitor
         self.fallback_manager = fallback_manager
         self.cookie_manager = cookie_manager
         self.platform_registry = platform_registry
         self.quota_monitor = quota_monitor
+        self.stability_monitor = stability_monitor
     
     def _setup_routes(self):
         """Setup HTTP routes"""

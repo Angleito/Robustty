@@ -13,7 +13,7 @@ from typing import Dict, Optional, Set
 from collections import defaultdict
 
 from ..platforms.registry import PlatformRegistry
-from ..config import get_config
+from ..utils.config_loader import load_config
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +72,7 @@ class StabilityMonitor:
     
     def __init__(self, platform_registry: PlatformRegistry):
         self.platform_registry = platform_registry
-        self.config = get_config()
+        self.config = load_config("config/config.yaml")
         self.stability_config = self.config.get('stability_mode', {})
         self.enabled = self.stability_config.get('enabled', False)
         

@@ -312,6 +312,10 @@ class PlatformFallbackManager:
         strategy = self.active_fallbacks.get(platform)
         return strategy.mode if strategy else None
     
+    def get_active_fallback(self, platform: str) -> Optional[FallbackStrategy]:
+        """Get the active fallback strategy for a platform"""
+        return self.active_fallbacks.get(platform)
+    
     def get_platform_limitations(self, platform: str) -> List[str]:
         """Get current limitations for a platform"""
         strategy = self.active_fallbacks.get(platform)
