@@ -64,15 +64,16 @@ class VoiceConnectionManager:
         
         # Configuration based on environment
         if self.environment == DeploymentEnvironment.VPS:
-            # VPS-specific configuration with longer delays
-            self.max_retry_attempts = 8
-            self.base_retry_delay = 5.0  # seconds
-            self.max_retry_delay = 120.0  # seconds
-            self.connection_timeout = 45.0  # seconds
-            self.session_timeout = 300.0  # 5 minutes
-            self.circuit_breaker_threshold = 5  # failures before opening circuit
-            self.circuit_breaker_timeout = 300.0  # 5 minutes
+            # VPS-specific configuration with longer delays and session recreation
+            self.max_retry_attempts = 3  # Reduced for faster recovery
+            self.base_retry_delay = 8.0  # Discord requires 6+ seconds, use 8 for VPS
+            self.max_retry_delay = 30.0  # Faster max delay
+            self.connection_timeout = 60.0  # Longer timeout for VPS
+            self.session_timeout = 180.0  # 3 minutes (shorter for faster refresh)
+            self.circuit_breaker_threshold = 3  # Faster circuit breaking
+            self.circuit_breaker_timeout = 120.0  # 2 minutes
             self.network_check_interval = 10.0  # seconds
+            self.force_session_recreation = True  # Always recreate sessions on VPS
         else:
             # Local/Docker configuration
             self.max_retry_attempts = 5
@@ -83,6 +84,7 @@ class VoiceConnectionManager:
             self.circuit_breaker_threshold = 3
             self.circuit_breaker_timeout = 180.0  # 3 minutes
             self.network_check_interval = 5.0  # seconds
+            self.force_session_recreation = False  # Normal session handling
         
         # WebSocket error codes and their meanings
         self.websocket_error_codes = {
@@ -282,9 +284,12 @@ class VoiceConnectionManager:
                 logger.error(f"WebSocket error {code} for guild {guild_id}: {description}")
                 
                 # Session errors require new session
-                if code in self.session_error_codes:
-                    logger.info(f"Error {code} requires new session for guild {guild_id}")
+                if code in self.session_error_codes or (self.environment == DeploymentEnvironment.VPS and self.force_session_recreation):
+                    logger.info(f"Error {code} requires new session for guild {guild_id} (VPS mode: {self.environment == DeploymentEnvironment.VPS})")
                     self.connection_states[guild_id] = VoiceConnectionState.SESSION_INVALID
+                    # Force disconnect and cleanup on VPS
+                    if self.environment == DeploymentEnvironment.VPS:
+                        await self._force_disconnect_guild(guild_id)
                     return True, True
                 
                 # Determine if we should retry based on error code
@@ -603,6 +608,22 @@ class VoiceConnectionManager:
                     unhealthy_guilds.append(guild_id)
         
         return unhealthy_guilds
+
+    async def _force_disconnect_guild(self, guild_id: int):
+        """Force disconnect from voice channel with cleanup (VPS-specific)"""
+        try:
+            guild = self.bot.get_guild(guild_id)
+            if guild and guild.voice_client:
+                logger.info(f"Force disconnecting from voice channel in guild {guild_id}")
+                await guild.voice_client.disconnect(force=True)
+                await asyncio.sleep(2)  # Give time for cleanup
+            
+            # Clean up session state
+            if guild_id in self.session_states:
+                del self.session_states[guild_id]
+                logger.info(f"Cleaned up session state for guild {guild_id}")
+        except Exception as e:
+            logger.error(f"Error during force disconnect for guild {guild_id}: {e}")
 
     def _start_health_monitoring(self):
         """Start background health monitoring task"""
