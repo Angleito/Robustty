@@ -199,7 +199,7 @@ else
 fi
 
 # Odysee API
-if curl -s --connect-timeout 10 https://api.lbry.tv/api/v1/proxy &> /dev/null; then
+if curl -s --connect-timeout 10 https://api.odysee.com/api/v1/claim_search &> /dev/null; then
     success "Odysee API reachable"
 else
     warning "Odysee API unreachable"

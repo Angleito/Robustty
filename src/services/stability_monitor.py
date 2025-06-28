@@ -89,8 +89,8 @@ class StabilityMonitor:
         self.problematic_platforms = set(self.stability_config.get('problematic_platforms', ['peertube', 'odysee']))
         
         # Configuration
-        self.failure_threshold = self.stability_config.get('failure_threshold', 5)
-        self.recovery_check_interval = self.stability_config.get('recovery_check_interval', 300)
+        self.failure_threshold = self.stability_config.get('failure_threshold', 10)
+        self.recovery_check_interval = self.stability_config.get('recovery_check_interval', 180)
         self.auto_disable = self.stability_config.get('auto_disable_failing_platforms', True)
         
         # Background task
@@ -127,7 +127,10 @@ class StabilityMonitor:
         tracker = self.get_tracker(platform_name)
         tracker.record_failure(reason)
         
-        logger.warning(
+        # Log at INFO level for first 5 failures, WARNING for more
+        log_level = logging.INFO if tracker.consecutive_failures < 5 else logging.WARNING
+        logger.log(
+            log_level,
             f"Platform {platform_name} failure recorded: {reason} "
             f"(consecutive: {tracker.consecutive_failures}, total: {tracker.total_failures})"
         )
@@ -136,6 +139,17 @@ class StabilityMonitor:
         if (self.auto_disable and 
             platform_name not in self.protected_platforms and
             tracker.should_disable(self.failure_threshold)):
+            
+            # Add grace period for problematic platforms
+            if platform_name in self.problematic_platforms:
+                # Give problematic platforms 50% more failures before disabling
+                grace_threshold = int(self.failure_threshold * 1.5)
+                if tracker.consecutive_failures < grace_threshold:
+                    logger.warning(
+                        f"Platform {platform_name} is problematic but in grace period "
+                        f"({tracker.consecutive_failures}/{grace_threshold} failures)"
+                    )
+                    return
             
             await self.disable_platform(platform_name)
             
@@ -178,8 +192,13 @@ class StabilityMonitor:
             
         tracker = self.get_tracker(platform_name)
         
+        # Use shorter recovery time for non-problematic platforms
+        recovery_time = self.recovery_check_interval
+        if platform_name not in self.problematic_platforms:
+            recovery_time = recovery_time // 2  # Half the time for stable platforms
+        
         # Check if enough time has passed
-        if not tracker.can_retry(self.recovery_check_interval):
+        if not tracker.can_retry(recovery_time):
             return False
             
         logger.info(f"STABILITY: Attempting to re-enable platform {platform_name}")
@@ -191,6 +210,9 @@ class StabilityMonitor:
         # Reset some tracking metrics
         tracker.consecutive_failures = 0
         tracker.disabled_at = None
+        
+        # Log successful re-enable
+        logger.info(f"STABILITY: Platform {platform_name} has been re-enabled successfully")
         
         return True
         

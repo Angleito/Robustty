@@ -77,7 +77,7 @@ class NetworkDiagnostic:
             ("youtube.com", "YouTube"),
             ("www.googleapis.com", "Google APIs"),
             ("odysee.com", "Odysee"),
-            ("api.lbry.tv", "Odysee API"),
+            ("api.odysee.com", "Odysee API"),
             ("tube.tchncs.de", "PeerTube Instance"),
             ("framatube.org", "PeerTube Framatube"),
             ("rumble.com", "Rumble"),
@@ -87,7 +87,7 @@ class NetworkDiagnostic:
         self.http_endpoints = [
             ("https://discord.com/api/v10/gateway", "Discord API Gateway"),
             ("https://www.googleapis.com/youtube/v3/", "YouTube API Base"),
-            ("https://api.lbry.tv/", "Odysee API"),
+            ("https://api.odysee.com/", "Odysee API"),
             ("https://tube.tchncs.de/api/v1/search/videos?search=test&count=1", "PeerTube Search"),
             ("https://odysee.com/", "Odysee Main"),
             ("https://rumble.com/", "Rumble Main"),

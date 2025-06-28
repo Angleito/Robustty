@@ -434,6 +434,10 @@ docker-compose exec robustty python -c "import redis; print(redis.from_url('redi
 python test_voice_connection_fix.py              # Test with auto-detected environment
 python test_voice_connection_fix.py vps          # Force VPS environment for testing
 python test_voice_connection_fix.py local        # Force local environment for testing
+
+# Test all VPS fixes comprehensively
+python test_vps_fixes.py                         # Run comprehensive VPS validation
+docker-compose exec robustty python test_vps_fixes.py  # Run inside Docker container
 ```
 
 ## Debugging

@@ -1688,6 +1688,141 @@ class Admin(Cog):
                 description=f"Failed to enable platform: {str(e)[:100]}..."
             )
             await ctx.send(embed=embed)
+    
+    @commands.command(name="platform", aliases=["platforms"])
+    @is_admin()
+    async def platform_control(self, ctx: Context[RobottyBot], action: Optional[str] = None, platform_name: Optional[str] = None) -> None:
+        """Control platform enable/disable status
+        
+        Usage:
+        !platform - Show all platforms status
+        !platform enable <name> - Enable a platform
+        !platform disable <name> - Disable a platform
+        """
+        await ctx.trigger_typing()
+        
+        try:
+            # Show platform status if no action specified
+            if not action:
+                platforms = self.bot.platform_registry.get_all_platforms()
+                
+                embed = create_embed(
+                    title="Platform Status",
+                    description="Current status of all registered platforms",
+                    color=discord.Color.blue()
+                )
+                
+                # Group by status
+                enabled_platforms = []
+                disabled_platforms = []
+                
+                for name, platform in platforms.items():
+                    if platform.enabled:
+                        enabled_platforms.append(name)
+                    else:
+                        disabled_platforms.append(name)
+                
+                if enabled_platforms:
+                    embed.add_field(
+                        name="✅ Enabled Platforms",
+                        value="\n".join([f"• **{p}**" for p in sorted(enabled_platforms)]),
+                        inline=False
+                    )
+                
+                if disabled_platforms:
+                    embed.add_field(
+                        name="❌ Disabled Platforms", 
+                        value="\n".join([f"• **{p}**" for p in sorted(disabled_platforms)]),
+                        inline=False
+                    )
+                
+                # Add stability info if available
+                if hasattr(self.bot, 'stability_monitor') and self.bot.stability_monitor:
+                    if self.bot.stability_monitor.disabled_platforms:
+                        embed.add_field(
+                            name="🚨 Auto-disabled by Stability Monitor",
+                            value="\n".join([f"• **{p}**" for p in sorted(self.bot.stability_monitor.disabled_platforms)]),
+                            inline=False
+                        )
+                
+                embed.set_footer(text="Use !platform enable/disable <name> to control platforms")
+                await ctx.send(embed=embed)
+                return
+            
+            # Validate action
+            action = action.lower()
+            if action not in ['enable', 'disable']:
+                embed = create_error_embed(
+                    title="Invalid Action",
+                    description="Valid actions are: `enable` or `disable`"
+                )
+                await ctx.send(embed=embed)
+                return
+            
+            # Validate platform name
+            if not platform_name:
+                embed = create_error_embed(
+                    title="Platform Name Required",
+                    description=f"Usage: `!platform {action} <platform_name>`"
+                )
+                await ctx.send(embed=embed)
+                return
+            
+            platform_name = platform_name.lower()
+            platform = self.bot.platform_registry.get_platform(platform_name)
+            
+            if not platform:
+                embed = create_error_embed(
+                    title="Platform Not Found",
+                    description=f"Platform **{platform_name}** is not registered.\n\n"
+                    f"Available platforms: {', '.join(self.bot.platform_registry.get_all_platforms().keys())}"
+                )
+                await ctx.send(embed=embed)
+                return
+            
+            # Handle enable/disable
+            if action == 'enable':
+                if platform.enabled:
+                    embed = create_warning_embed(
+                        title="Already Enabled",
+                        description=f"Platform **{platform_name}** is already enabled"
+                    )
+                else:
+                    platform.enabled = True
+                    # Remove from disabled platforms if present
+                    if hasattr(self.bot, 'stability_monitor') and self.bot.stability_monitor:
+                        self.bot.stability_monitor.disabled_platforms.discard(platform_name)
+                    
+                    embed = create_success_embed(
+                        title="Platform Enabled",
+                        description=f"Successfully enabled **{platform_name}** platform"
+                    )
+            else:  # disable
+                if not platform.enabled:
+                    embed = create_warning_embed(
+                        title="Already Disabled",
+                        description=f"Platform **{platform_name}** is already disabled"
+                    )
+                else:
+                    platform.enabled = False
+                    # Add to disabled platforms if stability monitor exists
+                    if hasattr(self.bot, 'stability_monitor') and self.bot.stability_monitor:
+                        self.bot.stability_monitor.disabled_platforms.add(platform_name)
+                    
+                    embed = create_success_embed(
+                        title="Platform Disabled",
+                        description=f"Successfully disabled **{platform_name}** platform"
+                    )
+            
+            await ctx.send(embed=embed)
+            
+        except Exception as e:
+            logger.error(f"Error in platform control: {e}")
+            embed = create_error_embed(
+                title="Platform Control Failed",
+                description=f"Failed to control platform: {str(e)[:100]}..."
+            )
+            await ctx.send(embed=embed)
 
 
 async def setup(bot: RobottyBot) -> None:

@@ -43,7 +43,7 @@ echo "🌐 DNS RESOLUTION TESTS"
 echo "----------------------"
 
 dns_servers=("8.8.8.8:Google" "1.1.1.1:Cloudflare" "9.9.9.9:Quad9")
-test_domains=("discord.com:Discord" "gateway.discord.gg:Discord Gateway" "api.lbry.tv:Odysee" "tube.tchncs.de:PeerTube")
+test_domains=("discord.com:Discord" "gateway.discord.gg:Discord Gateway" "api.odysee.com:Odysee" "tube.tchncs.de:PeerTube")
 
 working_dns=0
 total_dns=0
@@ -79,7 +79,7 @@ echo "-------------------------"
 
 http_endpoints=(
     "https://discord.com/api/v10/gateway:Discord API"
-    "https://api.lbry.tv:Odysee API"
+    "https://api.odysee.com:Odysee API"
     "https://tube.tchncs.de:PeerTube Main"
 )
 

@@ -428,17 +428,41 @@ async def safe_aiohttp_request(
     Raises:
         NetworkTimeoutError: On timeout
         aiohttp.ClientError: On other HTTP errors
+        ValueError: If session is closed or None
     """
+    # Validate session before making request
+    if session is None:
+        raise ValueError("Session is None")
+    if session.closed:
+        raise ValueError("Session is closed")
+    
+    response = None
     try:
         timeout_obj = aiohttp.ClientTimeout(total=timeout)
-        async with session.request(
+        # Don't use context manager - let caller handle response lifecycle
+        response = await session.request(
             method, url, timeout=timeout_obj, **kwargs
-        ) as response:
-            return response
+        )
+        # Ensure the response is actually connected before returning
+        # This reads the response status, which forces the connection to be established
+        _ = response.status
+        return response
     except asyncio.TimeoutError as e:
+        # Clean up response if it was created but timed out
+        if response is not None:
+            response.close()
         raise NetworkTimeoutError(f"Request to {url} timed out after {timeout}s") from e
     except aiohttp.ClientError as e:
+        # Clean up response if it was created but errored
+        if response is not None:
+            response.close()
         logger.error(f"HTTP request to {url} failed: {e}")
+        raise
+    except Exception as e:
+        # Clean up response on any unexpected error
+        if response is not None:
+            response.close()
+        logger.error(f"Unexpected error in HTTP request to {url}: {e}")
         raise
 
 

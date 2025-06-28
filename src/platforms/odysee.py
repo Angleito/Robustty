@@ -103,8 +103,9 @@ class OdyseePlatform(VideoPlatform):
 
     def __init__(self, name: str, config: Dict[str, Any], cache_manager=None) -> None:
         super().__init__(name, config, cache_manager)
-        self.api_url = config.get("api_url", "https://api.lbry.tv/api/v1")
-        self.stream_url = config.get("stream_url", "https://api.lbry.tv")
+        # Use Odysee API endpoint instead of deprecated LBRY endpoints
+        self.api_url = config.get("api_url", "https://api.odysee.com/api/v1")
+        self.stream_url = config.get("stream_url", "https://cdn.odysee.live")
         
         # Environment-specific timeout configuration
         if IS_VPS_ENVIRONMENT:
@@ -143,7 +144,6 @@ class OdyseePlatform(VideoPlatform):
         # URL patterns for Odysee videos
         self.url_patterns = [
             re.compile(r"https?://odysee\.com/@[^/]+:[a-f0-9]+/[^/]+:[a-f0-9]+"),
-            re.compile(r"https?://lbry\.tv/@[^/]+:[a-f0-9]+/[^/]+:[a-f0-9]+"),
             re.compile(r"lbry://(@[^/]+/[^/]+)"),
         ]
 
@@ -198,23 +198,26 @@ class OdyseePlatform(VideoPlatform):
                     self.session, "POST", url, json=params, timeout=adaptive_timeout
                 )
 
-                if response.status == 429:
-                    raise PlatformRateLimitError(
-                        "Odysee API rate limit exceeded", platform="Odysee"
-                    )
-                elif response.status >= 500:
-                    raise PlatformNotAvailableError(
-                        f"Odysee server error ({response.status})", platform="Odysee"
-                    )
-                elif response.status != 200:
-                    error_text = await response.text()
-                    raise PlatformAPIError(
-                        f"Odysee search failed: {response.status} - {error_text[:100]}...",
-                        platform="Odysee",
-                        status_code=response.status,
-                    )
+                try:
+                    if response.status == 429:
+                        raise PlatformRateLimitError(
+                            "Odysee API rate limit exceeded", platform="Odysee"
+                        )
+                    elif response.status >= 500:
+                        raise PlatformNotAvailableError(
+                            f"Odysee server error ({response.status})", platform="Odysee"
+                        )
+                    elif response.status != 200:
+                        error_text = await response.text()
+                        raise PlatformAPIError(
+                            f"Odysee search failed: {response.status} - {error_text[:100]}...",
+                            platform="Odysee",
+                            status_code=response.status,
+                        )
 
-                data = await response.json()
+                    data = await response.json()
+                finally:
+                    response.close()
 
             except NetworkTimeoutError as e:
                 await self._handle_network_failure("search timeout")
@@ -403,31 +406,34 @@ class OdyseePlatform(VideoPlatform):
                     self.session, "POST", url, json=params, timeout=adaptive_timeout
                 )
 
-                if response.status == 429:
-                    raise PlatformRateLimitError(
-                        "Odysee API rate limit exceeded", platform="Odysee"
-                    )
-                elif response.status >= 500:
-                    raise PlatformNotAvailableError(
-                        f"Odysee server error ({response.status})", platform="Odysee"
-                    )
-                elif response.status != 200:
-                    error_text = await response.text()
-                    logger.warning(
-                        f"Odysee video details failed: {response.status} - {error_text[:100]}..."
-                    )
-                    # Return basic info as fallback instead of failing
-                    return {
-                        "id": video_id,
-                        "title": f"Odysee Video {video_id}",
-                        "channel": "Unknown",
-                        "thumbnail": "",
-                        "url": f"https://odysee.com/$/download/{video_id}",
-                        "platform": "odysee",
-                        "description": f"Video details unavailable: HTTP {response.status}",
-                    }
+                try:
+                    if response.status == 429:
+                        raise PlatformRateLimitError(
+                            "Odysee API rate limit exceeded", platform="Odysee"
+                        )
+                    elif response.status >= 500:
+                        raise PlatformNotAvailableError(
+                            f"Odysee server error ({response.status})", platform="Odysee"
+                        )
+                    elif response.status != 200:
+                        error_text = await response.text()
+                        logger.warning(
+                            f"Odysee video details failed: {response.status} - {error_text[:100]}..."
+                        )
+                        # Return basic info as fallback instead of failing
+                        return {
+                            "id": video_id,
+                            "title": f"Odysee Video {video_id}",
+                            "channel": "Unknown",
+                            "thumbnail": "",
+                            "url": f"https://odysee.com/$/download/{video_id}",
+                            "platform": "odysee",
+                            "description": f"Video details unavailable: HTTP {response.status}",
+                        }
 
-                data = await response.json()
+                    data = await response.json()
+                finally:
+                    response.close()
 
             except NetworkTimeoutError as e:
                 await self._handle_network_failure("metadata timeout")
@@ -548,9 +554,7 @@ class OdyseePlatform(VideoPlatform):
 
     def is_platform_url(self, url: str) -> bool:
         """Check if URL belongs to Odysee/LBRY"""
-        return any(pattern.match(url) for pattern in self.url_patterns) or any(
-            domain in url for domain in ["odysee.com", "lbry.tv"]
-        )
+        return any(pattern.match(url) for pattern in self.url_patterns) or "odysee.com" in url
 
     @with_retry(
         retry_config=ODYSEE_RETRY_CONFIG,
@@ -588,9 +592,9 @@ class OdyseePlatform(VideoPlatform):
 
             # Try multiple stream URL formats for Odysee
             stream_urls = [
+                f"https://cdn.odysee.live/content/claims/{video_id}/stream",
+                f"https://api.odysee.com/content/claims/{video_id}/stream",
                 f"{self.stream_url}/content/claims/{video_id}/stream",
-                f"{self.stream_url}/api/v1/proxy?m=get&uri=lbry://{video_id}",
-                f"https://api.lbry.tv/content/claims/{video_id}/stream",
             ]
 
             for stream_url in stream_urls:
@@ -607,19 +611,22 @@ class OdyseePlatform(VideoPlatform):
                         self.session, "HEAD", stream_url, timeout=stream_check_timeout
                     )
 
-                    if response.status == 200:
-                        logger.info(
-                            f"Successfully found Odysee stream URL: {stream_url[:100]}..."
-                        )
-                        return stream_url
-                    elif response.status == 404:
-                        logger.debug(f"Stream URL not found: {stream_url}")
-                        continue
-                    else:
-                        logger.warning(
-                            f"Stream URL returned status {response.status}: {stream_url}"
-                        )
-                        continue
+                    try:
+                        if response.status == 200:
+                            logger.info(
+                                f"Successfully found Odysee stream URL: {stream_url[:100]}..."
+                            )
+                            return stream_url
+                        elif response.status == 404:
+                            logger.debug(f"Stream URL not found: {stream_url}")
+                            continue
+                        else:
+                            logger.warning(
+                                f"Stream URL returned status {response.status}: {stream_url}"
+                            )
+                            continue
+                    finally:
+                        response.close()
 
                 except NetworkTimeoutError as e:
                     logger.warning(
@@ -845,6 +852,7 @@ class OdyseePlatform(VideoPlatform):
                 enable_cleanup_closed=True,
                 force_close=False,  # Reuse connections aggressively
                 resolver=aiohttp.AsyncResolver(nameservers=['8.8.8.8', '1.1.1.1']),  # Use reliable DNS
+                ssl=False,  # Disable SSL verification for Odysee on VPS (connection issues)
             )
             
             # More generous timeouts for VPS

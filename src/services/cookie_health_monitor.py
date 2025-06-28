@@ -90,11 +90,12 @@ class CookieHealthMonitor:
         self.cookie_optional_platforms = config.get("cookie_optional_platforms", ["peertube", "odysee"])
         
         # Platform-specific cookie age thresholds (in hours)
+        # Extended thresholds for VPS deployments where cookie refresh is manual
         self.platform_cookie_thresholds = config.get("platform_cookie_thresholds", {
-            "youtube": 12,  # YouTube benefits from authenticated cookies
-            "rumble": 24,   # Rumble can work longer without fresh cookies
-            "peertube": 72, # PeerTube instances usually don't require authentication
-            "odysee": 48    # Odysee can work with older cookies or no cookies
+            "youtube": 24 if self.vps_mode else 12,  # Extended for VPS, normal for local
+            "rumble": 48 if self.vps_mode else 24,   # Rumble can work longer without fresh cookies
+            "peertube": 168, # PeerTube instances usually don't require authentication (7 days)
+            "odysee": 96    # Odysee can work with older cookies or no cookies (4 days)
         })
 
         # Validation URLs for testing cookie validity

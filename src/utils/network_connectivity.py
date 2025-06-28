@@ -231,15 +231,26 @@ class NetworkConnectivityChecker:
             resolver.retry_servfail = True  # Retry on SERVFAIL
             resolver.ndots = 1  # Reduce unnecessary queries
 
-            # Try A record first, then AAAA as fallback
+            # Try multiple record types in order
+            for record_type in ['A', 'AAAA', 'CNAME']:
+                try:
+                    await resolver.resolve(domain, record_type)
+                    response_time = time.time() - start_time
+                    return True, response_time, None
+                except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer):
+                    continue  # Try next record type
+            
+            # If all DNS record types fail, try system resolver
             try:
-                await resolver.resolve(domain, "A")
-            except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer):
-                # Try AAAA if A record fails
-                await resolver.resolve(domain, "AAAA")
-
+                socket.gethostbyname(domain)
+                response_time = time.time() - start_time
+                return True, response_time, None
+            except socket.gaierror:
+                pass
+                
+            # All methods failed
             response_time = time.time() - start_time
-            return True, response_time, None
+            return False, response_time, f"No DNS records found for domain '{domain}'"
 
         except dns.resolver.Timeout:
             response_time = time.time() - start_time
@@ -323,16 +334,54 @@ class NetworkConnectivityChecker:
 
         try:
             timeout = aiohttp.ClientTimeout(total=endpoint.timeout)
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.head(endpoint.url) as response:
-                    response_time = time.time() - start_time
-                    success = response.status < 400
-                    error = None if success else f"HTTP {response.status}"
-                    return success, response_time, error
+            
+            # Set proper headers, especially for Discord CDN
+            headers = {
+                'User-Agent': 'Robustty Bot/1.0 (Discord Music Bot)',
+                'Accept': '*/*',
+                'Accept-Encoding': 'gzip, deflate',
+                'Connection': 'keep-alive'
+            }
+            
+            # Discord CDN requires specific handling
+            if 'cdn.discordapp.com' in endpoint.url or 'discordapp.com' in endpoint.url:
+                # For Discord CDN, we'll just check if we can connect to the root
+                # Discord CDN blocks many requests without proper context
+                # We'll accept any response except connection errors
+                method = 'GET'
+                test_url = endpoint.url
+            else:
+                method = 'HEAD'
+                test_url = endpoint.url
+            
+            async with aiohttp.ClientSession(timeout=timeout, headers=headers) as session:
+                if method == 'GET':
+                    async with session.get(test_url) as response:
+                        response_time = time.time() - start_time
+                        # For Discord CDN, any response means we can reach it
+                        # Even 403/404 means the CDN is reachable, just blocking our generic request
+                        if 'cdn.discordapp.com' in endpoint.url or 'discordapp.com' in endpoint.url:
+                            # Consider it successful if we got any HTTP response
+                            # Connection errors would have thrown exceptions
+                            success = True
+                            error = None if response.status < 400 else f"HTTP {response.status} (CDN reachable)"
+                        else:
+                            success = response.status < 400
+                            error = None if success else f"HTTP {response.status}"
+                        return success, response_time, error
+                else:
+                    async with session.head(test_url) as response:
+                        response_time = time.time() - start_time
+                        success = response.status < 400
+                        error = None if success else f"HTTP {response.status}"
+                        return success, response_time, error
 
         except asyncio.TimeoutError:
             response_time = time.time() - start_time
             return False, response_time, f"Timeout after {endpoint.timeout}s"
+        except aiohttp.ClientError as e:
+            response_time = time.time() - start_time
+            return False, response_time, f"Client error: {str(e)}"
         except Exception as e:
             response_time = time.time() - start_time
             return False, response_time, str(e)
@@ -418,8 +467,13 @@ class NetworkConnectivityChecker:
         """Find the best working Discord gateway"""
         best_gateway = None
         best_response_time = float("inf")
+        main_gateway = None
 
         for gateway in self.discord_gateways:
+            # Keep reference to main gateway for fallback
+            if gateway.region == "global":
+                main_gateway = gateway
+            
             success, response_time, error = await self.check_discord_gateway(gateway)
             if success:
                 logger.info(
@@ -431,12 +485,26 @@ class NetworkConnectivityChecker:
             else:
                 logger.warning(f"Discord gateway {gateway.region} failed: {error}")
 
+        # If we found a working gateway, use it
         if best_gateway:
             logger.info(
                 f"Selected Discord gateway: {best_gateway.region} ({best_response_time:.2f}s)"
             )
             self.current_gateway = best_gateway
             return best_gateway
+
+        # If no gateways worked but we haven't tried main gateway yet, force try it
+        if main_gateway and main_gateway not in [gw for gw in self.discord_gateways]:
+            logger.warning("All regional gateways failed, trying main gateway as last resort...")
+            success, response_time, error = await self.check_discord_gateway(main_gateway)
+            if success:
+                logger.info(
+                    f"Main gateway fallback successful: {main_gateway.region} ({response_time:.2f}s)"
+                )
+                self.current_gateway = main_gateway
+                return main_gateway
+            else:
+                logger.error(f"Main gateway fallback also failed: {error}")
 
         logger.error("No working Discord gateways found")
         return None

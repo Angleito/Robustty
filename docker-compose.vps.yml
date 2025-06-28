@@ -15,6 +15,11 @@ services:
       - STREAM_TIMEOUT=${STREAM_TIMEOUT:-300}
       - MAX_QUEUE_SIZE=${MAX_QUEUE_SIZE:-100}
       - REDIS_URL=${REDIS_URL:-redis://redis:6379}
+      # VPS-specific environment variables
+      - IS_VPS=true
+      - DEPLOYMENT_TYPE=vps
+      - VPS_MODE=true
+      - DOCKER_CONTAINER=true
       # Platform enable/disable flags
       - YOUTUBE_ENABLED=${YOUTUBE_ENABLED:-true}
       - RUMBLE_ENABLED=${RUMBLE_ENABLED:-true}
@@ -26,6 +31,16 @@ services:
       - ./logs:/app/logs
       - ./data:/app/data
       - robustty-cookies:/app/cookies
+    networks:
+      - robustty-network
+    dns:
+      - 8.8.8.8      # Google primary
+      - 8.8.4.4      # Google secondary
+      - 1.1.1.1      # Cloudflare primary
+    dns_opt:
+      - ndots:0      # Prevent DNS search suffix issues
+      - timeout:3    # DNS timeout in seconds
+      - attempts:3   # DNS retry attempts
     depends_on:
       - redis
     healthcheck:
@@ -42,8 +57,9 @@ services:
     restart: unless-stopped
     volumes:
       - robustty-redis-data:/data
-    ports:
-      - "6379:6379"
+    networks:
+      - robustty-network
+    # SECURITY: No external port exposure - Redis only accessible within Docker network
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -55,3 +71,9 @@ volumes:
     driver: local
   robustty-redis-data:
     driver: local
+
+networks:
+  robustty-network:
+    driver: bridge
+    driver_opts:
+      com.docker.network.driver.mtu: "1450"  # VPS-friendly MTU to prevent packet fragmentation

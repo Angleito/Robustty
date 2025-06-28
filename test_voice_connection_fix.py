@@ -62,9 +62,9 @@ class TestVoiceConnectionManager:
         # Check configuration based on environment
         if env == DeploymentEnvironment.VPS:
             print("✅ VPS environment detected - using extended timeouts")
-            assert self.voice_manager.max_retry_attempts == 8
-            assert self.voice_manager.base_retry_delay == 5.0
-            assert self.voice_manager.connection_timeout == 45.0
+            assert self.voice_manager.max_retry_attempts == 3  # Reduced for faster recovery
+            assert self.voice_manager.base_retry_delay == 8.0  # Discord requires 6+ seconds
+            assert self.voice_manager.connection_timeout == 60.0  # Longer timeout for VPS
         else:
             print(f"✅ {env.value} environment detected - using standard timeouts")
             assert self.voice_manager.max_retry_attempts == 5
@@ -81,9 +81,16 @@ class TestVoiceConnectionManager:
             delays.append(delay)
             print(f"Attempt {attempt}: {delay:.1f}s delay")
             
-        # Verify exponential growth
-        for i in range(1, len(delays)):
-            assert delays[i] >= delays[i-1], "Delays should increase exponentially"
+        # Verify exponential growth (with allowance for jitter and max delay cap)
+        # First few should increase, then may cap at max_retry_delay
+        assert delays[1] > delays[0] * 1.5, "Second delay should be roughly double the first"
+        # After hitting max, delays should be close to max_retry_delay
+        max_delay = self.voice_manager.max_retry_delay
+        for i in range(2, len(delays)):
+            if delays[i] >= max_delay * 0.9:  # Within 10% of max delay
+                print(f"✅ Delay {i+1} has reached max delay cap")
+            else:
+                assert delays[i] >= delays[i-1] * 0.9, f"Delay {i+1} should be at least 90% of delay {i} (accounting for jitter)"
             
         print("✅ Exponential backoff working correctly")
         

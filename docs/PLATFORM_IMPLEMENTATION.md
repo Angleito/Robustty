@@ -14,7 +14,7 @@
 
 ### Implementation Details
 - Uses LBRY API endpoints for searching and streaming
-- Supports multiple URL formats (odysee.com, lbry.tv, lbry://)
+- Supports multiple URL formats (odysee.com, lbry://)
 - Leverages claim_search API for video discovery
 
 ## PeerTube Platform

@@ -1,10 +1,21 @@
 """
 Connection health monitoring service for proactive detection and handling of connectivity issues.
 Monitors Discord gateway, Redis, and platform API connectivity with automatic recovery.
+
+VPS-Specific Optimizations:
+- Environment detection: Automatically detects VPS deployment and adjusts parameters
+- Longer check intervals: 60s on VPS vs 30s on local/Docker to reduce load
+- Higher failure tolerance: 5 consecutive failures before marking unhealthy (vs 3)
+- Timeout multiplier: 2x longer timeouts for all operations on VPS
+- Network error tolerance: Distinguishes between network and API errors
+- Adaptive thresholds: More lenient for recent network errors on VPS
+- Extended recovery delays: Longer backoff periods to avoid overwhelming unstable networks
 """
 
 import asyncio
 import logging
+import os
+import socket
 import time
 from datetime import datetime, timedelta
 from enum import Enum
@@ -36,6 +47,21 @@ class ConnectionStatus(Enum):
     UNKNOWN = "unknown"
 
 
+class DeploymentEnvironment(Enum):
+    """Deployment environment types"""
+    LOCAL = "local"
+    DOCKER = "docker"
+    VPS = "vps"
+
+
+class ErrorCategory(Enum):
+    """Error categorization for better handling"""
+    NETWORK = "network"  # Network connectivity issues
+    API = "api"  # API-specific errors (rate limits, auth)
+    TIMEOUT = "timeout"  # Request timeouts
+    UNKNOWN = "unknown"  # Other errors
+
+
 @dataclass
 class HealthCheckResult:
     """Result of a health check"""
@@ -43,6 +69,7 @@ class HealthCheckResult:
     status: ConnectionStatus
     response_time: float
     error: Optional[str] = None
+    error_category: ErrorCategory = ErrorCategory.UNKNOWN
     details: Dict[str, Any] = field(default_factory=dict)
     timestamp: datetime = field(default_factory=datetime.now)
 
@@ -83,11 +110,33 @@ class HealthMonitor:
         self.config = config
         self.health_config = config.get("health_monitor", {})
         self.is_running = False
-        self.check_interval = self.health_config.get("check_interval", 30)  # seconds
-        self.max_consecutive_failures = self.health_config.get(
-            "max_consecutive_failures", 3
-        )
+        
+        # Detect deployment environment
+        self.environment = self._detect_environment()
+        logger.info(f"Health monitor initialized in {self.environment.value} environment")
+        
+        # Set environment-specific parameters
+        if self.environment == DeploymentEnvironment.VPS:
+            # VPS: Less aggressive checking, more tolerance for failures
+            self.check_interval = self.health_config.get("check_interval", 60)  # 1 minute
+            self.max_consecutive_failures = self.health_config.get(
+                "max_consecutive_failures", 5  # Allow more failures before marking unhealthy
+            )
+            self.timeout_multiplier = 2.0  # Double all timeouts
+            self.network_tolerance = 3  # Allow more network errors before marking unhealthy
+        else:
+            # Local/Docker: Standard parameters
+            self.check_interval = self.health_config.get("check_interval", 30)  # 30 seconds
+            self.max_consecutive_failures = self.health_config.get(
+                "max_consecutive_failures", 3
+            )
+            self.timeout_multiplier = 1.0
+            self.network_tolerance = 2
+        
         self.recovery_callbacks: Dict[str, Callable] = {}
+        
+        # Track error categories for better decision making
+        self.error_history: Dict[str, List[ErrorCategory]] = {}
 
         # Recovery configuration
         self.recovery_config = self.health_config.get("recovery", {})
@@ -108,6 +157,10 @@ class HealthMonitor:
 
         # Add platform health tracking - will be populated when platforms are loaded
         # This will be updated in the health check loop
+        
+        # Network error tracking for VPS-specific handling
+        self.network_error_counts: Dict[str, int] = {}
+        self.last_network_error: Dict[str, datetime] = {}
 
         # Prometheus metrics
         self.setup_metrics()
@@ -116,7 +169,12 @@ class HealthMonitor:
         self._health_check_task: Optional[asyncio.Task] = None
         self._recovery_tasks: Set[asyncio.Task] = set()
 
-        logger.info("Health monitor initialized")
+        logger.info(
+            f"Health monitor initialized - Environment: {self.environment.value}, "
+            f"Check interval: {self.check_interval}s, "
+            f"Max failures: {self.max_consecutive_failures}, "
+            f"Timeout multiplier: {self.timeout_multiplier}x"
+        )
 
     def setup_metrics(self):
         """Setup Prometheus metrics for health monitoring"""
@@ -139,7 +197,7 @@ class HealthMonitor:
         self.connection_failures_total = Counter(
             "robustty_connection_failures_total",
             "Total connection failures",
-            ["service", "error_type"],
+            ["service", "error_type", "error_category"],
         )
 
         # Recovery attempts counter
@@ -155,6 +213,71 @@ class HealthMonitor:
             "Number of consecutive failures per service",
             ["service"],
         )
+
+    def _detect_environment(self) -> DeploymentEnvironment:
+        """Detect deployment environment (Local, Docker, VPS)"""
+        # Check for Docker environment
+        if os.path.exists('/.dockerenv'):
+            # Running in Docker container
+            # Check if it's on VPS by looking for specific indicators
+            if self._is_vps_environment():
+                return DeploymentEnvironment.VPS
+            return DeploymentEnvironment.DOCKER
+        
+        # Check for VPS indicators
+        if self._is_vps_environment():
+            return DeploymentEnvironment.VPS
+        
+        # Default to local
+        return DeploymentEnvironment.LOCAL
+    
+    def _is_vps_environment(self) -> bool:
+        """Check if running on VPS by various indicators"""
+        vps_indicators = [
+            # Environment variables
+            os.getenv('IS_VPS', '').lower() == 'true',
+            os.getenv('DEPLOYMENT_TYPE', '').lower() == 'vps',
+            os.getenv('REDIS_URL', '').startswith('redis://redis:'),  # Container networking
+            
+            # Check hostname patterns common on VPS
+            'vps' in socket.gethostname().lower(),
+            'server' in socket.gethostname().lower(),
+            'ubuntu' in socket.gethostname().lower(),  # Common VPS hostname
+            
+            # Check for headless environment
+            os.getenv('DISPLAY') is None and os.name == 'posix',
+        ]
+        
+        return any(vps_indicators)
+
+    def _categorize_error(self, error: Exception) -> ErrorCategory:
+        """Categorize error for better handling"""
+        error_str = str(error).lower()
+        error_type = type(error).__name__.lower()
+        
+        # Network errors
+        if any(term in error_str for term in [
+            "timeout", "timed out", "connection", "network", 
+            "unreachable", "refused", "reset", "broken pipe",
+            "name resolution", "dns", "getaddrinfo"
+        ]) or any(term in error_type for term in [
+            "timeout", "connection", "oserror", "socket"
+        ]):
+            return ErrorCategory.NETWORK
+        
+        # API errors
+        if any(term in error_str for term in [
+            "rate limit", "quota", "429", "401", "403", 
+            "unauthorized", "forbidden", "invalid key", 
+            "invalid token", "authentication"
+        ]):
+            return ErrorCategory.API
+        
+        # Timeout errors
+        if "asyncio.timeouterror" in error_type:
+            return ErrorCategory.TIMEOUT
+        
+        return ErrorCategory.UNKNOWN
 
     async def start(self):
         """Start the health monitoring service"""
@@ -411,7 +534,20 @@ class HealthMonitor:
             # Test API connectivity with a simple search
             test_query = "test"
             try:
-                results = await platform.search_videos(test_query, max_results=1)
+                # Apply timeout based on environment
+                timeout = aiohttp.ClientTimeout(total=30 * self.timeout_multiplier)
+                
+                # Create platform-specific timeout context if needed
+                if hasattr(platform, 'search_videos_with_timeout'):
+                    results = await platform.search_videos_with_timeout(
+                        test_query, max_results=1, timeout=timeout.total
+                    )
+                else:
+                    # Use asyncio timeout for platforms without built-in timeout
+                    results = await asyncio.wait_for(
+                        platform.search_videos(test_query, max_results=1),
+                        timeout=timeout.total
+                    )
 
                 # Check if we got results or if it's just an empty response
                 if results is not None:
@@ -422,28 +558,55 @@ class HealthMonitor:
                     error = "API returned empty results"
 
             except Exception as api_error:
-                # Check error type to determine status
-                error_str = str(api_error).lower()
-                if any(
-                    term in error_str for term in ["timeout", "connection", "network"]
-                ):
-                    status = ConnectionStatus.UNHEALTHY
-                elif any(term in error_str for term in ["rate limit", "quota", "429"]):
-                    status = ConnectionStatus.DEGRADED
-                elif any(
-                    term in error_str for term in ["auth", "key", "token", "401", "403"]
-                ):
-                    status = ConnectionStatus.UNHEALTHY
+                # Categorize the error
+                error_category = self._categorize_error(api_error)
+                
+                # Determine status based on error category and environment
+                if error_category == ErrorCategory.NETWORK:
+                    # Track network errors for VPS
+                    platform_key = f"platform_{platform_name}"
+                    self.network_error_counts[platform_key] = \
+                        self.network_error_counts.get(platform_key, 0) + 1
+                    self.last_network_error[platform_key] = datetime.now()
+                    
+                    # Be more tolerant of network errors on VPS
+                    if self.environment == DeploymentEnvironment.VPS:
+                        if self.network_error_counts.get(platform_key, 0) < self.network_tolerance:
+                            status = ConnectionStatus.DEGRADED
+                        else:
+                            status = ConnectionStatus.UNHEALTHY
+                    else:
+                        status = ConnectionStatus.UNHEALTHY
+                        
+                elif error_category == ErrorCategory.API:
+                    # API errors are usually not transient
+                    if "rate limit" in str(api_error).lower() or "429" in str(api_error):
+                        status = ConnectionStatus.DEGRADED
+                    else:
+                        status = ConnectionStatus.UNHEALTHY
+                        
+                elif error_category == ErrorCategory.TIMEOUT:
+                    # Timeouts might be more common on VPS
+                    if self.environment == DeploymentEnvironment.VPS:
+                        status = ConnectionStatus.DEGRADED
+                    else:
+                        status = ConnectionStatus.UNHEALTHY
                 else:
                     status = ConnectionStatus.DEGRADED
 
-                error = f"API test failed: {str(api_error)}"
+                error = f"API test failed ({error_category.value}): {str(api_error)}"
 
             return HealthCheckResult(
                 status=status,
                 response_time=time.time() - start_time,
                 error=error,
-                details={"platform": platform_name, "enabled": platform.enabled},
+                error_category=error_category if 'error_category' in locals() else ErrorCategory.UNKNOWN,
+                details={
+                    "platform": platform_name, 
+                    "enabled": platform.enabled,
+                    "error_category": error_category.value if 'error_category' in locals() else None,
+                    "network_errors": self.network_error_counts.get(f"platform_{platform_name}", 0)
+                },
             )
 
         except Exception as e:
@@ -473,9 +636,16 @@ class HealthMonitor:
 
             # Record failure in metrics
             error_type = "connection_error" if result.error else "unknown"
+            error_category = result.error_category.value if hasattr(result, 'error_category') else "unknown"
             self.connection_failures_total.labels(
-                service=service_name, error_type=error_type
+                service=service_name, 
+                error_type=error_type,
+                error_category=error_category
             ).inc()
+            
+            # Reset network error count if healthy
+            if result.status == ConnectionStatus.HEALTHY and service_name in self.network_error_counts:
+                self.network_error_counts[service_name] = 0
 
         # Update connection status
         health.status = result.status
@@ -503,6 +673,24 @@ class HealthMonitor:
         self.consecutive_failures_gauge.labels(service=service_name).set(
             health.consecutive_failures
         )
+        
+        # Check if we should reduce severity for VPS network issues
+        if (self.environment == DeploymentEnvironment.VPS and 
+            service_name in self.network_error_counts and 
+            self.network_error_counts[service_name] > 0):
+            
+            # Check if network errors are recent
+            if service_name in self.last_network_error:
+                time_since_error = datetime.now() - self.last_network_error[service_name]
+                if time_since_error < timedelta(minutes=5):
+                    # Recent network errors on VPS - be more tolerant
+                    actual_threshold = self.max_consecutive_failures + 2
+                else:
+                    actual_threshold = self.max_consecutive_failures
+            else:
+                actual_threshold = self.max_consecutive_failures
+        else:
+            actual_threshold = self.max_consecutive_failures
         
         # Update platform prioritization if this is a platform health check
         if service_name.startswith("platform_"):
@@ -541,7 +729,7 @@ class HealthMonitor:
 
         # Trigger recovery if needed
         if (
-            health.consecutive_failures >= self.max_consecutive_failures
+            health.consecutive_failures >= actual_threshold
             and result.status == ConnectionStatus.UNHEALTHY
         ):
             await self._trigger_recovery(service_name, health)
@@ -571,13 +759,18 @@ class HealthMonitor:
     async def _recover_service(self, service_name: str, health: ConnectionHealth):
         """Attempt to recover a service"""
         try:
-            # Calculate delay based on configuration
+            # Calculate delay based on configuration and environment
             if self.use_exponential_backoff:
+                base_delay = 10 if self.environment != DeploymentEnvironment.VPS else 20
                 delay = min(
-                    self.max_recovery_delay, 10 * (2 ** (health.recovery_attempts - 1))
+                    self.max_recovery_delay, base_delay * (2 ** (health.recovery_attempts - 1))
                 )
             else:
-                delay = min(self.max_recovery_delay, 30 * health.recovery_attempts)
+                base_delay = 30 if self.environment != DeploymentEnvironment.VPS else 60
+                delay = min(self.max_recovery_delay, base_delay * health.recovery_attempts)
+            
+            # Apply timeout multiplier for VPS
+            delay *= self.timeout_multiplier
 
             logger.info(f"Waiting {delay}s before recovery attempt for {service_name}")
             await asyncio.sleep(delay)
@@ -718,6 +911,10 @@ class HealthMonitor:
             "overall_status": overall_status.value,
             "services": status,
             "timestamp": datetime.now().isoformat(),
+            "environment": self.environment.value,
+            "check_interval": self.check_interval,
+            "timeout_multiplier": self.timeout_multiplier,
+            "network_error_counts": dict(self.network_error_counts),
         }
 
     def register_recovery_callback(self, service_name: str, callback: Callable):

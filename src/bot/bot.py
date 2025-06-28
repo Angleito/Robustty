@@ -110,8 +110,18 @@ class RobusttyBot(commands.Bot):
         if self.stability_monitor.enabled:
             enabled_platforms = list(self.platform_registry.get_enabled_platforms().keys())
             logger.info(f"STABILITY MODE: Active platforms: {enabled_platforms}")
-            if self.stability_monitor.problematic_platforms:
-                logger.warning(f"STABILITY MODE: Problematic platforms disabled: {self.stability_monitor.problematic_platforms}")
+            
+            # Check which problematic platforms are actually disabled
+            disabled_problematic = []
+            for platform_name in self.stability_monitor.problematic_platforms:
+                platform = self.platform_registry.get_platform(platform_name)
+                if platform and not platform.enabled:
+                    disabled_problematic.append(platform_name)
+            
+            if disabled_problematic:
+                logger.warning(f"STABILITY MODE: Problematic platforms currently disabled: {set(disabled_problematic)}")
+            else:
+                logger.info(f"STABILITY MODE: All problematic platforms are currently enabled and will be monitored: {self.stability_monitor.problematic_platforms}")
 
         # Initialize cookie management services
         cookie_config = self.config.get("cookies", {})

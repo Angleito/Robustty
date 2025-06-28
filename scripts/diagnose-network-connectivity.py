@@ -40,14 +40,14 @@ class NetworkDiagnostic:
         self.test_domains = [
             ("discord.com", "Discord API"),
             ("gateway.discord.gg", "Discord Gateway"),
-            ("api.lbry.tv", "Odysee API"),
+            ("api.odysee.com", "Odysee API"),
             ("tube.tchncs.de", "PeerTube Instance"),
             ("framatube.org", "PeerTube Framatube"),
         ]
         
         self.http_endpoints = [
             ("https://discord.com/api/v10/gateway", "Discord API Gateway"),
-            ("https://api.lbry.tv", "Odysee API"),
+            ("https://api.odysee.com", "Odysee API"),
             ("https://tube.tchncs.de/api/v1/search/videos?search=test&count=1", "PeerTube Search"),
         ]
 

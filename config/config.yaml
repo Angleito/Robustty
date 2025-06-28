@@ -8,12 +8,12 @@ bot:
 stability_mode:
   enabled: ${VPS_STABILITY_MODE:true}  # Enable stability mode for VPS deployments
   auto_disable_failing_platforms: ${AUTO_DISABLE_FAILING_PLATFORMS:true}
-  failure_threshold: ${PLATFORM_FAILURE_THRESHOLD:5}  # Consecutive failures before disabling
-  recovery_check_interval: ${PLATFORM_RECOVERY_CHECK_INTERVAL:300}  # Check disabled platforms every 5 minutes
+  failure_threshold: ${PLATFORM_FAILURE_THRESHOLD:10}  # Consecutive failures before disabling (increased for better availability)
+  recovery_check_interval: ${PLATFORM_RECOVERY_CHECK_INTERVAL:180}  # Check disabled platforms every 3 minutes (faster recovery)
   
   # Platform-specific stability settings
   stable_platforms: ["youtube", "rumble"]  # Platforms known to be stable
-  problematic_platforms: ["peertube", "odysee"]  # Platforms with known issues
+  problematic_platforms: []  # Empty list - let stability monitor determine based on actual performance
   
   # Network optimization for VPS
   use_simplified_networking: ${USE_SIMPLIFIED_NETWORKING:true}
@@ -40,7 +40,7 @@ platforms:
     serve_stale_on_error: true  # Serve stale cache on YouTube-specific errors
 
   peertube:
-    enabled: ${PEERTUBE_ENABLED:false}  # Disabled by default for stability
+    enabled: ${PEERTUBE_ENABLED:true}  # Enable by default, let stability monitor handle issues
     instances:
       # Primary reliable instances (tested and verified)
       - https://tube.tchncs.de     # German instance, very reliable, federated content
@@ -60,9 +60,9 @@ platforms:
     max_results_per_instance: 3  # Reduced per instance since we have more instances
 
   odysee:
-    enabled: ${ODYSEE_ENABLED:false}
-    api_url: https://api.lbry.tv/api/v1/proxy
-    stream_url: https://api.lbry.tv
+    enabled: ${ODYSEE_ENABLED:true}  # Enable by default, let stability monitor handle issues
+    api_url: https://api.odysee.com/api/v1
+    stream_url: https://cdn.odysee.live
     max_results: 10
     
     # Enhanced timeout configuration for connection stability
@@ -77,7 +77,7 @@ platforms:
     max_connections_per_host: ${ODYSEE_MAX_CONNECTIONS_PER_HOST:5}  # Per-host connection limit - VPS uses 8
 
   rumble:
-    enabled: ${RUMBLE_ENABLED:false}
+    enabled: ${RUMBLE_ENABLED:true}  # Enable by default, let stability monitor handle issues
     api_token: ${RUMBLE_API_TOKEN:}
     base_url: https://rumble.com
     api_base: https://rumble.com/api/v0

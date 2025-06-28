@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import re
+import ssl
 from datetime import datetime, timedelta
 from typing import Any, Coroutine, Dict, List, Optional, Union, Set
 
@@ -69,10 +70,10 @@ class PeerTubeTimeoutError(PeerTubeConnectionError):
 
 # PeerTube-specific configurations
 PEERTUBE_INSTANCE_CIRCUIT_BREAKER_CONFIG = CircuitBreakerConfig(
-    failure_threshold=2,  # More sensitive for individual instances
-    recovery_timeout=120,  # Give instances more time to recover
+    failure_threshold=3,  # Allow 3 failures before opening (was 2)
+    recovery_timeout=60,  # Reduced recovery timeout (was 120)
     success_threshold=1,  # Only need 1 success to close
-    timeout=20,  # Shorter timeout for individual instance calls
+    timeout=15,  # Reasonable timeout for instance calls (was 20)
 )
 
 PEERTUBE_RETRY_CONFIG = RetryConfig(
@@ -189,6 +190,42 @@ class PeerTubePlatform(VideoPlatform):
             f"PeerTube platform initialized with {len(self.instances)} instances"
         )
 
+    async def initialize(self):
+        """Initialize platform resources with custom SSL context for PeerTube instances"""
+        # Create SSL context that accepts self-signed certificates
+        # Many PeerTube instances use self-signed certificates which would otherwise cause connection failures
+        ssl_context = ssl.create_default_context()
+        ssl_context.check_hostname = False
+        ssl_context.verify_mode = ssl.CERT_NONE  # Disable certificate verification for self-signed certs
+        
+        # Create timeout config
+        timeout = aiohttp.ClientTimeout(
+            total=self.config.get('http_timeout', 30),
+            connect=self.config.get('http_connect_timeout', 10),
+            sock_connect=self.config.get('sock_connect_timeout', 10),
+            sock_read=self.config.get('sock_read_timeout', 10)
+        )
+        
+        # Create connector with SSL context
+        connector = aiohttp.TCPConnector(
+            ssl=ssl_context,
+            limit_per_host=self.config.get('connections_per_host', 10),
+            ttl_dns_cache=self.config.get('dns_cache_ttl', 300),
+            enable_cleanup_closed=True,
+            force_close=True
+        )
+        
+        # Create session with custom settings
+        self.session = aiohttp.ClientSession(
+            timeout=timeout,
+            connector=connector,
+            headers={
+                'User-Agent': 'Robustty-Bot/1.0 (Discord Music Bot)'
+            }
+        )
+        self._session_closed = False
+        logger.info(f"Initialized PeerTube platform with custom SSL context for {len(self.instances)} instances")
+
     async def search_videos(
         self, query: SearchQuery, max_results: int = 10
     ) -> List[Dict[str, Any]]:
@@ -235,12 +272,15 @@ class PeerTubePlatform(VideoPlatform):
         )
 
         try:
-            # Search each healthy instance
-            for instance in healthy_instances:
+            # Search each healthy instance with small stagger to avoid thundering herd
+            for i, instance in enumerate(healthy_instances):
                 task = self._search_instance_with_resilience(
                     instance, query, results_per_instance
                 )
                 tasks.append(task)
+                # Add small delay between instance requests (50ms)
+                if i < len(healthy_instances) - 1:
+                    await asyncio.sleep(0.05)
 
             # Gather results from all instances with timeout
             # Use longer timeout for instances that might be recovering
@@ -476,31 +516,36 @@ class PeerTubePlatform(VideoPlatform):
                 self.session, "GET", url, params=params, timeout=12
             )
 
-            if response.status == 403:
-                logger.warning(
-                    f"PeerTube instance {instance_url} returned 403 "
-                    "Forbidden - may require authentication"
-                )
-                return []
-            elif response.status == 429:
-                raise PlatformRateLimitError(
-                    f"PeerTube instance {instance_url} rate limit exceeded",
-                    platform="PeerTube",
-                )
-            elif response.status >= 500:
-                raise PeerTubeInstanceUnavailableError(
-                    f"Server error ({response.status})",
-                    instance=instance_url,
-                    platform="PeerTube",
-                )
-            elif response.status != 200:
-                logger.warning(
-                    f"PeerTube search failed for {instance_url}: {response.status}"
-                )
-                return []
+            # Read response data while connection is still active
+            try:
+                if response.status == 403:
+                    logger.warning(
+                        f"PeerTube instance {instance_url} returned 403 "
+                        "Forbidden - may require authentication"
+                    )
+                    return []
+                elif response.status == 429:
+                    raise PlatformRateLimitError(
+                        f"PeerTube instance {instance_url} rate limit exceeded",
+                        platform="PeerTube",
+                    )
+                elif response.status >= 500:
+                    raise PeerTubeInstanceUnavailableError(
+                        f"Server error ({response.status})",
+                        instance=instance_url,
+                        platform="PeerTube",
+                    )
+                elif response.status != 200:
+                    logger.warning(
+                        f"PeerTube search failed for {instance_url}: {response.status}"
+                    )
+                    return []
 
-            data: SearchData = await response.json()
-            results: List[Dict[str, Any]] = []
+                data: SearchData = await response.json()
+                results: List[Dict[str, Any]] = []
+            finally:
+                # Ensure response is closed
+                response.close()
 
             for video in data.get("data", []):
                 try:
@@ -557,10 +602,18 @@ class PeerTubePlatform(VideoPlatform):
                     platform="PeerTube",
                     original_error=e,
                 )
+            elif "ssl" in error_msg or "certificate" in error_msg or "sslcertverificationerror" in error_msg:
+                logger.error(f"SSL/TLS error connecting to {instance_url}: {e}")
+                raise PeerTubeConnectionError(
+                    f"SSL/TLS error connecting to {instance_url}. This may be due to self-signed certificates. "
+                    "SSL verification has been disabled to support self-signed certificates.",
+                    platform="PeerTube",
+                    original_error=e,
+                )
             else:
                 logger.error(f"Connection error to {instance_url}: {e}")
                 raise PeerTubeConnectionError(
-                    f"Connection failed to {instance_url}",
+                    f"Connection failed to {instance_url}: {str(e)[:100]}",
                     platform="PeerTube",
                     original_error=e,
                 )
@@ -610,7 +663,13 @@ class PeerTubePlatform(VideoPlatform):
                 if self.session is None:
                     logger.error("Session not initialized")
                     continue
-                async with self.session.get(url) as response:
+                    
+                # Use safe_aiohttp_request for consistent SSL handling
+                response = await safe_aiohttp_request(
+                    self.session, "GET", url, timeout=12
+                )
+                
+                try:
                     if response.status == 200:
                         video: VideoInfo = await response.json()
 
@@ -637,6 +696,19 @@ class PeerTubePlatform(VideoPlatform):
                         # Cache the details
                         await self.cache_video_metadata(video_id, details)
                         return details
+                    elif response.status == 404:
+                        # Video not found on this instance, try next
+                        continue
+                finally:
+                    response.close()
+                    
+            except aiohttp.ClientConnectorError as e:
+                error_msg = str(e).lower()
+                if "ssl" in error_msg or "certificate" in error_msg:
+                    logger.warning(f"SSL/TLS error getting video details from {instance}: {e}")
+                else:
+                    logger.debug(f"Connection error to {instance}: {e}")
+                continue
             except Exception as e:
                 logger.debug(f"Video {video_id} not found on {instance}: {e}")
                 continue
@@ -675,8 +747,15 @@ class PeerTubePlatform(VideoPlatform):
             if self.session is None:
                 logger.error("Session not initialized")
                 return None
-            async with self.session.get(url) as response:
+                
+            # Use safe_aiohttp_request for consistent SSL handling
+            response = await safe_aiohttp_request(
+                self.session, "GET", url, timeout=12
+            )
+            
+            try:
                 if response.status != 200:
+                    logger.warning(f"Failed to get stream URL from {instance}: status {response.status}")
                     return None
 
                 video: VideoInfo = await response.json()
@@ -684,6 +763,7 @@ class PeerTubePlatform(VideoPlatform):
                 # Get best quality file
                 files: List[VideoFile] = video.get("files", [])
                 if not files:
+                    logger.warning(f"No video files available for {video_id} on {instance}")
                     return None
 
                 # Sort by resolution, get highest
@@ -696,9 +776,22 @@ class PeerTubePlatform(VideoPlatform):
                 # Cache the stream URL
                 await self.cache_stream_url(video_id, stream_url)
                 return stream_url
+            finally:
+                response.close()
+                
+        except aiohttp.ClientConnectorError as e:
+            error_msg = str(e).lower()
+            if "ssl" in error_msg or "certificate" in error_msg:
+                logger.error(
+                    f"SSL/TLS error getting stream URL from {instance}: {e}. "
+                    "The instance may be using a self-signed certificate."
+                )
+            else:
+                logger.error(f"Connection error to {instance}: {e}")
+            return None
         except Exception as e:
             logger.error(
-                f"Error getting stream URL for PeerTube video " f"{video_id}: {e}"
+                f"Error getting stream URL for PeerTube video {video_id}: {e}"
             )
             return None
 

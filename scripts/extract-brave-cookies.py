@@ -145,18 +145,36 @@ def save_cookies_to_files(cookies: Dict[str, List[dict]]) -> None:
     logger.info(f"Using cookie directory: {cookie_dir}")
     
     # Ensure all platforms have cookie files (create empty ones if needed)
+    COOKIE_OPTIONAL_PLATFORMS = ['peertube', 'odysee']
+    
     for platform in PLATFORM_DOMAINS.keys():
         output_file = cookie_dir / f'{platform}_cookies.json'
         platform_cookies = cookies.get(platform, [])
+        
+        # For optional platforms without cookies, create placeholder
+        if not platform_cookies and platform in COOKIE_OPTIONAL_PLATFORMS:
+            placeholder_cookie = {
+                "name": f"{platform}_placeholder",
+                "value": "placeholder",
+                "domain": f".{platform}.com",
+                "path": "/",
+                "secure": True,
+                "httpOnly": False,
+                "sameSite": "None",
+                "expires": None,
+                "_comment": f"Placeholder for {platform} - platform works without authentication"
+            }
+            platform_cookies = [placeholder_cookie]
+            logger.info(f"Creating placeholder cookie for {platform} (optional platform)")
         
         try:
             with open(output_file, 'w') as f:
                 json.dump(platform_cookies, f, indent=2)
             
-            if platform_cookies:
+            if platform_cookies and not (len(platform_cookies) == 1 and platform_cookies[0].get('name', '').endswith('_placeholder')):
                 logger.info(f"Saved {len(platform_cookies)} {platform} cookies to {output_file}")
             else:
-                logger.info(f"Created empty {platform} cookie file at {output_file}")
+                logger.info(f"Created {platform} cookie file at {output_file} (placeholder or empty)")
             
         except Exception as e:
             logger.error(f"Failed to save {platform} cookies: {e}")
