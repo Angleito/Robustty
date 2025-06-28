@@ -7,8 +7,6 @@ import aiohttp
 if TYPE_CHECKING:
     from ..services.cache_manager import CacheManager
 
-from ..services.http_session_manager import get_session_manager
-
 logger = logging.getLogger(__name__)
 
 
@@ -52,39 +50,32 @@ class VideoPlatform(ABC):
 
     async def initialize(self):
         """Initialize platform resources"""
-        # Use the global session manager for all HTTP connections
-        session_manager = get_session_manager()
-        
-        # Get platform-specific session configuration
+        # Create a simple aiohttp session for now
         timeout = aiohttp.ClientTimeout(
             total=self.config.get('http_timeout', 30),
             connect=self.config.get('http_connect_timeout', 10)
         )
         
-        connector_kwargs = {
-            'limit_per_host': self.config.get('connections_per_host', 10),
-            'ttl_dns_cache': self.config.get('dns_cache_ttl', 300)
-        }
+        connector = aiohttp.TCPConnector(
+            limit_per_host=self.config.get('connections_per_host', 10),
+            ttl_dns_cache=self.config.get('dns_cache_ttl', 300)
+        )
         
-        # Get or create session through the manager
-        self.session = await session_manager.get_session(
-            name=f"platform_{self.name}",
+        # Create simple session
+        self.session = aiohttp.ClientSession(
             timeout=timeout,
-            connector_kwargs=connector_kwargs
+            connector=connector
         )
         self._session_closed = False
-        logger.info(f"Initialized {self.name} platform with managed HTTP session")
+        logger.info(f"Initialized {self.name} platform with HTTP session")
 
     async def cleanup(self):
         """Cleanup platform resources"""
-        # Session cleanup is now handled by the session manager
-        # Just mark our reference as closed
-        if self.session:
+        if hasattr(self, 'session') and self.session and not self._session_closed:
+            await self.session.close()
             self._session_closed = True
             self.session = None
-            logger.info(f"Released HTTP session reference for {self.name} platform")
-        
-        logger.info(f"Cleaned up {self.name} platform")
+            logger.info(f"Cleaned up {self.name} platform")
 
     # Cache-aware helper methods
     async def get_cached_search_results(self, query: str) -> Optional[List[Dict[str, Any]]]:
