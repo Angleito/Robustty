@@ -431,13 +431,16 @@ docker-compose -f docker-compose.yml up -d --build
 docker-compose exec robustty python -c "import redis; print(redis.from_url('redis://redis:6379').ping())"
 
 # Test voice connection enhancements
-python test_voice_connection_fix.py              # Test with auto-detected environment
-python test_voice_connection_fix.py vps          # Force VPS environment for testing
-python test_voice_connection_fix.py local        # Force local environment for testing
+python tests/manual/test_voice_connection_fix.py              # Test with auto-detected environment
+python tests/manual/test_voice_connection_fix.py vps          # Force VPS environment for testing
+python tests/manual/test_voice_connection_fix.py local        # Force local environment for testing
+
+# Test connection cleanup
+python tests/manual/test_connection_cleanup.py                # Test aiohttp cleanup
 
 # Test all VPS fixes comprehensively
-python test_vps_fixes.py                         # Run comprehensive VPS validation
-docker-compose exec robustty python test_vps_fixes.py  # Run inside Docker container
+python tests/manual/test_vps_fixes.py                         # Run comprehensive VPS validation
+docker-compose exec robustty python tests/manual/test_vps_fixes.py  # Run inside Docker container
 ```
 
 ## Debugging
