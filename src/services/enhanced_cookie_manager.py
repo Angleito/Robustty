@@ -193,34 +193,42 @@ class EnhancedCookieManager:
             return False
 
     def _validate_cookie(self, cookie: Dict, platform: str, index: int) -> bool:
-        """Validate individual cookie structure"""
+        """Validate individual cookie structure with enhanced handling for encrypted cookies"""
         if not isinstance(cookie, dict):
             logger.debug(f"Invalid cookie {index} for {platform}: not a dict")
             return False
 
-        required_fields = ["name", "value"]
-        for field in required_fields:
-            if field not in cookie or not cookie[field]:
-                logger.debug(
-                    f"Invalid cookie {index} for {platform}: missing or empty {field}"
-                )
-                return False
+        # Check for required name field
+        if "name" not in cookie or not cookie["name"]:
+            logger.debug(f"Invalid cookie {index} for {platform}: missing or empty name")
+            return False
 
-        # Check for problematic characters
+        # For value field, be more lenient - encrypted cookies may appear empty
+        if "value" not in cookie:
+            logger.debug(f"Invalid cookie {index} for {platform}: missing value field")
+            return False
+
         name = cookie["name"]
-        value = cookie["value"]
+        value = cookie.get("value", "")
 
+        # Check for problematic characters in name
         if any(char in name for char in ["\n", "\t", "\r"]):
             logger.debug(
                 f"Invalid cookie {index} for {platform}: name contains invalid characters"
             )
             return False
 
-        if any(char in value for char in ["\n", "\t", "\r"]):
+        # Check for problematic characters in value (if value exists)
+        if value and any(char in value for char in ["\n", "\t", "\r"]):
             logger.debug(
                 f"Invalid cookie {index} for {platform}: value contains invalid characters"
             )
             return False
+
+        # Accept cookies with empty values as they may be encrypted or platform-specific
+        # Log a debug message for tracking but don't reject the cookie
+        if not value.strip():
+            logger.debug(f"Cookie {index} for {platform} ({name}) has empty value - may be encrypted")
 
         return True
 

@@ -43,9 +43,13 @@ services:
       - 8.8.4.4      # Google secondary
       - 1.1.1.1      # Cloudflare primary
       - 1.0.0.1      # Cloudflare secondary
+      - 208.67.222.222  # OpenDNS primary
+      - 208.67.220.220  # OpenDNS secondary
     dns_search: []   # Disable DNS search domains
     dns_opt:
       - ndots:0      # Prevent DNS search suffix issues
+      - timeout:3    # DNS timeout in seconds
+      - attempts:3   # DNS retry attempts
     extra_hosts:
       - "host.docker.internal:host-gateway"  # For container-to-host communication
     sysctls:

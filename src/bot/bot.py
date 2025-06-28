@@ -22,6 +22,7 @@ from src.services.stability_monitor import StabilityMonitor
 # from src.utils.resilient_discord_client import add_resilient_connection_to_bot
 from src.utils.network_connectivity import get_connectivity_manager
 from src.services.http_session_manager import cleanup_session_manager
+from src.utils.discord_connection_handler import setup_connection_handler
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +38,10 @@ class RobusttyBot(commands.Bot):
             intents=intents,
             description=config["bot"]["description"],
             help_command=None,  # Disable default help command
+            # Enhanced connection settings for stability
+            heartbeat_timeout=60.0,  # Increased from default 60s
+            guild_ready_timeout=10.0,  # Increased timeout for guild ready
+            max_messages=5000,  # Reduced message cache to save memory
         )
 
         self.config = config
@@ -54,7 +59,10 @@ class RobusttyBot(commands.Bot):
         self.health_monitor: Optional[HealthMonitor] = None
         self.stability_monitor: Optional[StabilityMonitor] = None
         self.connectivity_manager = get_connectivity_manager(config)
-
+        
+        # Enhanced connection handler for WebSocket resilience
+        self.connection_handler = setup_connection_handler(self)
+        
         # Temporarily disable resilient connection to fix infinite loop
         # self.resilient_client = add_resilient_connection_to_bot(self, config)
         self.resilient_client = None
@@ -186,12 +194,22 @@ class RobusttyBot(commands.Bot):
             return
 
         logger.info(f"Logged in as {self.user} (ID: {self.user.id})")
+        
+        # Notify connection handler of successful connection
+        if hasattr(self, 'connection_handler'):
+            self.connection_handler.on_ready()
 
-        # Set activity
+        # Set activity with rate limiting protection
         activity = discord.Activity(
             type=discord.ActivityType.listening, name=self.config["bot"]["activity"]
         )
-        await self.change_presence(activity=activity)
+        
+        if hasattr(self, 'connection_handler'):
+            success = await self.connection_handler.safe_status_change(activity)
+            if not success:
+                logger.debug("Status change skipped due to rate limiting")
+        else:
+            await self.change_presence(activity=activity)
 
         # Start health monitor if enabled
         if self.health_monitor and self.config.get("health_monitor", {}).get(

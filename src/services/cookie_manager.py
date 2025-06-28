@@ -145,15 +145,19 @@ class CookieManager:
                     self.cookie_status[platform]["error"] = "Invalid format"
                     return False
 
-                # Validate cookie structure
+                # Validate cookie structure with enhanced handling for encrypted cookies
                 valid_cookies = []
                 for cookie in cookies:
                     if (
                         isinstance(cookie, dict)
                         and "name" in cookie
                         and "value" in cookie
+                        and cookie["name"]  # Name must not be empty
                     ):
+                        # Accept cookies even with empty values (may be encrypted)
                         valid_cookies.append(cookie)
+                        if not cookie.get("value", "").strip():
+                            logger.debug(f"Cookie {cookie['name']} for {platform} has empty value - may be encrypted")
                     else:
                         logger.debug(f"Skipping invalid cookie in {platform}: {cookie}")
 

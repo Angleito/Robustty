@@ -59,11 +59,17 @@ async def main() -> None:
             logger.error("DISCORD_TOKEN not found in environment")
             sys.exit(1)
 
-        # Run preflight network checks
-        if not await run_preflight_checks(config):
-            logger.error("Preflight network checks failed - aborting startup")
-            logger.error("Please check your network connectivity and try again")
-            sys.exit(1)
+        # Run preflight network checks (non-blocking)
+        try:
+            preflight_result = await run_preflight_checks(config)
+            if not preflight_result:
+                logger.warning("Preflight network checks failed - continuing with degraded connectivity")
+                logger.warning("Some features may not work optimally")
+            else:
+                logger.info("Preflight network checks passed")
+        except Exception as e:
+            logger.warning(f"Preflight network checks encountered error: {e}")
+            logger.warning("Continuing startup despite network check failure")
 
         # Create bot first
         bot = RobusttyBot(config)
