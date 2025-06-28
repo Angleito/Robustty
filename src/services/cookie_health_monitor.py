@@ -14,7 +14,7 @@ from typing import Dict, List, Optional, Tuple, Any
 import aiofiles
 import aiohttp
 
-from .http_session_manager import get_session_manager
+from src.services.http_session_manager import get_session_manager
 
 logger = logging.getLogger(__name__)
 
