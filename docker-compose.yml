@@ -71,8 +71,9 @@ services:
     image: redis:7-alpine
     container_name: robustty-redis
     restart: unless-stopped
-    ports:
-      - "6379:6379"
+    # SECURITY: Remove external port exposure - Redis only accessible within Docker network
+    # ports:
+    #   - "6379:6379"  # REMOVED: This was exposing Redis to the public internet
     volumes:
       - robustty-redis-data:/data
     networks:
@@ -81,6 +82,8 @@ services:
       redis-server 
       --appendonly yes 
       --port 6379
+      --bind 0.0.0.0
+      --protected-mode yes
       --tcp-keepalive 300
       --timeout 0
       --tcp-backlog 511
