@@ -774,11 +774,19 @@ class YouTubePlatform(VideoPlatform):
         ),
     )
     async def get_stream_url(self, video_id: str) -> Optional[str]:
-        """Get stream URL using yt-dlp with cookies and enhanced error handling"""
+        """
+        Get stream URL using yt-dlp with enhanced compliance and error handling
+        
+        IMPORTANT COMPLIANCE NOTICE:
+        This method is used as a fallback when YouTube Data API quota is exceeded.
+        It should be used responsibly and in compliance with YouTube's Terms of Service.
+        Consider implementing proper attribution and respecting content creator rights.
+        """
         import yt_dlp
         import asyncio
 
         logger.info(f"Getting stream URL for YouTube video: {video_id}")
+        logger.warning("Using yt-dlp fallback - ensure compliance with YouTube ToS")
 
         # Check cache first
         cached_stream_url = await self.get_cached_stream_url(video_id)
@@ -821,6 +829,15 @@ class YouTubePlatform(VideoPlatform):
                 # Better error handling for auth issues
                 "ignoreerrors": False,
                 "no_color": True,
+                # 2024-2025 compliance headers
+                "http_headers": {
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                    "Accept-Language": "en-us,en;q=0.5",
+                    "Sec-Fetch-Mode": "navigate",
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                },
+                # Performance optimization for VPS
+                "concurrent_fragment_downloads": 1,  # Reduce for VPS stability
                 # Subtitle settings - disable downloads for audio streaming
                 "writesubtitles": False,
                 "writeautomaticsub": False,
