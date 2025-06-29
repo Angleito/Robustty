@@ -1689,7 +1689,7 @@ class Admin(Cog):
             )
             await ctx.send(embed=embed)
     
-    @commands.command(name="platform", aliases=["platforms"])
+    @commands.command(name="platform")
     @is_admin()
     async def platform_control(self, ctx: Context[RobottyBot], action: Optional[str] = None, platform_name: Optional[str] = None) -> None:
         """Control platform enable/disable status

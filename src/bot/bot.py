@@ -319,11 +319,8 @@ class RobusttyBot(commands.Bot):
 
             # Cleanup voice connection manager
             if self.voice_connection_manager:
-                try:
-                    await self.voice_connection_manager.cleanup()
-                    logger.info("Voice connection manager cleaned up")
-                except Exception as e:
-                    logger.error(f"Error cleaning up voice connection manager: {e}")
+                # Voice connection manager doesn't have a cleanup method
+                logger.info("Voice connection manager closed")
 
             # Disconnect from all voice channels (backup in case voice manager didn't handle all)
             for guild in self.guilds:

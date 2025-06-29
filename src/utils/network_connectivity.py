@@ -231,6 +231,17 @@ class NetworkConnectivityChecker:
             resolver.retry_servfail = True  # Retry on SERVFAIL
             resolver.ndots = 1  # Reduce unnecessary queries
 
+            # Special handling for Discord gateway domains
+            if 'discord.gg' in domain and 'gateway' in domain:
+                # Discord gateways may not have standard DNS records
+                # Try to resolve the main gateway domain instead
+                try:
+                    await resolver.resolve('gateway.discord.gg', 'A')
+                    response_time = time.time() - start_time
+                    return True, response_time, None
+                except:
+                    pass
+            
             # Try multiple record types in order
             for record_type in ['A', 'AAAA', 'CNAME']:
                 try:
