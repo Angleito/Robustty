@@ -355,6 +355,9 @@ APIFY_API_KEY=your_apify_key_for_rumble
 LOG_LEVEL=INFO
 MAX_QUEUE_SIZE=100
 REDIS_URL=redis://localhost:6379
+
+# Voice Connection (optional)
+VOICE_ENVIRONMENT=vps  # Force VPS mode (options: vps, local, docker)
 ```
 
 ### Local Development Setup
@@ -378,11 +381,13 @@ docker-compose up -d
 
 ### Enhanced Voice Connection Management for VPS
 - **Environment Detection**: Automatic detection of deployment environment (Local/Docker/VPS)
+  - Can be overridden with `VOICE_ENVIRONMENT` environment variable
 - **VPS-Specific Optimizations**: 
-  - Longer retry delays (5s base, up to 120s max) for unstable VPS networks
-  - Extended connection timeout (45s) and session timeout (5 minutes)
+  - Longer retry delays (10s base, up to 60s max) for unstable VPS networks
+  - Extended connection timeout (90s) and session timeout (5 minutes)
   - Higher circuit breaker threshold (5 failures) before disabling connections
   - Network stability checks before attempting voice connections
+  - More aggressive session recreation for error recovery
 - **Session Management**: 
   - Proper session recreation for WebSocket error 4006 ("Session no longer valid")
   - Session state tracking with unique IDs and age monitoring
@@ -441,6 +446,11 @@ python tests/manual/test_connection_cleanup.py                # Test aiohttp cle
 # Test all VPS fixes comprehensively
 python tests/manual/test_vps_fixes.py                         # Run comprehensive VPS validation
 docker-compose exec robustty python tests/manual/test_vps_fixes.py  # Run inside Docker container
+
+# Test VPS voice connection fixes
+python tests/manual/test_vps_voice_fixes.py                   # Test voice fixes with auto-detection
+python tests/manual/test_vps_voice_fixes.py vps               # Force VPS environment for testing
+VOICE_ENVIRONMENT=vps python tests/manual/test_vps_voice_fixes.py  # Using environment variable
 ```
 
 ## Debugging

@@ -65,15 +65,15 @@ class VoiceConnectionManager:
         # Configuration based on environment
         if self.environment == DeploymentEnvironment.VPS:
             # VPS-specific configuration with longer delays and session recreation
-            self.max_retry_attempts = 3  # Reduced for faster recovery
-            self.base_retry_delay = 8.0  # Discord requires 6+ seconds, use 8 for VPS
-            self.max_retry_delay = 30.0  # Faster max delay
-            self.connection_timeout = 60.0  # Longer timeout for VPS
-            self.session_timeout = 180.0  # 3 minutes (shorter for faster refresh)
-            self.circuit_breaker_threshold = 3  # Faster circuit breaking
-            self.circuit_breaker_timeout = 120.0  # 2 minutes
+            self.max_retry_attempts = 5  # More attempts for VPS network stability
+            self.base_retry_delay = 10.0  # Increased from 8 to 10 for better VPS stability
+            self.max_retry_delay = 60.0  # Increased max delay for VPS
+            self.connection_timeout = 90.0  # Increased from 60 to 90 seconds
+            self.session_timeout = 300.0  # 5 minutes for VPS
+            self.circuit_breaker_threshold = 5  # Increased from 3 to 5 for VPS
+            self.circuit_breaker_timeout = 300.0  # 5 minutes
             self.network_check_interval = 10.0  # seconds
-            self.force_session_recreation = False  # Only recreate when actually needed
+            self.force_session_recreation = True  # More aggressive session recreation for VPS
         else:
             # Local/Docker configuration
             self.max_retry_attempts = 5
@@ -100,11 +100,27 @@ class VoiceConnectionManager:
         # Session-specific error codes that require new session
         self.session_error_codes = {4006, 4009}
         
+        # VPS-specific error codes that should trigger more aggressive handling
+        self.vps_aggressive_error_codes = {4006, 4009, 4011, 4014}
+        
         # Initialize health monitoring
         self._start_health_monitoring()
 
     def _detect_environment(self) -> DeploymentEnvironment:
         """Detect deployment environment (Local, Docker, VPS)"""
+        # Check for environment variable override first
+        voice_env = os.getenv('VOICE_ENVIRONMENT', '').lower()
+        if voice_env:
+            env_map = {
+                'vps': DeploymentEnvironment.VPS,
+                'local': DeploymentEnvironment.LOCAL,
+                'docker': DeploymentEnvironment.DOCKER
+            }
+            if voice_env in env_map:
+                logger.info(f"Voice environment forced to {voice_env.upper()} via VOICE_ENVIRONMENT variable")
+                return env_map[voice_env]
+        
+        # Auto-detect if no override
         # Check for Docker environment
         if os.path.exists('/.dockerenv'):
             # Running in Docker container
@@ -207,18 +223,75 @@ class VoiceConnectionManager:
         if self.environment != DeploymentEnvironment.VPS:
             return True  # Skip for non-VPS environments
         
+        checks_passed = 0
+        total_checks = 3
+        
         try:
-            # Check Discord API endpoint
             import aiohttp
+            import dns.resolver
+            
+            # Create a single session for all checks
             async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    'https://discord.com/api/v10/gateway',
-                    timeout=aiohttp.ClientTimeout(total=5)
-                ) as response:
-                    return response.status == 200
+                # Check 1: Discord API endpoint
+                try:
+                    async with session.get(
+                        'https://discord.com/api/v10/gateway',
+                        timeout=aiohttp.ClientTimeout(total=5)
+                    ) as response:
+                        if response.status == 200:
+                            checks_passed += 1
+                            logger.debug("Network check: Discord API gateway - OK")
+                        else:
+                            logger.warning(f"Network check: Discord API gateway - Failed (status {response.status})")
+                except Exception as e:
+                    logger.warning(f"Network check: Discord API gateway - Failed ({e})")
+                
+                # Check 2: Discord CDN
+                try:
+                    async with session.get(
+                        'https://cdn.discordapp.com/',
+                        timeout=aiohttp.ClientTimeout(total=5)
+                    ) as response:
+                        if response.status in [200, 403]:  # 403 is expected for CDN root
+                            checks_passed += 1
+                            logger.debug("Network check: Discord CDN - OK")
+                        else:
+                            logger.warning(f"Network check: Discord CDN - Failed (status {response.status})")
+                except Exception as e:
+                    logger.warning(f"Network check: Discord CDN - Failed ({e})")
+                
+                # Check 3: Voice Gateway (if available)
+                try:
+                    async with session.get(
+                        'https://discord.com/api/v10/voice/regions',
+                        timeout=aiohttp.ClientTimeout(total=5)
+                    ) as response:
+                        if response.status in [200, 401]:  # 401 expected without auth
+                            checks_passed += 1
+                            logger.debug("Network check: Voice regions - OK")
+                        else:
+                            logger.warning(f"Network check: Voice regions - Failed (status {response.status})")
+                except Exception as e:
+                    logger.warning(f"Network check: Voice regions - Failed ({e})")
+            
+            # Determine if network is stable enough
+            stability_ratio = checks_passed / total_checks
+            is_stable = stability_ratio >= 0.66  # At least 2 out of 3 checks must pass
+            
+            if is_stable:
+                logger.info(f"Network stability check passed ({checks_passed}/{total_checks} checks successful)")
+            else:
+                logger.warning(f"Network stability check failed ({checks_passed}/{total_checks} checks successful)")
+            
+            return is_stable
+            
+        except ImportError:
+            logger.warning("aiohttp not available for network checks, assuming network is stable")
+            return True
         except Exception as e:
-            logger.warning(f"Network stability check failed: {e}")
-            return False
+            logger.error(f"Unexpected error during network stability check: {e}")
+            # Don't block connection attempts due to check failures
+            return True
 
     async def _validate_voice_permissions(self, voice_channel: discord.VoiceChannel) -> tuple[bool, str]:
         """Validate bot permissions for voice channel"""
@@ -246,12 +319,18 @@ class VoiceConnectionManager:
 
     async def _create_new_session(self, guild_id: int):
         """Create a new voice session for a guild"""
+        # Clear any existing session state thoroughly
+        if guild_id in self.session_states:
+            old_session = self.session_states[guild_id]
+            logger.info(f"Replacing old session {old_session.get('session_id', 'unknown')} for guild {guild_id}")
+        
         self.session_states[guild_id] = {
             'created_at': datetime.now(),
             'session_id': f"{guild_id}_{int(time.time())}",
-            'reconnect_count': 0
+            'reconnect_count': 0,
+            'environment': self.environment.value
         }
-        logger.info(f"Created new voice session for guild {guild_id}: {self.session_states[guild_id]['session_id']}")
+        logger.info(f"Created new voice session for guild {guild_id}: {self.session_states[guild_id]['session_id']} (env: {self.environment.value})")
 
     def _is_session_valid(self, guild_id: int) -> bool:
         """Check if current session is still valid"""
@@ -260,6 +339,16 @@ class VoiceConnectionManager:
         
         session = self.session_states[guild_id]
         age = (datetime.now() - session['created_at']).total_seconds()
+        
+        # On VPS, be more strict about session validity
+        if self.environment == DeploymentEnvironment.VPS:
+            # Invalidate sessions with too many reconnects
+            if session.get('reconnect_count', 0) >= 3:
+                logger.info(f"Invalidating session for guild {guild_id} due to excessive reconnects")
+                return False
+            
+            # Shorter session timeout for VPS to ensure fresh sessions
+            return age < (self.session_timeout * 0.75)
         
         return age < self.session_timeout
 
@@ -320,9 +409,16 @@ class VoiceConnectionManager:
                 return True, True  # New session to clean up state
             elif "timeout" in error_str.lower():
                 logger.warning("Connection timeout - will retry")
-                return True, False
+                # VPS environments should recreate session on timeout
+                return True, self.environment == DeploymentEnvironment.VPS
             else:
                 logger.error(f"Client exception: {error_str}")
+                # On VPS, be more aggressive about session recreation
+                if self.environment == DeploymentEnvironment.VPS:
+                    # Create new session for certain errors
+                    if any(phrase in error_str.lower() for phrase in ['websocket', 'closed', 'invalid', 'session']):
+                        logger.info(f"VPS environment: creating new session due to error: {error_str}")
+                        return True, True
                 return True, False  # Most client exceptions are retryable
         
         elif isinstance(error, asyncio.TimeoutError):
@@ -335,7 +431,7 @@ class VoiceConnectionManager:
             return True, False  # Try to handle unknown errors
 
     async def _cleanup_existing_connection(self, guild_id: int, voice_client: Optional[discord.VoiceClient]):
-        """Clean up existing voice connection with session cleanup"""
+        """Clean up existing voice connection with enhanced session cleanup"""
         try:
             # First check guild's voice client
             guild = self.bot.get_guild(guild_id)
@@ -355,8 +451,39 @@ class VoiceConnectionManager:
                 except Exception as e:
                     logger.warning(f"Error disconnecting passed voice client: {e}")
                     
-            # Wait for cleanup
-            wait_time = 3 if self.environment == DeploymentEnvironment.VPS else 2
+            # Enhanced cleanup - search all bot voice clients
+            if hasattr(self.bot, 'voice_clients'):
+                clients_to_remove = []
+                for vc in self.bot.voice_clients:
+                    try:
+                        if hasattr(vc, 'guild') and vc.guild.id == guild_id:
+                            clients_to_remove.append(vc)
+                            if vc.is_connected():
+                                logger.info(f"Found additional voice client for guild {guild_id}, disconnecting")
+                                await vc.disconnect(force=True)
+                    except Exception as e:
+                        logger.warning(f"Error checking voice client: {e}")
+                        clients_to_remove.append(vc)  # Remove problematic clients
+                
+                # Remove all found clients from the list
+                for vc in clients_to_remove:
+                    try:
+                        self.bot.voice_clients.remove(vc)
+                        logger.debug(f"Removed voice client from bot's list for guild {guild_id}")
+                    except ValueError:
+                        pass  # Already removed
+                    except Exception as e:
+                        logger.warning(f"Error removing voice client from list: {e}")
+            
+            # Clear any references in guild object
+            if guild:
+                try:
+                    guild._voice_client = None
+                except Exception:
+                    pass
+                    
+            # Wait for cleanup - longer for VPS
+            wait_time = 5 if self.environment == DeploymentEnvironment.VPS else 3
             await asyncio.sleep(wait_time)
             
         except Exception as e:
@@ -365,10 +492,10 @@ class VoiceConnectionManager:
         # Clear session state
         self.session_states.pop(guild_id, None)
         
-        # Extra cleanup - remove from bot's voice_clients list
+        # Final cleanup attempt - recreate voice_clients list without this guild
         if hasattr(self.bot, 'voice_clients') and hasattr(self.bot.voice_clients, '__iter__'):
             try:
-                self.bot.voice_clients = [vc for vc in self.bot.voice_clients if vc.guild.id != guild_id]
+                self.bot.voice_clients = [vc for vc in self.bot.voice_clients if not (hasattr(vc, 'guild') and vc.guild.id == guild_id)]
             except Exception as e:
                 logger.debug(f"Could not clean voice_clients list: {e}")
 
@@ -399,7 +526,11 @@ class VoiceConnectionManager:
             # Check network stability for VPS
             if self.environment == DeploymentEnvironment.VPS:
                 if not await self._check_network_stability():
-                    return None, "Network connectivity issues detected. Please check bot's internet connection."
+                    # Try to recover network issues before giving up
+                    logger.warning("Network instability detected, attempting recovery...")
+                    await asyncio.sleep(5)  # Brief wait
+                    if not await self._check_network_stability():
+                        return None, "Network connectivity issues detected. Please check bot's internet connection."
             
             # Validate permissions first
             has_permissions, permission_message = await self._validate_voice_permissions(voice_channel)
@@ -464,10 +595,19 @@ class VoiceConnectionManager:
                         else:
                             # This often indicates a session issue - force new session
                             logger.warning(f"Connection established but client reports as not connected for guild {guild_id}")
-                            needs_new_session = True
+                            # On VPS, always force new session for this issue
+                            if self.environment == DeploymentEnvironment.VPS:
+                                logger.info(f"VPS environment: forcing new session due to connection state mismatch")
+                                needs_new_session = True
+                                # Force cleanup the current attempt
+                                await self._force_disconnect_guild(guild_id)
                             raise discord.ConnectionClosed(None, shard_id=None, code=4006)
                     
                     except asyncio.TimeoutError:
+                        # On VPS, timeout often indicates session issues
+                        if self.environment == DeploymentEnvironment.VPS:
+                            logger.warning(f"Connection timeout on VPS for guild {guild_id} - will force new session on next attempt")
+                            needs_new_session = True
                         raise Exception(f"Connection timeout after {self.connection_timeout}s")
                 
                 except Exception as e:
@@ -649,29 +789,72 @@ class VoiceConnectionManager:
         return unhealthy_guilds
 
     async def _force_disconnect_guild(self, guild_id: int):
-        """Force disconnect from voice channel with cleanup"""
+        """Force disconnect from voice channel with enhanced cleanup"""
         try:
             guild = self.bot.get_guild(guild_id)
+            disconnected_any = False
+            
+            # Try to disconnect via guild voice client
             if guild and guild.voice_client:
                 logger.info(f"Force disconnecting from voice channel in guild {guild_id}")
                 try:
                     await guild.voice_client.disconnect(force=True)
+                    disconnected_any = True
                 except Exception as disconnect_error:
                     logger.warning(f"Error during disconnect: {disconnect_error}")
+            
+            # Also check all voice clients in bot's list
+            if hasattr(self.bot, 'voice_clients'):
+                clients_to_disconnect = []
+                for vc in list(self.bot.voice_clients):  # Use list() to avoid modification during iteration
+                    try:
+                        if hasattr(vc, 'guild') and vc.guild.id == guild_id:
+                            clients_to_disconnect.append(vc)
+                    except Exception:
+                        pass
                 
-                # Wait longer on VPS for network cleanup
-                wait_time = 3 if self.environment == DeploymentEnvironment.VPS else 2
-                await asyncio.sleep(wait_time)
+                # Disconnect all found clients
+                for vc in clients_to_disconnect:
+                    try:
+                        if vc.is_connected():
+                            logger.info(f"Force disconnecting additional voice client for guild {guild_id}")
+                            await vc.disconnect(force=True)
+                            disconnected_any = True
+                    except Exception as e:
+                        logger.warning(f"Error disconnecting voice client: {e}")
+                    
+                    # Remove from bot's list
+                    try:
+                        self.bot.voice_clients.remove(vc)
+                    except ValueError:
+                        pass
+                    except Exception as e:
+                        logger.warning(f"Error removing voice client from list: {e}")
+            
+            # Clear guild's voice client reference
+            if guild:
+                try:
+                    guild._voice_client = None
+                except Exception:
+                    pass
             
             # Clean up session state
             if guild_id in self.session_states:
                 del self.session_states[guild_id]
                 logger.info(f"Cleaned up session state for guild {guild_id}")
-                
-            # Extra cleanup - remove from bot's voice_clients list
-            if hasattr(self.bot, 'voice_clients') and hasattr(self.bot.voice_clients, '__iter__'):
+            
+            # Reset connection state
+            self._reset_connection_state(guild_id)
+            
+            # Wait longer on VPS for network cleanup
+            if disconnected_any:
+                wait_time = 5 if self.environment == DeploymentEnvironment.VPS else 3
+                await asyncio.sleep(wait_time)
+            
+            # Final cleanup - recreate voice_clients list without this guild
+            if hasattr(self.bot, 'voice_clients'):
                 try:
-                    self.bot.voice_clients = [vc for vc in self.bot.voice_clients if vc.guild.id != guild_id]
+                    self.bot.voice_clients = [vc for vc in self.bot.voice_clients if not (hasattr(vc, 'guild') and vc.guild.id == guild_id)]
                 except Exception as e:
                     logger.debug(f"Could not clean voice_clients list: {e}")
                 
