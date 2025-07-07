@@ -1,4 +1,35 @@
 services:
+  # YouTube Music headless service
+  youtube-music-headless:
+    build:
+      context: ./docker/youtube-music
+      dockerfile: Dockerfile
+    container_name: robustty-youtube-music
+    restart: unless-stopped
+    environment:
+      - DISPLAY=:99
+      - NODE_ENV=production
+      - PULSE_SERVER=unix:/tmp/pulse-socket
+    volumes:
+      - ./cookies:/app/cookies:ro
+      - youtube-music-data:/root/.config
+    networks:
+      - robustty-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9863/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+      - 1.1.1.1
+    dns_opt:
+      - ndots:0
+      - timeout:3
+      - attempts:3
+
   # Discord bot - platform-agnostic configuration
   robustty:
     build:
@@ -27,6 +58,9 @@ services:
       - RUMBLE_ENABLED=${RUMBLE_ENABLED:-true}
       - ODYSEE_ENABLED=${ODYSEE_ENABLED:-true}
       - PEERTUBE_ENABLED=${PEERTUBE_ENABLED:-true}
+      # YouTube Music headless integration
+      - YOUTUBE_MUSIC_API_URL=${YOUTUBE_MUSIC_API_URL:-http://youtube-music-headless:9863}
+      - YOUTUBE_MUSIC_ENABLED=${YOUTUBE_MUSIC_ENABLED:-true}
     volumes:
       # App data persistence
       - ./config:/app/config:ro
@@ -65,6 +99,8 @@ services:
       start_period: 60s
     depends_on:
       redis:
+        condition: service_healthy
+      youtube-music-headless:
         condition: service_healthy
 
   # Redis for caching
@@ -107,4 +143,6 @@ networks:
 
 volumes:
   robustty-redis-data:
+    driver: local
+  youtube-music-data:
     driver: local

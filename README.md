@@ -8,7 +8,8 @@ A modular Discord music bot that searches and plays audio from multiple video pl
 
 ## Features
 
-- 🎵 **Multi-platform search** - YouTube, PeerTube, Odysee, Rumble
+- 🎵 **Multi-platform search** - YouTube Music (headless), YouTube, PeerTube, Odysee, Rumble
+- 🎧 **YouTube Music Integration** - Headless desktop app with API for premium features
 - 🔍 **Smart search** - Automatic URL detection and cross-platform search
 - 🍪 **Cookie management** - Automatic cookie extraction for authenticated access
 - 🐳 **Docker deployment** - Easy deployment with Docker Compose

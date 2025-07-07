@@ -61,6 +61,9 @@ class HealthEndpoints:
         self.app.router.add_get('/health/platforms', self.platform_status)
         self.app.router.add_get('/health/fallback', self.fallback_status)
         
+        # YouTube Music headless health
+        self.app.router.add_get('/health/youtube-music', self.youtube_music_health)
+        
         # Quota monitoring endpoint
         self.app.router.add_get('/health/quota/youtube', self.youtube_quota_status)
         
@@ -488,5 +491,56 @@ class HealthEndpoints:
             logger.error(f"HTTP session stats error: {e}")
             return web.json_response(
                 {'error': str(e)},
+                status=500
+            )
+    
+    async def youtube_music_health(self, request):
+        """YouTube Music headless service health status"""
+        try:
+            # Get YouTube Music platform
+            if not self.platform_registry:
+                return web.json_response(
+                    {'error': 'Platform registry not available'},
+                    status=503
+                )
+            
+            ytmusic_platform = self.platform_registry.get_platform('youtube_music_headless')
+            if not ytmusic_platform:
+                return web.json_response(
+                    {'error': 'YouTube Music headless platform not found'},
+                    status=404
+                )
+            
+            # Get health status from platform
+            health_status = await ytmusic_platform.get_health_status()
+            
+            # Check authentication status
+            auth_status = await ytmusic_platform._check_authentication_status()
+            
+            # Combine health information
+            status = {
+                'platform': 'youtube_music_headless',
+                'timestamp': datetime.now().isoformat(),
+                'service_health': health_status,
+                'authentication': auth_status,
+                'enabled': ytmusic_platform.enabled,
+                'api_url': ytmusic_platform.api_url,
+                'cache_enabled': bool(ytmusic_platform.cache_manager)
+            }
+            
+            # Overall health assessment
+            if health_status.get('healthy') and auth_status.get('authenticated'):
+                status['overall_status'] = 'healthy_authenticated'
+            elif health_status.get('healthy'):
+                status['overall_status'] = 'healthy_unauthenticated'
+            else:
+                status['overall_status'] = 'unhealthy'
+            
+            return web.json_response(status)
+            
+        except Exception as e:
+            logger.error(f"YouTube Music health check error: {e}")
+            return web.json_response(
+                {'error': str(e), 'platform': 'youtube_music_headless'},
                 status=500
             )

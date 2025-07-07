@@ -87,11 +87,16 @@ class RobusttyBot(commands.Bot):
         # Load platforms dynamically
         try:
             # Import platform modules
+            from src.platforms.ytmusic_headless import YouTubeMusicHeadlessPlatform
             from src.platforms.peertube import PeerTubePlatform
             from src.platforms.youtube import YouTubePlatform
             from src.platforms.rumble import RumblePlatform
             from src.platforms.odysee import OdyseePlatform
 
+            # Register YouTube Music headless platform FIRST (highest priority)
+            self.platform_registry.register_platform("youtube_music_headless", YouTubeMusicHeadlessPlatform)
+            
+            # Register other platforms in order of preference
             self.platform_registry.register_platform("youtube", YouTubePlatform)
             self.platform_registry.register_platform("peertube", PeerTubePlatform)
             self.platform_registry.register_platform("rumble", RumblePlatform)
@@ -138,7 +143,7 @@ class RobusttyBot(commands.Bot):
         await self.fallback_manager.start()
 
         # Set fallback and health monitors on platforms
-        for platform_name in ["youtube", "rumble", "odysee", "peertube"]:
+        for platform_name in ["youtube_music_headless", "youtube", "rumble", "odysee", "peertube"]:
             try:
                 platform = self.platform_registry.get_platform(platform_name)
                 if platform and hasattr(platform, "set_fallback_manager"):

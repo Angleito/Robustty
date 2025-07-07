@@ -12,7 +12,7 @@ stability_mode:
   recovery_check_interval: ${PLATFORM_RECOVERY_CHECK_INTERVAL:180}  # Check disabled platforms every 3 minutes (faster recovery)
   
   # Platform-specific stability settings
-  stable_platforms: ["youtube", "rumble"]  # Platforms known to be stable
+  stable_platforms: ["youtube_music_headless", "youtube", "rumble"]  # Platforms known to be stable
   problematic_platforms: []  # Empty list - let stability monitor determine based on actual performance
   
   # Network optimization for VPS
@@ -21,6 +21,14 @@ stability_mode:
   max_retry_attempts: ${STABILITY_MAX_RETRY:1}  # Minimal retries in stability mode
 
 platforms:
+  youtube_music_headless:
+    enabled: ${YOUTUBE_MUSIC_ENABLED:true}
+    api_url: ${YOUTUBE_MUSIC_API_URL:http://youtube-music-headless:9863}
+    timeout: ${YOUTUBE_MUSIC_TIMEOUT:30}
+    retry_attempts: ${YOUTUBE_MUSIC_RETRY_ATTEMPTS:3}
+    retry_delay: ${YOUTUBE_MUSIC_RETRY_DELAY:1}
+    max_results: ${YOUTUBE_MUSIC_MAX_RESULTS:10}
+    
   youtube:
     enabled: true
     api_key: ${YOUTUBE_API_KEY:}
@@ -142,6 +150,7 @@ deduplication:
   # Quality scoring configuration
   quality_scoring:
     platform_weights:
+      youtube_music_headless: 1.2
       youtube: 1.0
       odysee: 0.8
       peertube: 0.7
@@ -163,6 +172,7 @@ prioritization:
   failure_penalty_duration: 300  # seconds (5 minutes)
   response_time_threshold: 5.0  # seconds
   default_order: 
+    - youtube_music_headless
     - youtube
     - odysee
     - peertube

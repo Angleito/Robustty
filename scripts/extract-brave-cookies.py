@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 # Platform domains for cookie filtering
 PLATFORM_DOMAINS = {
     'youtube': ['.youtube.com', 'youtube.com', 'www.youtube.com'],
+    'youtube_music': ['.youtube.com', 'youtube.com', 'www.youtube.com', 'music.youtube.com', '.music.youtube.com'],
     'rumble': ['.rumble.com', 'rumble.com'],
     'odysee': ['.odysee.com', 'odysee.com'],
     'peertube': ['framatube.org', 'video.ploud.fr', 'peertube.social']
