@@ -3,7 +3,7 @@ services:
   youtube-music-headless:
     build:
       context: ./docker/youtube-music
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.simple
     container_name: robustty-youtube-music
     restart: unless-stopped
     environment:
