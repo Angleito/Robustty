@@ -15,13 +15,25 @@ cp /etc/resolv.conf /etc/resolv.conf.backup.$(date +%Y%m%d_%H%M%S) 2>/dev/null
 echo "Backup created"
 echo
 
-# Fix host DNS
-echo "2. Fixing host DNS configuration..."
-cat > /etc/resolv.conf << EOF
+# Fix systemd-resolved symlink issue (critical for Ubuntu VPS)
+echo "2. Fixing systemd-resolved DNS configuration..."
+if [ -L /etc/resolv.conf ] && readlink /etc/resolv.conf | grep -q "stub-resolv.conf"; then
+    echo "Detected systemd-resolved stub configuration - fixing..."
+    # Remove the problematic stub symlink
+    rm -f /etc/resolv.conf
+    # Create symlink to real resolv.conf (not the stub)
+    ln -sf /run/systemd/resolve/resolv.conf /etc/resolv.conf
+    echo "Fixed /etc/resolv.conf symlink to use real resolver"
+else
+    # Fallback: create static resolv.conf if no systemd-resolved
+    echo "Creating static DNS configuration..."
+    rm -f /etc/resolv.conf
+    cat > /etc/resolv.conf << EOF
 nameserver 8.8.8.8
 nameserver 8.8.4.4
 nameserver 1.1.1.1
 EOF
+fi
 echo "Host DNS updated"
 echo
 
@@ -63,7 +75,7 @@ echo
 
 # Fix systemd-resolved if present
 if systemctl is-active systemd-resolved &>/dev/null; then
-    echo "5. Fixing systemd-resolved..."
+    echo "5. Configuring systemd-resolved..."
     mkdir -p /etc/systemd/resolved.conf.d/
     cat > /etc/systemd/resolved.conf.d/dns.conf << EOF
 [Resolve]
@@ -71,8 +83,11 @@ DNS=8.8.8.8 8.8.4.4 1.1.1.1
 FallbackDNS=208.67.222.222 208.67.220.220
 DNSStubListener=no
 EOF
+    # Restart services in correct order
     systemctl restart systemd-resolved
-    echo "systemd-resolved updated"
+    # If NetworkManager is present, restart it to respect new DNS config
+    systemctl is-active NetworkManager &>/dev/null && systemctl restart NetworkManager
+    echo "systemd-resolved updated and services restarted"
 else
     echo "5. systemd-resolved not active, skipping..."
 fi

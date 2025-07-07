@@ -296,6 +296,20 @@ setup_docker() {
 deploy_services() {
     show_stage "SERVICE DEPLOYMENT"
     
+    log INFO "Fixing DNS configuration for Docker containers..."
+    
+    # Run DNS fix before starting services
+    ssh "$VPS_USER@$VPS_HOST" "
+        cd ~/robustty-bot
+        if [ -f scripts/fix-vps-dns.sh ]; then
+            echo 'Running DNS fix script...'
+            sudo bash scripts/fix-vps-dns.sh
+            echo 'DNS configuration fixed'
+        else
+            echo 'WARNING: DNS fix script not found. Containers may have DNS issues.'
+        fi
+    "
+    
     log INFO "Starting Docker services..."
     
     # Start services on VPS
