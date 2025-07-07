@@ -147,28 +147,26 @@ def validate_platform_credentials(config: Dict[str, Any]):
     """Validate required API credentials for enabled platforms."""
     platforms = config.get("platforms", {})
 
-    # Check YouTube API key
+    # Check YouTube API key - make it optional, just log a warning
     if platforms.get("youtube", {}).get("enabled"):
         api_key = platforms["youtube"].get("api_key")
         if not api_key or api_key.startswith("${"):
-            raise ConfigurationError(
-                "YouTube platform is enabled but API key is missing.\n"
-                "To fix this:\n"
-                "1. Set the YOUTUBE_API_KEY environment variable\n"
-                "2. Or add the key directly to config.yaml\n"
-                "3. Or disable YouTube in config by setting 'enabled: false'\n"
-                "\nExample: export YOUTUBE_API_KEY='your-api-key-here'"
+            print(
+                "WARNING: YouTube platform is enabled but API key is missing.\n"
+                "YouTube search will be limited or unavailable.\n"
+                "To enable YouTube search, set the YOUTUBE_API_KEY environment variable."
             )
+            # Disable YouTube if no API key is provided
+            platforms["youtube"]["enabled"] = False
 
-    # Check Rumble API token
+    # Check Rumble API token - make it optional, just log a warning
     if platforms.get("rumble", {}).get("enabled"):
         api_token = platforms["rumble"].get("api_token")
         if not api_token or api_token.startswith("${"):
-            raise ConfigurationError(
-                "Rumble platform is enabled but API token is missing.\n"
-                "To fix this:\n"
-                "1. Set the RUMBLE_API_TOKEN environment variable\n"
-                "2. Or add the token directly to config.yaml\n"
-                "3. Or disable Rumble in config by setting 'enabled: false'\n"
-                "\nExample: export RUMBLE_API_TOKEN='your-api-token-here'"
+            print(
+                "WARNING: Rumble platform is enabled but API token is missing.\n"
+                "Rumble search will be unavailable.\n"
+                "To enable Rumble search, set the RUMBLE_API_TOKEN environment variable."
             )
+            # Disable Rumble if no API token is provided
+            platforms["rumble"]["enabled"] = False

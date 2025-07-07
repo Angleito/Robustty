@@ -42,8 +42,8 @@ services:
       - "50000-65535:50000-65535/udp"  # Discord voice RTP audio streaming
     environment:
       - DISCORD_TOKEN=${DISCORD_TOKEN}
-      - YOUTUBE_API_KEY=${YOUTUBE_API_KEY}
-      - APIFY_API_KEY=${APIFY_API_KEY}
+      - YOUTUBE_API_KEY=${YOUTUBE_API_KEY:-}
+      - APIFY_API_KEY=${APIFY_API_KEY:-}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - SEARCH_TIMEOUT=${SEARCH_TIMEOUT:-30}
       - STREAM_TIMEOUT=${STREAM_TIMEOUT:-300}

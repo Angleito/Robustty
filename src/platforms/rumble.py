@@ -84,11 +84,8 @@ class RumblePlatform(VideoPlatform):
             return cached_results
 
         if not self.api_token or not self.extractor:
-            logger.error("Rumble API token not configured")
-            raise PlatformAuthenticationError(
-                "API token is required for Rumble searches. Please configure 'api_token' in config.",
-                platform="Rumble",
-            )
+            logger.warning("Rumble API token not configured - platform disabled")
+            return []
 
         try:
             logger.debug(f"Searching Rumble for: {query} (max_results: {max_results})")
