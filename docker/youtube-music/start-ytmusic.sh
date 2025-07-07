@@ -5,6 +5,9 @@ set -e
 
 echo "Starting YouTube Music Headless Container..."
 
+# Clean up any existing X lock files
+rm -f /tmp/.X99-lock
+
 # Start virtual display
 echo "Starting Xvfb virtual display..."
 Xvfb :99 -screen 0 1024x768x24 -ac +extension GLX +render -noreset &
@@ -15,11 +18,7 @@ sleep 3
 
 # Start PulseAudio for audio support
 echo "Starting PulseAudio..."
-pulseaudio --start --exit-idle-time=-1 &
-PULSE_PID=$!
-
-# Wait for audio to be ready
-sleep 2
+pulseaudio --start --exit-idle-time=-1 || echo "PulseAudio start failed (running as root)"
 
 # Import cookies if available
 echo "Checking for cookie files..."
@@ -73,20 +72,42 @@ echo "Configuration created. Starting YouTube Music..."
 cleanup() {
     echo "Shutting down services..."
     kill $XVFB_PID 2>/dev/null || true
-    kill $PULSE_PID 2>/dev/null || true
     exit 0
 }
 
 # Set trap for cleanup
 trap cleanup SIGTERM SIGINT
 
+# Check if youtube-music binary exists
+if ! which youtube-music > /dev/null 2>&1; then
+    echo "ERROR: youtube-music binary not found!"
+    echo "Checking possible locations..."
+    ls -la /usr/bin/ | grep -i youtube || true
+    ls -la /opt/ | grep -i youtube || true
+    find / -name "youtube-music" -type f 2>/dev/null | head -10 || true
+    
+    # Try alternative locations
+    if [ -f "/opt/YouTube Music/youtube-music" ]; then
+        echo "Found at /opt/YouTube Music/youtube-music"
+        YOUTUBE_MUSIC_BIN="/opt/YouTube Music/youtube-music"
+    elif [ -f "/usr/share/youtube-music/youtube-music" ]; then
+        echo "Found at /usr/share/youtube-music/youtube-music"
+        YOUTUBE_MUSIC_BIN="/usr/share/youtube-music/youtube-music"
+    else
+        echo "FATAL: Cannot find youtube-music binary anywhere!"
+        exit 1
+    fi
+else
+    YOUTUBE_MUSIC_BIN="youtube-music"
+fi
+
 # Start YouTube Music with headless settings
-youtube-music \
+echo "Starting YouTube Music from: $YOUTUBE_MUSIC_BIN"
+"$YOUTUBE_MUSIC_BIN" \
     --no-sandbox \
     --disable-web-security \
     --disable-features=VizDisplayCompositor \
     --disable-gpu \
-    --headless=new \
     --disable-dev-shm-usage \
     --remote-debugging-port=9222 \
     --enable-automation \

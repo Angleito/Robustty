@@ -30,15 +30,28 @@ RUN apt-get update && apt-get install -y \
     libgtk-3-0 \
     curl \
     wget \
+    ca-certificates \
+    fonts-liberation \
+    libappindicator3-1 \
+    libnss3-dev \
+    libxss1 \
+    xdg-utils \
     && rm -rf /var/lib/apt/lists/*
 
 # Create app directory
 WORKDIR /app
 
 # Download and install YouTube Music Desktop App
-RUN wget https://github.com/th-ch/youtube-music/releases/latest/download/youtube-music_3.6.0_amd64.deb -O youtube-music.deb \
-    && dpkg -i youtube-music.deb || apt-get install -f -y \
-    && rm youtube-music.deb
+# Using a specific version that's known to work
+RUN wget -O youtube-music.deb "https://github.com/th-ch/youtube-music/releases/download/v3.6.0/youtube-music_3.6.0_amd64.deb" \
+    && apt-get update \
+    && apt-get install -y ./youtube-music.deb \
+    && rm youtube-music.deb \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Verify installation
+RUN which youtube-music || (echo "YouTube Music not found in PATH" && ls -la /usr/bin/youtube* || true && ls -la /opt/ || true)
 
 # Create necessary directories
 RUN mkdir -p /app/cookies \
