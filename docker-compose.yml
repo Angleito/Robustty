@@ -89,6 +89,16 @@ services:
       - attempts:3   # DNS retry attempts
     extra_hosts:
       - "host.docker.internal:host-gateway"  # For container-to-host communication
+      # Pre-resolve Discord domains to avoid DNS lookup failures
+      - "gateway.discord.gg:162.159.137.232"
+      - "gateway-us-west-1.discord.gg:162.159.137.232"
+      - "gateway-us-east-1.discord.gg:162.159.135.232"
+      - "gateway-us-central-1.discord.gg:162.159.136.232"
+      - "gateway-europe-1.discord.gg:162.159.128.232"
+      - "gateway-asia-1.discord.gg:162.159.134.232"
+      - "gateway-sydney-1.discord.gg:162.159.130.232"
+      - "discord.com:162.159.137.232"
+      - "discordapp.com:162.159.137.232"
     sysctls:
       - net.ipv4.tcp_keepalive_time=300
       - net.ipv4.tcp_keepalive_probes=5

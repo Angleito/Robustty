@@ -301,8 +301,12 @@ deploy_services() {
     # Run DNS fix before starting services
     ssh "$VPS_USER@$VPS_HOST" "
         cd ~/robustty-bot
-        if [ -f scripts/fix-vps-dns.sh ]; then
-            echo 'Running DNS fix script...'
+        if [ -f scripts/fix-vps-dns-enhanced.sh ]; then
+            echo 'Running enhanced DNS fix script...'
+            sudo bash scripts/fix-vps-dns-enhanced.sh
+            echo 'DNS configuration fixed with Discord domain fallbacks'
+        elif [ -f scripts/fix-vps-dns.sh ]; then
+            echo 'Running standard DNS fix script...'
             sudo bash scripts/fix-vps-dns.sh
             echo 'DNS configuration fixed'
         else
