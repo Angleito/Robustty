@@ -1,5 +1,5 @@
 services:
-  # YouTube Music headless service
+  # YouTube Music headless service - Memory optimized for 2GB VPS
   youtube-music-headless:
     build:
       context: ./docker/youtube-music
@@ -10,11 +10,20 @@ services:
       - DISPLAY=:99
       - NODE_ENV=production
       - PULSE_SERVER=unix:/tmp/pulse-socket
+      # Memory optimization for headless browser
+      - NODE_OPTIONS=--max-old-space-size=384
     volumes:
       - ./cookies:/app/cookies:ro
       - youtube-music-data:/root/.config
     networks:
       - robustty-network
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 384M
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9863/api/health"]
       interval: 30s
@@ -53,11 +62,14 @@ services:
       # VPS optimization flags
       - VPS_MODE=${VPS_MODE:-true}          # Enable VPS-specific optimizations
       - DOCKER_CONTAINER=true               # Indicate running in Docker container
-      # Platform enable/disable flags
-      - YOUTUBE_ENABLED=${YOUTUBE_ENABLED:-true}
-      - RUMBLE_ENABLED=${RUMBLE_ENABLED:-true}
+      # Platform enable/disable flags - Optimized for 2GB VPS
+      - YOUTUBE_ENABLED=${YOUTUBE_ENABLED:-false}  # Disabled by default (no API key)
+      - RUMBLE_ENABLED=${RUMBLE_ENABLED:-false}   # Disabled by default (no API key)
       - ODYSEE_ENABLED=${ODYSEE_ENABLED:-true}
       - PEERTUBE_ENABLED=${PEERTUBE_ENABLED:-true}
+      # Python memory optimization
+      - PYTHONUNBUFFERED=1
+      - PYTHONDONTWRITEBYTECODE=1
       # YouTube Music headless integration
       - YOUTUBE_MUSIC_API_URL=${YOUTUBE_MUSIC_API_URL:-http://youtube-music-headless:9863}
       - YOUTUBE_MUSIC_ENABLED=${YOUTUBE_MUSIC_ENABLED:-true}
@@ -97,6 +109,13 @@ services:
       timeout: 15s
       retries: 3
       start_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+          cpus: '0.7'
+        reservations:
+          memory: 512M
     depends_on:
       redis:
         condition: service_healthy
@@ -124,7 +143,17 @@ services:
       --tcp-keepalive 300
       --timeout 0
       --tcp-backlog 511
+      --maxmemory 256mb
       --maxmemory-policy allkeys-lru
+      --save ""
+      --stop-writes-on-bgsave-error no
+    deploy:
+      resources:
+        limits:
+          memory: 384M
+          cpus: '0.3'
+        reservations:
+          memory: 256M
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 30s
