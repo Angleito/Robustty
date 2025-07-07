@@ -121,7 +121,7 @@ check_container_health() {
     log DEBUG "Checking Docker container health..."
     
     # Check bot container
-    if docker-compose -f docker-compose.vps.yml ps | grep -q 'robustty-bot.*Up'; then
+    if docker-compose ps | grep -q 'robustty-bot.*Up'; then
         service_status["bot_container"]="healthy"
         failure_counts["bot_container"]=0
         log DEBUG "✅ Bot container is running"
@@ -136,7 +136,7 @@ check_container_health() {
     fi
     
     # Check Redis container
-    if docker-compose -f docker-compose.vps.yml ps | grep -q 'robustty-redis.*Up'; then
+    if docker-compose ps | grep -q 'robustty-redis.*Up'; then
         service_status["redis_container"]="healthy"
         failure_counts["redis_container"]=0
         log DEBUG "✅ Redis container is running"
@@ -180,7 +180,7 @@ check_discord_connectivity() {
     # Check Discord API accessibility
     if curl -s --max-time 10 https://discord.com/api/v10/gateway >/dev/null 2>&1; then
         # Check bot logs for connection status
-        local recent_logs=$(docker-compose -f docker-compose.vps.yml logs --tail=20 robustty 2>/dev/null)
+        local recent_logs=$(docker-compose logs --tail=20 robustty 2>/dev/null)
         
         if echo "$recent_logs" | grep -q -E "(heartbeat|gateway|connected)" && ! echo "$recent_logs" | grep -q -E "(disconnected|error|failed)"; then
             service_status["discord_connection"]="healthy"
@@ -315,14 +315,14 @@ attempt_service_recovery() {
     
     case $service in
         "bot_container"|"redis_container")
-            if docker-compose -f docker-compose.vps.yml restart robustty redis; then
+            if docker-compose restart robustty redis; then
                 log INFO "✅ Services restarted successfully"
                 last_restart_time["$service"]=$current_time
                 ((restart_attempts++))
                 
                 # Wait and verify recovery
                 sleep 30
-                if docker-compose -f docker-compose.vps.yml ps | grep -q "Up"; then
+                if docker-compose ps | grep -q "Up"; then
                     log INFO "✅ Service recovery successful"
                     restart_attempts=0  # Reset on successful recovery
                     failure_counts["$service"]=0
@@ -450,7 +450,7 @@ interactive_mode() {
                 ;;
             'r'|'R')
                 log INFO "Manual service restart requested"
-                docker-compose -f docker-compose.vps.yml restart
+                docker-compose restart
                 sleep 5
                 ;;
             's'|'S')
@@ -640,8 +640,8 @@ done
 # Main execution
 main() {
     # Check prerequisites
-    if [ ! -f docker-compose.vps.yml ]; then
-        log ERROR "docker-compose.vps.yml not found. Please run from project root."
+    if [ ! -f docker-compose.yml ]; then
+        log ERROR "docker-compose.yml not found. Please run from project root."
         exit 1
     fi
     

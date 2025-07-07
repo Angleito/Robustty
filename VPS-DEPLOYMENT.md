@@ -13,13 +13,13 @@ cp .env.vps.example .env
 nano .env
 ```
 
-### 2. Deploy with VPS-optimized compose file
+### 2. Deploy using the main compose file
 ```bash
-# Use the VPS-specific compose file (recommended)
-docker-compose -f docker-compose.vps.yml up -d
-
-# OR use the main compose file (now VPS-compatible)
+# The main compose file is now VPS-compatible
 docker-compose up -d
+
+# For low-resource VPS, use the minimal configuration
+docker-compose -f docker-compose.minimal.yml up -d
 ```
 
 ## Key Differences: Local vs VPS
@@ -42,9 +42,9 @@ docker-compose up -d
 
 #### VPS Deployment (Ubuntu)
 - No local browser data available
-- Uses `docker-compose.vps.yml` with `Dockerfile.vps`
+- Uses main `docker-compose.yml` (now VPS-compatible)
 - Cookies must be synced from external source
-- Environment variable `COOKIE_SOURCE=remote`
+- Cookie path: `./cookies` directory bind mounted
 
 ### Network Configuration
 

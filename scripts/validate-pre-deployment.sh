@@ -204,9 +204,9 @@ validate_environment() {
     
     # Project files
     check_requirement "project_root" \
-        "[ -f docker-compose.vps.yml ]" \
+        "[ -f docker-compose.yml ]" \
         "In correct project directory" \
-        "Not in project root or missing docker-compose.vps.yml" \
+        "Not in project root or missing docker-compose.yml" \
         true \
         "Navigate to project root directory"
     

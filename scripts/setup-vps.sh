@@ -83,19 +83,19 @@ chmod 755 logs data cookies
 
 # Stop any existing containers
 echo "🛑 Stopping existing containers..."
-docker-compose -f docker-compose.vps.yml down 2>/dev/null || true
+docker-compose down 2>/dev/null || true
 
 # Pull latest images and build
-echo "🔨 Building VPS container..."
-docker-compose -f docker-compose.vps.yml build --no-cache
+echo "🔨 Building containers..."
+docker-compose build --no-cache
 
 # Start services
 echo "🚀 Starting services..."
-docker-compose -f docker-compose.vps.yml up -d
+docker-compose up -d
 
 # Show status
 echo "📊 Service status:"
-docker-compose -f docker-compose.vps.yml ps
+docker-compose ps
 
 echo "✅ VPS setup complete!"
 echo ""

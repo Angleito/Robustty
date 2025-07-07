@@ -453,6 +453,25 @@ python tests/manual/test_vps_voice_fixes.py vps               # Force VPS enviro
 VOICE_ENVIRONMENT=vps python tests/manual/test_vps_voice_fixes.py  # Using environment variable
 ```
 
+## Recent Fixes (2025-01-27) - VPS Deployment Cleanup
+
+### Simplified Docker Compose Structure
+- **Removed `docker-compose.vps.yml`**: The main `docker-compose.yml` is now fully VPS-compatible
+- **Removed `Dockerfile.vps`**: No longer needed as main Dockerfile handles both environments
+- **Unified Deployment**: Both local and VPS deployments now use the same `docker-compose.yml`
+- **Minimal Option**: `docker-compose.minimal.yml` retained for low-resource VPS deployments
+
+### Key Benefits
+- **YouTube Music Integration**: VPS deployments now include the YouTube Music headless service
+- **Simpler Deployment**: No need to copy/rename files during deployment
+- **Consistent Configuration**: Same compose file works for both local development and VPS
+- **Easier Maintenance**: Single source of truth for Docker configuration
+
+### Migration Notes
+- If you have existing VPS deployments, simply use `docker-compose up -d` instead of referencing the VPS-specific file
+- All VPS optimizations (DNS, networking, etc.) are preserved in the main compose file
+- For low-memory VPS (< 1GB RAM), use `docker-compose -f docker-compose.minimal.yml up -d`
+
 ## Debugging
 
 ### Platform Issues

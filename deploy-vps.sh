@@ -198,9 +198,8 @@ ssh_exec_persistent "$VPS_HOST" "$VPS_USER" "22" "" "mkdir -p ~/robustty-bot"
 echo "📤 Copying project files using persistent SSH..."
 ssh_copy_persistent "to" "$VPS_HOST" "$VPS_USER" "22" "" "." "~/robustty-bot/" "--exclude='venv' --exclude='__pycache__' --exclude='.git' --exclude='logs' --exclude='data' --exclude='cookies'"
 
-# Copy VPS-specific docker-compose
-echo "📋 Setting up VPS configuration..."
-ssh_copy_persistent "to" "$VPS_HOST" "$VPS_USER" "22" "" "docker-compose.vps.yml" "~/robustty-bot/docker-compose.yml"
+# VPS configuration is now handled by the main docker-compose.yml
+echo "📋 VPS configuration ready (using main docker-compose.yml)..."
 
 # Copy environment file
 if [ -f .env ]; then
