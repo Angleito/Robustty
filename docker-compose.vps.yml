@@ -54,6 +54,16 @@ services:
       - "gateway-sydney-1.discord.gg:162.159.130.232"
       - "discord.com:162.159.137.232"
       - "discordapp.com:162.159.137.232"
+      # Additional Discord domains
+      - "cdn.discordapp.com:162.159.137.232"
+      - "media.discordapp.net:162.159.137.232"
+      - "discordstatus.com:104.21.58.190"
+      # Platform API domains
+      - "api.odysee.tv:104.21.12.139"
+      - "api.rumble.com:104.26.9.156"
+      - "www.googleapis.com:172.217.1.138"
+      - "youtube.googleapis.com:172.217.1.138"
+      - "youtubei.googleapis.com:172.217.1.138"
     depends_on:
       - redis
     healthcheck:
