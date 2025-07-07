@@ -1,0 +1,82 @@
+services:
+  # Discord bot - minimal memory configuration
+  robustty:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: robustty-bot
+    restart: unless-stopped
+    ports:
+      - "8080:8080"  # Health check port only
+    environment:
+      - DISCORD_TOKEN=${DISCORD_TOKEN}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - SEARCH_TIMEOUT=${SEARCH_TIMEOUT:-30}
+      - STREAM_TIMEOUT=${STREAM_TIMEOUT:-300}
+      - MAX_QUEUE_SIZE=${MAX_QUEUE_SIZE:-50}
+      - REDIS_URL=redis://redis:6379
+      - VPS_MODE=true
+      - DOCKER_CONTAINER=true
+      # Disable heavy platforms
+      - YOUTUBE_ENABLED=false
+      - RUMBLE_ENABLED=false
+      - YOUTUBE_MUSIC_ENABLED=false
+      # Enable lightweight platforms only
+      - ODYSEE_ENABLED=true
+      - PEERTUBE_ENABLED=true
+      # Memory optimization settings
+      - PYTHONUNBUFFERED=1
+      - PYTHONDONTWRITEBYTECODE=1
+      - PYTHONMALLOC=malloc
+    volumes:
+      - ./config:/app/config:ro
+      - ./logs:/app/logs
+      - ./cookies:/app/cookies
+    networks:
+      - robustty-network
+    deploy:
+      resources:
+        limits:
+          memory: 384M
+          cpus: '0.5'
+        reservations:
+          memory: 256M
+    depends_on:
+      - redis
+
+  # Redis with minimal memory
+  redis:
+    image: redis:7-alpine
+    container_name: robustty-redis
+    restart: unless-stopped
+    volumes:
+      - robustty-redis-data:/data
+    networks:
+      - robustty-network
+    command: |
+      redis-server 
+      --appendonly yes 
+      --maxmemory 128mb
+      --maxmemory-policy allkeys-lru
+      --save ""
+      --stop-writes-on-bgsave-error no
+    deploy:
+      resources:
+        limits:
+          memory: 192M
+          cpus: '0.3'
+        reservations:
+          memory: 128M
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+
+networks:
+  robustty-network:
+    driver: bridge
+
+volumes:
+  robustty-redis-data:
+    driver: local
