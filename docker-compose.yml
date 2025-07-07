@@ -11,7 +11,7 @@ services:
       - NODE_ENV=production
       - PULSE_SERVER=unix:/tmp/pulse-socket
     volumes:
-      - ./cookies:/app/cookies:ro
+      - ./cookies:/app/cookies
       - youtube-music-data:/root/.config
     networks:
       - robustty-network
