@@ -59,3 +59,8 @@ async def get_session() -> aiohttp.ClientSession:
 async def close_session():
     """Close the global HTTP session."""
     await _session_manager.close()
+
+
+async def cleanup_session_manager():
+    """Cleanup the session manager (alias for close_session)."""
+    await close_session()
