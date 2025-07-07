@@ -497,8 +497,8 @@ echo "======================================================"
 
 # Stop all services
 echo "🛑 Stopping services..."
-if command -v docker-compose &> /dev/null && [[ -f docker-compose.vps.yml ]]; then
-    docker-compose -f docker-compose.vps.yml down 2>/dev/null || true
+if command -v docker-compose &> /dev/null && [[ -f docker-compose.yml ]]; then
+    docker-compose -f docker-compose.yml down 2>/dev/null || true
 fi
 
 # Reset Docker networking
@@ -537,11 +537,11 @@ else
 fi
 
 # Restart bot if compose file exists
-if [[ -f docker-compose.vps.yml ]]; then
+if [[ -f docker-compose.yml ]]; then
     echo "🚀 Restarting bot services..."
-    docker-compose -f docker-compose.vps.yml up -d
+    docker-compose -f docker-compose.yml up -d
 else
-    echo "⚠️ docker-compose.vps.yml not found in current directory"
+    echo "⚠️ docker-compose.yml not found in current directory"
 fi
 
 echo "✅ Emergency recovery completed"

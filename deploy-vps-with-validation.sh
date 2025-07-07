@@ -242,9 +242,9 @@ deploy_project() {
         --exclude='logs' --exclude='data' --exclude='cookies' \
         ./ "$VPS_USER@$VPS_HOST:~/robustty-bot/"
     
-    # Copy VPS-specific configuration
+    # Copy main docker-compose configuration (already VPS-compatible)
     log INFO "Setting up VPS configuration..."
-    scp docker-compose.vps.yml "$VPS_USER@$VPS_HOST:~/robustty-bot/docker-compose.yml"
+    scp docker-compose.yml "$VPS_USER@$VPS_HOST:~/robustty-bot/docker-compose.yml"
     
     # Copy environment file
     if [ -f .env ]; then

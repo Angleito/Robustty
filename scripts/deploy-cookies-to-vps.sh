@@ -26,7 +26,7 @@ NC='\033[0m' # No Color
 echo -e "${BLUE}🚀 Starting automated cookie deployment to VPS...${NC}"
 
 # Check if we're in the right directory
-if [ ! -f "docker-compose.vps.yml" ]; then
+if [ ! -f "docker-compose.yml" ]; then
     echo -e "${RED}❌ Error: Must run from Robustty project root directory${NC}"
     exit 1
 fi
@@ -76,9 +76,9 @@ expect -c "
     expect \"Enter passphrase for key\" { send \"$SSH_PASSPHRASE\r\" }
     expect \"#\" { send \"cd ~/Robustty\r\" }
     expect \"#\" { send \"echo 'Stopping containers...'\r\" }
-    expect \"#\" { send \"docker-compose -f docker-compose.vps.yml down\r\" }
+    expect \"#\" { send \"docker-compose -f docker-compose.yml down\r\" }
     expect \"#\" { send \"echo 'Rebuilding and starting containers...'\r\" }
-    expect \"#\" { send \"docker-compose -f docker-compose.vps.yml up -d --build\r\" }
+    expect \"#\" { send \"docker-compose -f docker-compose.yml up -d --build\r\" }
     expect \"#\" { send \"echo 'Waiting for containers to start...'\r\" }
     expect \"#\" { send \"sleep 20\r\" }
     expect \"#\" { send \"echo 'Container status:'\r\" }

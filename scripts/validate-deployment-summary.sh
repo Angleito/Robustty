@@ -186,10 +186,10 @@ quick_validation_check() {
         echo -e "${YELLOW}⚠️  .env file missing${NC}"
     fi
     
-    if [[ -f docker-compose.vps.yml ]]; then
-        echo -e "${GREEN}✅ docker-compose.vps.yml exists${NC}"
+    if [[ -f docker-compose.yml ]]; then
+        echo -e "${GREEN}✅ docker-compose.yml exists${NC}"
     else
-        echo -e "${RED}❌ docker-compose.vps.yml missing${NC}"
+        echo -e "${RED}❌ docker-compose.yml missing${NC}"
     fi
 }
 

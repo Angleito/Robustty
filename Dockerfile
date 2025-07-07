@@ -78,6 +78,10 @@ echo "Fixing cookie directory permissions..."\n\
 sudo chown -R robustty:robustty /app/cookies /app/data /app/logs || true\n\
 sudo chmod 755 /app/cookies /app/data /app/logs || true\n\
 \n\
+# Convert any Netscape format cookies to JSON format\n\
+echo "Converting Netscape cookies to JSON format..."\n\
+cd /app && /usr/local/bin/python scripts/convert-cookies-to-json.py 2>&1 | tee -a /app/logs/cookie-conversion.log || echo "Cookie conversion failed or no cookies to convert"\n\
+\n\
 # Start the bot\n\
 echo "Starting Discord bot..."\n\
 exec /usr/local/bin/python -m src.main' > /app/start.sh && chmod +x /app/start.sh

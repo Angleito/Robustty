@@ -179,9 +179,7 @@ combined_verify_restart_script="
     cd $VPS_PATH
     
     # Determine which docker-compose file to use
-    if [ -f docker-compose.vps.yml ]; then
-        compose_file='docker-compose.vps.yml'
-    elif [ -f docker-compose.yml ]; then
+    if [ -f docker-compose.yml ]; then
         compose_file='docker-compose.yml'
     else
         echo 'WARNING: No docker-compose file found, skipping service restart'

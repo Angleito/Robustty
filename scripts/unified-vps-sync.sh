@@ -234,8 +234,6 @@ restart_and_monitor_services() {
         # Check if docker-compose file exists
         if [ -f docker-compose.yml ]; then
             compose_file='docker-compose.yml'
-        elif [ -f docker-compose.vps.yml ]; then
-            compose_file='docker-compose.vps.yml'
         else
             echo 'No docker-compose file found'
             exit 1

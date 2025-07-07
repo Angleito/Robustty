@@ -137,7 +137,7 @@ systemctl start network-optimize
 
 ### Bridge Network Optimization
 
-Update `docker-compose.vps.yml` with optimized networking:
+Update `docker-compose.yml` with optimized networking (already configured for VPS):
 
 ```yaml
 version: '3.8'
@@ -246,7 +246,7 @@ systemctl restart systemd-resolved
 
 ### Container DNS Configuration
 
-Add to `docker-compose.vps.yml`:
+Add to `docker-compose.yml`:
 
 ```yaml
 services:
@@ -398,7 +398,7 @@ sysctl -p
 
 ### Docker Container Limits
 
-Update `docker-compose.vps.yml`:
+Update `docker-compose.yml`:
 
 ```yaml
 services:
@@ -495,7 +495,7 @@ while true; do
         sleep 30
         if ! check_bot_health; then
             log_message "🔄 Attempting service restart..."
-            docker-compose -f docker-compose.vps.yml restart robustty
+            docker-compose restart robustty
         fi
     fi
     
@@ -671,7 +671,7 @@ nslookup discord.com 1.1.1.1
 
 2. **Container DNS:**
    ```yaml
-   # docker-compose.vps.yml
+   # docker-compose.yml
    services:
      robustty:
        dns:
@@ -702,7 +702,7 @@ docker ps
 sudo fuser -k 8080/tcp
 
 # Use different port
-# Update docker-compose.vps.yml port mapping
+# Update docker-compose.yml port mapping
 ```
 
 ### Network Performance Issues
@@ -840,7 +840,7 @@ echo "Diagnostics complete. Check logs at /var/log/robustty-network.log"
 echo "🚨 Emergency Network Recovery"
 
 # Stop all services
-docker-compose -f docker-compose.vps.yml down
+docker-compose down
 
 # Reset Docker networking
 docker network prune -f
@@ -854,7 +854,7 @@ systemctl restart systemd-resolved
 systemctl restart docker
 
 # Restart services
-docker-compose -f docker-compose.vps.yml up -d
+docker-compose up -d
 
 echo "✅ Network recovery attempted"
 ```
@@ -893,15 +893,15 @@ echo "DNS recovery complete"
 echo "🔄 Container Recovery"
 
 # Stop containers
-docker-compose -f docker-compose.vps.yml down
+docker-compose down
 
 # Remove containers and volumes
-docker-compose -f docker-compose.vps.yml rm -f
+docker-compose rm -f
 docker volume prune -f
 
 # Rebuild and restart
-docker-compose -f docker-compose.vps.yml build --no-cache
-docker-compose -f docker-compose.vps.yml up -d
+docker-compose build --no-cache
+docker-compose up -d
 
 echo "Container recovery complete"
 ```
@@ -935,7 +935,7 @@ while true; do
         echo "$(date) - Health check failed, attempting recovery"
         
         # Try simple restart first
-        docker-compose -f docker-compose.vps.yml restart robustty
+        docker-compose restart robustty
         sleep 30
         
         # If still failing, full recovery

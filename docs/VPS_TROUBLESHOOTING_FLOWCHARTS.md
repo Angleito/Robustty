@@ -294,7 +294,7 @@ curl http://localhost:8080/network | jq .
 echo "🚨 Starting emergency recovery..."
 
 # Stop all services
-docker-compose -f docker-compose.vps.yml down || true
+docker-compose down || true
 
 # Reset Docker
 systemctl stop docker
@@ -318,7 +318,7 @@ nameserver 1.1.1.1
 EOF
 
 # Restart services
-docker-compose -f docker-compose.vps.yml up -d --build
+docker-compose up -d --build
 
 echo "✅ Emergency recovery completed"
 ```
@@ -357,13 +357,13 @@ fi
 echo "🔄 Service recovery starting..."
 
 # Stop services gracefully
-docker-compose -f docker-compose.vps.yml down
+docker-compose down
 
 # Clean up
 docker system prune -f
 
 # Restart services
-docker-compose -f docker-compose.vps.yml up -d
+docker-compose up -d
 
 # Wait for services to start
 sleep 30

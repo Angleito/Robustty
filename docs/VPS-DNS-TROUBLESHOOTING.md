@@ -164,7 +164,7 @@ Many VPS providers have security groups or firewall rules that need to be config
 
 ### DNS Configuration in Docker Compose
 
-The `docker-compose.vps.yml` already includes DNS configuration:
+The main `docker-compose.yml` already includes DNS configuration for VPS deployments:
 
 ```yaml
 dns:
@@ -198,7 +198,7 @@ python -c "import socket; socket.create_connection(('discord.com', 443), timeout
 If DNS issues persist, try host networking:
 
 ```yaml
-# Add to robustty service in docker-compose.vps.yml
+# Add to robustty service in docker-compose.yml
 network_mode: host
 ```
 
@@ -233,10 +233,10 @@ except Exception as e:
 
 ```bash
 # View real-time logs
-docker-compose -f docker-compose.vps.yml logs -f robustty
+docker-compose logs -f robustty
 
 # Search for DNS errors
-docker-compose -f docker-compose.vps.yml logs robustty | grep -i "gaierror\|dns\|resolve"
+docker-compose logs robustty | grep -i "gaierror\|dns\|resolve"
 ```
 
 ### Check System DNS Logs
@@ -287,4 +287,4 @@ If DNS issues persist after trying all solutions:
 - `/scripts/fix-vps-dns.sh` - Automated DNS fix script
 - `/deploy-vps.sh` - VPS deployment with DNS pre-checks
 - `/scripts/setup-vps.sh` - VPS setup with network validation
-- `/docker-compose.vps.yml` - VPS Docker configuration with DNS settings
+- `/docker-compose.yml` - Main Docker configuration with VPS-compatible DNS settings

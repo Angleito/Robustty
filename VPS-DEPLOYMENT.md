@@ -2,12 +2,18 @@
 
 This guide explains how to deploy Robustty on Ubuntu VPS, highlighting the differences from local development.
 
+## Docker Compose Structure
+
+- **`docker-compose.yml`**: Main configuration file, now VPS-compatible (no separate VPS file needed)
+- **`docker-compose.minimal.yml`**: For low-resource VPS deployments (< 1GB RAM)
+- **`docker-compose.cookies.yml`**: Cookie extraction service for macOS environments only
+
 ## Quick Start for Ubuntu VPS
 
 ### 1. Environment Setup
 ```bash
-# Copy VPS-specific environment template
-cp .env.vps.example .env
+# Copy environment template
+cp .env.example .env
 
 # Edit with your credentials
 nano .env
@@ -116,13 +122,13 @@ python scripts/extract-brave-cookies.py
 
 ## Deployment Commands
 
-### VPS-Specific Deployment
+### VPS Deployment
 ```bash
-# Use VPS-optimized configuration
-docker-compose -f docker-compose.vps.yml up -d
+# Deploy using the main docker-compose.yml (now VPS-compatible)
+docker-compose up -d
 
 # View logs
-docker-compose -f docker-compose.vps.yml logs -f
+docker-compose logs -f
 
 # Health check
 curl http://localhost:8080/health
@@ -188,7 +194,13 @@ The VPS configuration includes several optimizations:
 
 1. **Export Cookies** (run on local machine):
    ```bash
+   # Option 1: Manual extraction
    python scripts/extract-brave-cookies.py
+   
+   # Option 2: Using cookie extraction service (macOS only)
+   docker-compose -f docker-compose.cookies.yml up
+   
+   # Package cookies for transfer
    tar -czf cookies.tar.gz cookies/
    ```
 
@@ -201,9 +213,9 @@ The VPS configuration includes several optimizations:
 3. **Deploy on VPS**:
    ```bash
    # On VPS
-   cp .env.vps.example .env
+   cp .env.example .env
    # Edit .env with your credentials
-   docker-compose -f docker-compose.vps.yml up -d
+   docker-compose up -d
    ```
 
 ## Monitoring and Maintenance

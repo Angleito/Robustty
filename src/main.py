@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 import yaml  # noqa: E402
 from dotenv import load_dotenv  # noqa: E402
+import discord  # noqa: E402
 
 from src.bot.bot import RobusttyBot  # noqa: E402
 from src.utils.config_loader import load_config, ConfigurationError  # noqa: E402
@@ -111,6 +112,23 @@ async def main() -> None:
                 if task.exception():
                     raise task.exception()
 
+    except discord.LoginFailure as e:
+        logger.error(f"Discord Authentication Failed: {e}")
+        logger.error("\n" + "="*60)
+        logger.error("AUTHENTICATION ERROR - WEBSOCKET 530")
+        logger.error("="*60)
+        logger.error("\nYour bot token is invalid or expired. Please:")
+        logger.error("1. Go to https://discord.com/developers/applications")
+        logger.error("2. Select your application")
+        logger.error("3. Go to 'Bot' section")
+        logger.error("4. Click 'Reset Token' to generate a new token")
+        logger.error("5. Copy the ENTIRE token (it has 3 parts separated by dots)")
+        logger.error("6. Update your .env file: DISCORD_TOKEN=your-new-token-here")
+        logger.error("7. Do NOT include 'Bot ' prefix - it's added automatically")
+        logger.error("\nFor detailed diagnostics, run:")
+        logger.error("  python scripts/diagnose-discord-auth.py")
+        logger.error("  python scripts/fix-discord-530-error.py")
+        sys.exit(1)
     except ConfigurationError as e:
         logger.error(f"Configuration Error: {e}")
         sys.exit(1)

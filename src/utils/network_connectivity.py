@@ -447,6 +447,14 @@ class NetworkConnectivityChecker:
                             )
                 except aiohttp.WSServerHandshakeError as e:
                     response_time = time.time() - start_time
+                    # Handle 530 authentication errors specifically
+                    if hasattr(e, 'status') and e.status == 530:
+                        logger.error(f"Discord gateway authentication failed (530): Invalid or expired token")
+                        return (
+                            False,
+                            response_time,
+                            f"Authentication failed (530): Token is invalid or expired. Please regenerate your bot token.",
+                        )
                     return (
                         False,
                         response_time,

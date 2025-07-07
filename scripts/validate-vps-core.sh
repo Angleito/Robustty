@@ -123,9 +123,9 @@ validate_docker() {
         true
     
     run_test "compose_file_exists" \
-        "[ -f docker-compose.vps.yml ]" \
-        "VPS compose file exists" \
-        "docker-compose.vps.yml missing" \
+        "[ -f docker-compose.yml ]" \
+        "Docker compose file exists" \
+        "docker-compose.yml missing" \
         true
     
     run_test "env_file_exists" \
@@ -151,7 +151,7 @@ validate_services() {
     
     # Start services for validation
     log INFO "Starting services for validation..."
-    if ! docker-compose -f docker-compose.vps.yml up -d; then
+    if ! docker-compose -f docker-compose.yml up -d; then
         log FAIL "Failed to start Docker services"
         CRITICAL_FAILURES+=("docker_services: Failed to start containers")
         return 1
@@ -163,20 +163,20 @@ validate_services() {
     
     # Redis health
     run_test "redis_running" \
-        "docker-compose -f docker-compose.vps.yml ps | grep -q 'redis.*Up'" \
+        "docker-compose -f docker-compose.yml ps | grep -q 'redis.*Up'" \
         "Redis container running" \
         "Redis container not running" \
         true
     
     run_test "redis_accessible" \
-        "docker-compose -f docker-compose.vps.yml exec -T redis redis-cli ping | grep -q PONG" \
+        "docker-compose -f docker-compose.yml exec -T redis redis-cli ping | grep -q PONG" \
         "Redis accessible" \
         "Redis not responding" \
         true
     
     # Bot container health
     run_test "bot_container_running" \
-        "docker-compose -f docker-compose.vps.yml ps | grep -q 'robustty.*Up'" \
+        "docker-compose -f docker-compose.yml ps | grep -q 'robustty.*Up'" \
         "Bot container running" \
         "Bot container not running" \
         true
@@ -207,7 +207,7 @@ validate_bot() {
     
     # Check bot logs for connection
     log INFO "Checking bot connection status..."
-    local bot_logs=$(docker-compose -f docker-compose.vps.yml logs --tail=20 robustty 2>/dev/null || echo "")
+    local bot_logs=$(docker-compose -f docker-compose.yml logs --tail=20 robustty 2>/dev/null || echo "")
     
     if echo "$bot_logs" | grep -q -E "(Bot is now online|Logged in as|Successfully connected)"; then
         log PASS "Bot successfully connected to Discord"
@@ -382,8 +382,8 @@ main() {
     echo "==========================================="
     
     # Check basic requirements
-    if [ ! -f docker-compose.vps.yml ]; then
-        log ERROR "docker-compose.vps.yml not found. Run from project root."
+    if [ ! -f docker-compose.yml ]; then
+        log ERROR "docker-compose.yml not found. Run from project root."
         exit 3
     fi
     

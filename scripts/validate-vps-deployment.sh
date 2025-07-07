@@ -197,11 +197,11 @@ validate_docker_services() {
         "Docker Compose is not installed" \
         true
     
-    # Check for VPS-specific compose file
-    run_test "DOCKER_SERVICES" "vps_compose_file" \
-        "[ -f docker-compose.vps.yml ]" \
-        "VPS Docker Compose file exists" \
-        "VPS Docker Compose file missing" \
+    # Check for Docker compose file
+    run_test "DOCKER_SERVICES" "compose_file" \
+        "[ -f docker-compose.yml ]" \
+        "Docker Compose file exists" \
+        "Docker Compose file missing" \
         true
     
     # Environment file validation
@@ -227,7 +227,7 @@ validate_docker_services() {
     
     # Container services health
     log INFO "Starting Docker services for validation..."
-    docker-compose -f docker-compose.vps.yml up -d || {
+    docker-compose -f docker-compose.yml up -d || {
         log CRITICAL "Failed to start Docker services"
         return 1
     }
@@ -236,20 +236,20 @@ validate_docker_services() {
     sleep 10
     
     run_test "DOCKER_SERVICES" "redis_container_running" \
-        "docker-compose -f docker-compose.vps.yml ps | grep -q 'robustty-redis.*Up'" \
+        "docker-compose -f docker-compose.yml ps | grep -q 'robustty-redis.*Up'" \
         "Redis container is running" \
         "Redis container is not running" \
         true
     
     run_test "DOCKER_SERVICES" "bot_container_running" \
-        "docker-compose -f docker-compose.vps.yml ps | grep -q 'robustty-bot.*Up'" \
+        "docker-compose -f docker-compose.yml ps | grep -q 'robustty-bot.*Up'" \
         "Bot container is running" \
         "Bot container is not running" \
         true
     
     # Redis connectivity test
     run_test "DOCKER_SERVICES" "redis_connectivity" \
-        "docker-compose -f docker-compose.vps.yml exec -T redis redis-cli ping | grep -q PONG" \
+        "docker-compose -f docker-compose.yml exec -T redis redis-cli ping | grep -q PONG" \
         "Redis is accessible" \
         "Redis is not accessible" \
         true
@@ -304,7 +304,7 @@ validate_discord_integration() {
     
     # Check bot logs for connection status
     log INFO "Checking bot connection status in logs..."
-    local bot_logs=$(docker-compose -f docker-compose.vps.yml logs --tail=50 robustty 2>/dev/null || echo "")
+    local bot_logs=$(docker-compose -f docker-compose.yml logs --tail=50 robustty 2>/dev/null || echo "")
     
     if echo "$bot_logs" | grep -q "Bot is now online"; then
         log SUCCESS "✅ Bot successfully connected to Discord"
@@ -398,7 +398,7 @@ validate_resource_monitoring() {
         false
     
     # Redis memory usage
-    local redis_memory=$(docker-compose -f docker-compose.vps.yml exec -T redis redis-cli info memory | grep used_memory_human | cut -d':' -f2 | tr -d '\r\n' || echo "0B")
+    local redis_memory=$(docker-compose -f docker-compose.yml exec -T redis redis-cli info memory | grep used_memory_human | cut -d':' -f2 | tr -d '\r\n' || echo "0B")
     log INFO "Redis memory usage: $redis_memory"
     
     # Log file size validation
@@ -431,7 +431,7 @@ validate_security_config() {
     
     # Container security
     run_test "SECURITY_CONFIG" "container_non_root" \
-        "! docker-compose -f docker-compose.vps.yml exec -T robustty whoami | grep -q '^root$'" \
+        "! docker-compose -f docker-compose.yml exec -T robustty whoami | grep -q '^root$'" \
         "Bot container not running as root" \
         "Bot container running as root" \
         false
@@ -453,7 +453,7 @@ validate_security_config() {
     
     # Environment variable security
     run_test "SECURITY_CONFIG" "no_secrets_in_env" \
-        "! docker-compose -f docker-compose.vps.yml config | grep -i -E 'password|secret|key' | grep -v -E 'DISCORD_TOKEN|YOUTUBE_API_KEY|APIFY_API_KEY'" \
+        "! docker-compose -f docker-compose.yml config | grep -i -E 'password|secret|key' | grep -v -E 'DISCORD_TOKEN|YOUTUBE_API_KEY|APIFY_API_KEY'" \
         "No unexpected secrets in environment" \
         "Potential secrets exposed in environment" \
         false
@@ -483,7 +483,7 @@ validate_performance() {
     # Container startup time validation
     log INFO "Testing container restart performance..."
     local start_time=$(date +%s)
-    docker-compose -f docker-compose.vps.yml restart robustty >/dev/null 2>&1
+    docker-compose -f docker-compose.yml restart robustty >/dev/null 2>&1
     local end_time=$(date +%s)
     local restart_time=$((end_time - start_time))
     
@@ -494,7 +494,7 @@ validate_performance() {
         false
     
     # Log processing performance
-    local log_lines=$(docker-compose -f docker-compose.vps.yml logs robustty 2>/dev/null | wc -l || echo 0)
+    local log_lines=$(docker-compose -f docker-compose.yml logs robustty 2>/dev/null | wc -l || echo 0)
     run_test "PERFORMANCE_VALIDATION" "log_processing" \
         "[ $log_lines -gt 0 ]" \
         "Bot is generating logs properly" \
@@ -595,8 +595,8 @@ generate_report() {
     echo -e "${BLUE}LOGS AND DEBUGGING${NC}"
     echo "=================="
     echo "Full validation log: $LOG_FILE"
-    echo "Bot logs: docker-compose -f docker-compose.vps.yml logs -f robustty"
-    echo "Redis logs: docker-compose -f docker-compose.vps.yml logs -f redis"
+    echo "Bot logs: docker-compose -f docker-compose.yml logs -f robustty"
+    echo "Redis logs: docker-compose -f docker-compose.yml logs -f redis"
     echo "System monitoring: scripts/monitor-vps-health.sh"
     
     # Return appropriate exit code
@@ -615,7 +615,7 @@ cleanup() {
     
     # Don't stop services if they were already running
     if [ "$SERVICES_WERE_RUNNING" != "true" ]; then
-        docker-compose -f docker-compose.vps.yml down >/dev/null 2>&1 || true
+        docker-compose -f docker-compose.yml down >/dev/null 2>&1 || true
     fi
     
     # Clean up temporary files
@@ -684,7 +684,7 @@ REQUIREMENTS:
     • Linux/Unix VPS environment
     • Docker and Docker Compose installed
     • .env file with bot configuration
-    • docker-compose.vps.yml file
+    • docker-compose.yml file
     • Network access to Discord and platform APIs
 
 FOR TROUBLESHOOTING:
@@ -753,7 +753,7 @@ main() {
     log INFO "===================================================="
     
     # Check if services are already running
-    if docker-compose -f docker-compose.vps.yml ps | grep -q "Up"; then
+    if docker-compose -f docker-compose.yml ps | grep -q "Up"; then
         SERVICES_WERE_RUNNING=true
         log INFO "Services already running - will not stop them after validation"
     else
@@ -761,8 +761,8 @@ main() {
     fi
     
     # Check basic requirements
-    if [ ! -f docker-compose.vps.yml ]; then
-        log CRITICAL "docker-compose.vps.yml not found. Please run from project root."
+    if [ ! -f docker-compose.yml ]; then
+        log CRITICAL "docker-compose.yml not found. Please run from project root."
         return 3
     fi
     

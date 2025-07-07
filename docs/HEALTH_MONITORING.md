@@ -199,7 +199,7 @@ Overall status is determined by the worst component status, with specific rules 
 
 ### Docker Health Checks
 
-Both `docker-compose.yml` and `docker-compose.vps.yml` use the dependency-free health check script:
+The main `docker-compose.yml` (now VPS-compatible) uses the dependency-free health check script:
 
 ```yaml
 healthcheck:

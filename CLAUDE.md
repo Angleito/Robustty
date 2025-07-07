@@ -64,8 +64,8 @@ docker-compose exec redis redis-cli info # Redis info via container
 
 #### VPS Deployment (Ubuntu)
 ```bash
-# VPS-specific Docker commands (uses bridge networking)
-docker-compose -f docker-compose.yml up -d --build   # Build and start services
+# VPS deployment using the main docker-compose.yml (VPS-compatible with bridge networking)
+docker-compose up -d --build                         # Build and start services
 docker-compose exec robustty bash                    # Access container shell
 docker-compose exec redis redis-cli                  # Access Redis CLI
 docker-compose restart robustty                      # Restart bot only
@@ -466,6 +466,7 @@ VOICE_ENVIRONMENT=vps python tests/manual/test_vps_voice_fixes.py  # Using envir
 - **Simpler Deployment**: No need to copy/rename files during deployment
 - **Consistent Configuration**: Same compose file works for both local development and VPS
 - **Easier Maintenance**: Single source of truth for Docker configuration
+- **Cookie Extraction**: Remains a separate service (`docker-compose.cookies.yml`) for macOS environments
 
 ### Migration Notes
 - If you have existing VPS deployments, simply use `docker-compose up -d` instead of referencing the VPS-specific file

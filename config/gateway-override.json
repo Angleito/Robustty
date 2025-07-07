@@ -1,0 +1,9 @@
+{
+  "network": {
+    "use_regional_gateways": false,
+    "primary_gateway": "gateway.discord.gg",
+    "fallback_gateways": [],
+    "connection_timeout": 30,
+    "reconnect_delay": 5
+  }
+}

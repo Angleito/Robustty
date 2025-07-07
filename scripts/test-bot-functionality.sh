@@ -121,7 +121,7 @@ validate_bot_status() {
     # Check if containers are running
     run_test "bot_container_running" \
         "Bot container is running" \
-        "docker-compose -f docker-compose.vps.yml ps | grep -q 'robustty-bot.*Up'" \
+        "docker-compose -f docker-compose.yml ps | grep -q 'robustty-bot.*Up'" \
         true
     
     # Check health endpoint
@@ -131,7 +131,7 @@ validate_bot_status() {
         true
     
     # Check bot logs for successful startup
-    local bot_logs=$(docker-compose -f docker-compose.vps.yml logs --tail=50 robustty 2>/dev/null)
+    local bot_logs=$(docker-compose -f docker-compose.yml logs --tail=50 robustty 2>/dev/null)
     
     if echo "$bot_logs" | grep -q -E "(Bot is now online|Logged in as|Successfully connected)"; then
         log SUCCESS "✅ Bot successfully connected to Discord"
@@ -164,20 +164,20 @@ test_redis_functionality() {
     # Basic Redis connectivity
     run_test "redis_ping" \
         "Redis responds to ping" \
-        "docker-compose -f docker-compose.vps.yml exec -T redis redis-cli ping | grep -q PONG" \
+        "docker-compose -f docker-compose.yml exec -T redis redis-cli ping | grep -q PONG" \
         true
     
     # Test Redis write/read operations
     run_test "redis_write_read" \
         "Redis write/read operations work" \
-        "docker-compose -f docker-compose.vps.yml exec -T redis redis-cli set test_key 'test_value' && docker-compose -f docker-compose.vps.yml exec -T redis redis-cli get test_key | grep -q 'test_value'" \
+        "docker-compose -f docker-compose.yml exec -T redis redis-cli set test_key 'test_value' && docker-compose -f docker-compose.yml exec -T redis redis-cli get test_key | grep -q 'test_value'" \
         true
     
     # Clean up test key
-    docker-compose -f docker-compose.vps.yml exec -T redis redis-cli del test_key >/dev/null 2>&1 || true
+    docker-compose -f docker-compose.yml exec -T redis redis-cli del test_key >/dev/null 2>&1 || true
     
     # Check Redis memory usage
-    local redis_memory=$(docker-compose -f docker-compose.vps.yml exec -T redis redis-cli info memory | grep used_memory_human | cut -d':' -f2 | tr -d '\r' || echo "unknown")
+    local redis_memory=$(docker-compose -f docker-compose.yml exec -T redis redis-cli info memory | grep used_memory_human | cut -d':' -f2 | tr -d '\r' || echo "unknown")
     log INFO "Redis memory usage: $redis_memory"
     
     # Test cache operations through bot (if accessible)
@@ -244,10 +244,10 @@ test_platform_searches() {
         false
     
     # Test yt-dlp functionality for stream extraction
-    if docker-compose -f docker-compose.vps.yml exec -T robustty which yt-dlp >/dev/null 2>&1; then
+    if docker-compose -f docker-compose.yml exec -T robustty which yt-dlp >/dev/null 2>&1; then
         run_test "yt_dlp_functionality" \
             "yt-dlp is available for stream extraction" \
-            "docker-compose -f docker-compose.vps.yml exec -T robustty yt-dlp --version" \
+            "docker-compose -f docker-compose.yml exec -T robustty yt-dlp --version" \
             false
     else
         skip_test "yt_dlp_functionality" \
@@ -262,16 +262,16 @@ test_audio_functionality() {
     echo "=============================="
     
     # Check FFmpeg availability
-    if docker-compose -f docker-compose.vps.yml exec -T robustty which ffmpeg >/dev/null 2>&1; then
+    if docker-compose -f docker-compose.yml exec -T robustty which ffmpeg >/dev/null 2>&1; then
         run_test "ffmpeg_available" \
             "FFmpeg is available for audio processing" \
-            "docker-compose -f docker-compose.vps.yml exec -T robustty ffmpeg -version" \
+            "docker-compose -f docker-compose.yml exec -T robustty ffmpeg -version" \
             true
             
         # Test FFmpeg audio processing capabilities
         run_test "ffmpeg_audio_codecs" \
             "FFmpeg supports required audio codecs" \
-            "docker-compose -f docker-compose.vps.yml exec -T robustty ffmpeg -codecs | grep -q -E '(opus|pcm|mp3)'" \
+            "docker-compose -f docker-compose.yml exec -T robustty ffmpeg -codecs | grep -q -E '(opus|pcm|mp3)'" \
             true
     else
         log ERROR "❌ FFmpeg not found - audio streaming will not work"
@@ -283,19 +283,19 @@ test_audio_functionality() {
     # Check audio libraries and dependencies
     run_test "python_audio_libs" \
         "Python audio libraries are available" \
-        "docker-compose -f docker-compose.vps.yml exec -T robustty python -c 'import discord; import asyncio; print(\"Audio libs OK\")'" \
+        "docker-compose -f docker-compose.yml exec -T robustty python -c 'import discord; import asyncio; print(\"Audio libs OK\")'" \
         true
     
     # Test Discord voice client capabilities
     run_test "discord_voice_support" \
         "Discord.py voice support is available" \
-        "docker-compose -f docker-compose.vps.yml exec -T robustty python -c 'import discord; print(discord.opus.is_loaded())'" \
+        "docker-compose -f docker-compose.yml exec -T robustty python -c 'import discord; print(discord.opus.is_loaded())'" \
         false
     
     # Check for audio processing dependencies
     run_test "audio_dependencies" \
         "Audio processing dependencies are met" \
-        "docker-compose -f docker-compose.vps.yml exec -T robustty python -c 'import subprocess; subprocess.run([\"ffmpeg\", \"-version\"], check=True, capture_output=True)'" \
+        "docker-compose -f docker-compose.yml exec -T robustty python -c 'import subprocess; subprocess.run([\"ffmpeg\", \"-version\"], check=True, capture_output=True)'" \
         true
 }
 
@@ -339,7 +339,7 @@ test_configuration() {
     # Test container environment
     run_test "container_environment" \
         "Container environment is properly configured" \
-        "docker-compose -f docker-compose.vps.yml exec -T robustty env | grep -q DISCORD_TOKEN" \
+        "docker-compose -f docker-compose.yml exec -T robustty env | grep -q DISCORD_TOKEN" \
         true
 }
 
@@ -351,25 +351,25 @@ test_network_connectivity() {
     # Discord API connectivity from container
     run_test "discord_api_from_container" \
         "Discord API accessible from container" \
-        "docker-compose -f docker-compose.vps.yml exec -T robustty curl -s --max-time 10 https://discord.com/api/v10/gateway | grep -q 'wss://'" \
+        "docker-compose -f docker-compose.yml exec -T robustty curl -s --max-time 10 https://discord.com/api/v10/gateway | grep -q 'wss://'" \
         true
     
     # DNS resolution from container
     run_test "dns_resolution_container" \
         "DNS resolution works from container" \
-        "docker-compose -f docker-compose.vps.yml exec -T robustty nslookup discord.com" \
+        "docker-compose -f docker-compose.yml exec -T robustty nslookup discord.com" \
         true
     
     # External API connectivity
     run_test "external_apis_container" \
         "External APIs accessible from container" \
-        "docker-compose -f docker-compose.vps.yml exec -T robustty curl -s --max-time 10 https://googleapis.com" \
+        "docker-compose -f docker-compose.yml exec -T robustty curl -s --max-time 10 https://googleapis.com" \
         false
     
     # Container network connectivity
     run_test "container_network" \
         "Container can access other services" \
-        "docker-compose -f docker-compose.vps.yml exec -T robustty nc -z redis 6379" \
+        "docker-compose -f docker-compose.yml exec -T robustty nc -z redis 6379" \
         true
 }
 
@@ -382,7 +382,7 @@ test_error_handling() {
     log INFO "Testing bot resilience..."
     
     # Check log file for proper error handling
-    local bot_logs=$(docker-compose -f docker-compose.vps.yml logs --tail=100 robustty 2>/dev/null)
+    local bot_logs=$(docker-compose -f docker-compose.yml logs --tail=100 robustty 2>/dev/null)
     
     # Look for graceful error handling patterns
     if echo "$bot_logs" | grep -q -E "(Error.*handled|Exception.*caught|Gracefully|Retry)"; then
@@ -400,7 +400,7 @@ test_error_handling() {
     log INFO "Testing container restart recovery..."
     local restart_start=$(date +%s)
     
-    if docker-compose -f docker-compose.vps.yml restart robustty >/dev/null 2>&1; then
+    if docker-compose -f docker-compose.yml restart robustty >/dev/null 2>&1; then
         # Wait for service to be ready
         local attempts=0
         while [ $attempts -lt 30 ]; do
@@ -572,7 +572,7 @@ generate_test_report() {
 cleanup() {
     log INFO "🧹 Cleaning up test environment..."
     # Remove any test artifacts
-    docker-compose -f docker-compose.vps.yml exec -T redis redis-cli del test_key >/dev/null 2>&1 || true
+    docker-compose -f docker-compose.yml exec -T redis redis-cli del test_key >/dev/null 2>&1 || true
     log INFO "Test cleanup completed"
 }
 
@@ -622,12 +622,12 @@ TESTS PERFORMED:
     • Performance and resource usage
 
 REQUIREMENTS:
-    • Bot must be deployed and running (docker-compose.vps.yml)
+    • Bot must be deployed and running (docker-compose.yml)
     • .env file with proper configuration
     • Network access to Discord and platform APIs
 
 FOR TROUBLESHOOTING:
-    • Check bot logs: docker-compose -f docker-compose.vps.yml logs -f robustty
+    • Check bot logs: docker-compose -f docker-compose.yml logs -f robustty
     • Run network diagnostics: scripts/diagnose-vps-network.sh
     • Validate deployment: scripts/validate-vps-deployment.sh
 
@@ -681,8 +681,8 @@ main() {
     log INFO "================================================="
     
     # Check prerequisites
-    if [ ! -f docker-compose.vps.yml ]; then
-        log ERROR "docker-compose.vps.yml not found. Please run from project root."
+    if [ ! -f docker-compose.yml ]; then
+        log ERROR "docker-compose.yml not found. Please run from project root."
         return 3
     fi
     

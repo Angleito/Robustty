@@ -105,20 +105,20 @@ echo ""
 # Test 5: Check Docker Compose DNS configuration
 print_info "Test 5: Checking Docker Compose DNS configuration..."
 
-if [ -f "docker-compose.vps.yml" ]; then
-    if grep -q "dns:" docker-compose.vps.yml; then
+if [ -f "docker-compose.yml" ]; then
+    if grep -q "dns:" docker-compose.yml; then
         print_success "Docker Compose has DNS configuration"
     else
         print_warning "Docker Compose missing DNS configuration"
     fi
     
-    if grep -q "healthcheck:" docker-compose.vps.yml; then
+    if grep -q "healthcheck:" docker-compose.yml; then
         print_success "Docker Compose has health checks configured"
     else
         print_warning "Docker Compose missing health checks"
     fi
 else
-    print_error "docker-compose.vps.yml not found"
+    print_error "docker-compose.yml not found"
 fi
 
 echo ""
