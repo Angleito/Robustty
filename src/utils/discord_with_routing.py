@@ -46,33 +46,12 @@ class NetworkRoutedDiscordClient(commands.Bot):
         # Store original HTTP request method
         self._original_http_request = self.http.request
         
-        async def routed_request(method, url, **kwargs):
+        async def routed_request(route, **kwargs):
             """Route Discord HTTP requests through VPN"""
-            # Use VPN routing for Discord API calls
-            if 'discord.com' in url or 'discordapp.com' in url:
-                try:
-                    async with discord_session() as session:
-                        logger.debug(f"Routing Discord API request through VPN: {method} {url}")
-                        
-                        # Ensure headers are properly set
-                        headers = kwargs.get('headers', {})
-                        if 'Authorization' not in headers and hasattr(self.http, 'token'):
-                            headers['Authorization'] = f'Bot {self.http.token}'
-                        if 'User-Agent' not in headers:
-                            headers['User-Agent'] = 'Robustty Bot (Discord Music Bot)'
-                        kwargs['headers'] = headers
-                        
-                        # Make the request through VPN
-                        async with session.request(method, url, **kwargs) as response:
-                            # Return response in format expected by Discord.py
-                            return response
-                except Exception as e:
-                    logger.warning(f"VPN routing failed for Discord request, falling back to original: {e}")
-                    # Fall back to original method if VPN routing fails
-                    return await self._original_http_request(method, url, **kwargs)
-            else:
-                # Use original method for non-Discord requests
-                return await self._original_http_request(method, url, **kwargs)
+            # For now, disable VPN routing to fix the immediate error
+            # and let Discord.py work normally until we can implement proper routing
+            logger.debug(f"Discord HTTP request: {route.method} {route.path}")
+            return await self._original_http_request(route, **kwargs)
         
         # Replace the HTTP request method
         self.http.request = routed_request
