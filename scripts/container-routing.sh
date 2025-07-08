@@ -45,18 +45,26 @@ detect_network_interface() {
     fi
 }
 
-# Function to get subnet for a network name
+# Function to get subnet for a network name by detecting actual Docker network config
 get_network_subnet() {
     local network_name=$1
+    
+    # Try to detect actual subnet from container's network interfaces
     case $network_name in
         "vpn-network")
-            echo "${VPN_NETWORK_SUBNET:-10.28.0.0/16}"
+            # Look for interface in VPN network range
+            local vpn_subnet=$(ip addr show | grep "inet 172\.28\." | head -1 | awk '{print $2}' | cut -d'/' -f1 | sed 's/\.[0-9]*$/\.0\/16/')
+            echo "${vpn_subnet:-${VPN_NETWORK_SUBNET:-172.28.0.0/16}}"
             ;;
         "direct-network")
-            echo "${DIRECT_NETWORK_SUBNET:-10.29.0.0/16}"
+            # Look for interface in direct network range  
+            local direct_subnet=$(ip addr show | grep "inet 172\.29\." | head -1 | awk '{print $2}' | cut -d'/' -f1 | sed 's/\.[0-9]*$/\.0\/16/')
+            echo "${direct_subnet:-${DIRECT_NETWORK_SUBNET:-172.29.0.0/16}}"
             ;;
         "internal-network")
-            echo "${INTERNAL_NETWORK_SUBNET:-10.30.0.0/16}"
+            # Look for interface in internal network range
+            local internal_subnet=$(ip addr show | grep "inet 172\.30\." | head -1 | awk '{print $2}' | cut -d'/' -f1 | sed 's/\.[0-9]*$/\.0\/16/')
+            echo "${internal_subnet:-${INTERNAL_NETWORK_SUBNET:-172.30.0.0/16}}"
             ;;
         *)
             echo ""
@@ -79,21 +87,21 @@ INTERNAL_INTERFACE=$(detect_network_interface "$INTERNAL_SUBNET" "Internal")
 if [ -n "$VPN_INTERFACE" ] && [ -n "$DIRECT_INTERFACE" ]; then
     echo "🛠️  Configuring routing tables..."
     
-    # Create custom routing tables
-    echo "100 vpn_table" >> /etc/iproute2/rt_tables 2>/dev/null || true
-    echo "200 direct_table" >> /etc/iproute2/rt_tables 2>/dev/null || true
+    # Create custom routing tables (with sudo for permissions)
+    echo "100 vpn_table" | sudo tee -a /etc/iproute2/rt_tables >/dev/null 2>&1 || true
+    echo "200 direct_table" | sudo tee -a /etc/iproute2/rt_tables >/dev/null 2>&1 || true
     
     # Add routes to custom tables
     VPN_GATEWAY=$(ip route show dev "$VPN_INTERFACE" | grep default | head -1 | awk '{print $3}' || echo "")
     DIRECT_GATEWAY=$(ip route show dev "$DIRECT_INTERFACE" | grep default | head -1 | awk '{print $3}' || echo "")
     
     if [ -n "$VPN_GATEWAY" ]; then
-        ip route add default via "$VPN_GATEWAY" dev "$VPN_INTERFACE" table vpn_table 2>/dev/null || true
+        sudo ip route add default via "$VPN_GATEWAY" dev "$VPN_INTERFACE" table vpn_table 2>/dev/null || true
         echo "✅ VPN routing table configured"
     fi
     
     if [ -n "$DIRECT_GATEWAY" ]; then
-        ip route add default via "$DIRECT_GATEWAY" dev "$DIRECT_INTERFACE" table direct_table 2>/dev/null || true
+        sudo ip route add default via "$DIRECT_GATEWAY" dev "$DIRECT_INTERFACE" table direct_table 2>/dev/null || true
         echo "✅ Direct routing table configured"
     fi
     
@@ -104,13 +112,13 @@ if [ -n "$VPN_INTERFACE" ] && [ -n "$DIRECT_INTERFACE" ]; then
     if [ "$DISCORD_USE_VPN" = "true" ]; then
         # Route Discord traffic through VPN
         for discord_range in 162.159.0.0/16 162.158.0.0/16 66.22.196.0/22; do
-            ip rule add to "$discord_range" table vpn_table priority 100 2>/dev/null || true
+            sudo ip rule add to "$discord_range" table vpn_table priority 100 2>/dev/null || true
         done
         echo "🔐 Discord traffic routed through VPN"
     else
         # Route Discord traffic through direct connection
         for discord_range in 162.159.0.0/16 162.158.0.0/16 66.22.196.0/22; do
-            ip rule add to "$discord_range" table direct_table priority 100 2>/dev/null || true
+            sudo ip rule add to "$discord_range" table direct_table priority 100 2>/dev/null || true
         done
         echo "🚀 Discord traffic routed through direct connection"
     fi
@@ -119,7 +127,7 @@ if [ -n "$VPN_INTERFACE" ] && [ -n "$DIRECT_INTERFACE" ]; then
     if [ "$YOUTUBE_USE_VPN" = "false" ]; then
         # Route YouTube APIs through direct connection
         for youtube_range in 172.217.0.0/16 216.58.192.0/19 64.233.160.0/19; do
-            ip rule add to "$youtube_range" table direct_table priority 110 2>/dev/null || true
+            sudo ip rule add to "$youtube_range" table direct_table priority 110 2>/dev/null || true
         done
         echo "🎵 YouTube APIs routed through direct connection"
     fi
@@ -127,19 +135,19 @@ if [ -n "$VPN_INTERFACE" ] && [ -n "$DIRECT_INTERFACE" ]; then
     # Rumble API routing
     if [ "$RUMBLE_USE_VPN" = "false" ]; then
         # Route Rumble through direct connection
-        ip rule add to 162.159.0.0/16 table direct_table priority 120 2>/dev/null || true
+        sudo ip rule add to 162.159.0.0/16 table direct_table priority 120 2>/dev/null || true
         echo "📺 Rumble APIs routed through direct connection"
     fi
     
     # Odysee API routing
     if [ "$ODYSEE_USE_VPN" = "false" ]; then
         # Route Odysee through direct connection
-        ip rule add to 104.18.0.0/16 table direct_table priority 130 2>/dev/null || true
+        sudo ip rule add to 104.18.0.0/16 table direct_table priority 130 2>/dev/null || true
         echo "🎬 Odysee APIs routed through direct connection"
     fi
     
     # Flush routing cache
-    ip route flush cache 2>/dev/null || true
+    sudo ip route flush cache 2>/dev/null || true
     
     echo "✅ Container routing configured successfully"
     
