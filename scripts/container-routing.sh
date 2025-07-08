@@ -93,29 +93,39 @@ if [ -n "$VPN_INTERFACE" ] && [ -n "$DIRECT_INTERFACE" ]; then
     
     # Add routes to custom tables
     # Get the main default gateway from the main routing table
-    MAIN_GATEWAY=$(ip route show | grep "^default" | head -1 | awk '{print $3}')
-    MAIN_INTERFACE=$(ip route show | grep "^default" | head -1 | awk '{print $5}')
+    MAIN_GATEWAY=$(ip route show | grep default | head -1 | awk '{print $3}')
+    MAIN_INTERFACE=$(ip route show | grep default | head -1 | awk '{print $5}')
     
     echo "🌐 Main gateway: $MAIN_GATEWAY via $MAIN_INTERFACE"
     
-    # For VPN routing, we'll use the VPN interface if it has connectivity
-    # Otherwise fall back to main gateway
-    VPN_GATEWAY=$(ip route show dev "$VPN_INTERFACE" 2>/dev/null | grep "^default" | head -1 | awk '{print $3}' || echo "$MAIN_GATEWAY")
-    DIRECT_GATEWAY=$(ip route show dev "$DIRECT_INTERFACE" 2>/dev/null | grep "^default" | head -1 | awk '{print $3}' || echo "$MAIN_GATEWAY")
+    # For simplicity, use the main gateway for both tables initially
+    # This ensures basic connectivity works, then we can optimize per-interface routing
+    VPN_GATEWAY="$MAIN_GATEWAY"
+    DIRECT_GATEWAY="$MAIN_GATEWAY"
     
-    # Add default routes to custom tables
-    if [ -n "$VPN_GATEWAY" ] && [ -n "$VPN_INTERFACE" ]; then
-        # Try VPN interface first, fall back to main interface for VPN table
-        sudo ip route add default via "$VPN_GATEWAY" dev "$VPN_INTERFACE" table vpn_table 2>/dev/null || \
-        sudo ip route add default via "$MAIN_GATEWAY" dev "$MAIN_INTERFACE" table vpn_table 2>/dev/null || true
-        echo "✅ VPN routing table configured (gateway: $VPN_GATEWAY)"
-    fi
-    
-    if [ -n "$DIRECT_GATEWAY" ] && [ -n "$DIRECT_INTERFACE" ]; then
-        # For direct table, prefer the direct interface or fall back to main interface
-        sudo ip route add default via "$DIRECT_GATEWAY" dev "$DIRECT_INTERFACE" table direct_table 2>/dev/null || \
-        sudo ip route add default via "$MAIN_GATEWAY" dev "$MAIN_INTERFACE" table direct_table 2>/dev/null || true
-        echo "✅ Direct routing table configured (gateway: $DIRECT_GATEWAY)"
+    # Add default routes to custom tables using main gateway for connectivity
+    if [ -n "$MAIN_GATEWAY" ] && [ -n "$MAIN_INTERFACE" ]; then
+        # Add route to VPN table using main connectivity
+        sudo ip route add default via "$MAIN_GATEWAY" dev "$MAIN_INTERFACE" table vpn_table 2>/dev/null
+        VPN_RESULT=$?
+        
+        # Add route to direct table using main connectivity  
+        sudo ip route add default via "$MAIN_GATEWAY" dev "$MAIN_INTERFACE" table direct_table 2>/dev/null
+        DIRECT_RESULT=$?
+        
+        if [ $VPN_RESULT -eq 0 ]; then
+            echo "✅ VPN routing table configured (gateway: $MAIN_GATEWAY via $MAIN_INTERFACE)"
+        else
+            echo "❌ VPN routing table configuration failed"
+        fi
+        
+        if [ $DIRECT_RESULT -eq 0 ]; then
+            echo "✅ Direct routing table configured (gateway: $MAIN_GATEWAY via $MAIN_INTERFACE)"
+        else
+            echo "❌ Direct routing table configuration failed"
+        fi
+    else
+        echo "❌ No main gateway found - cannot configure routing tables"
     fi
     
     # Configure service-specific routing rules
