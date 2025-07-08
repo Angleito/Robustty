@@ -1,0 +1,121 @@
+version: '3.8'
+
+# Multi-network configuration for VPN routing
+# Use with: docker-compose -f docker-compose.yml -f docker-compose.networks.yml up -d
+
+networks:
+  # Network for VPN-routed traffic (Discord)
+  vpn-network:
+    driver: bridge
+    driver_opts:
+      com.docker.network.driver.mtu: "${NETWORK_MTU:-1450}"
+    ipam:
+      config:
+        - subnet: "${VPN_NETWORK_SUBNET:-172.28.0.0/16}"
+    labels:
+      - "com.robustty.network.type=vpn"
+      - "com.robustty.network.description=Routes through VPN interface"
+
+  # Network for direct internet access (YouTube, APIs)
+  direct-network:
+    driver: bridge
+    driver_opts:
+      com.docker.network.driver.mtu: "${NETWORK_MTU:-1450}"
+    ipam:
+      config:
+        - subnet: "${DIRECT_NETWORK_SUBNET:-172.29.0.0/16}"
+    labels:
+      - "com.robustty.network.type=direct"
+      - "com.robustty.network.description=Bypasses VPN for direct access"
+
+  # Internal network for container-to-container only
+  internal-network:
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: "${INTERNAL_NETWORK_SUBNET:-172.30.0.0/16}"
+    labels:
+      - "com.robustty.network.type=internal"
+      - "com.robustty.network.description=Internal communication only"
+
+  # Keep the original network for compatibility
+  robustty-network:
+    external: true
+
+services:
+  # YouTube Music service - uses direct network to bypass VPN
+  youtube-music-headless:
+    networks:
+      # Remove from default network
+      robustty-network: null
+      # Add to networks
+      direct-network:
+        aliases:
+          - youtube-music
+      internal-network:
+        aliases:
+          - youtube-music-internal
+
+  # Main bot service - has access to all networks
+  robustty:
+    networks:
+      # Remove from default network
+      robustty-network: null
+      # Add to all networks for flexible routing
+      vpn-network:
+        aliases:
+          - robustty-vpn
+      direct-network:
+        aliases:
+          - robustty-direct
+      internal-network:
+        aliases:
+          - robustty-internal
+    cap_add:
+      - NET_ADMIN  # Required for custom routing within container
+    environment:
+      # Network routing preferences
+      - NETWORK_STRATEGY=${NETWORK_STRATEGY:-auto}
+      - VPN_NETWORK_NAME=vpn-network
+      - DIRECT_NETWORK_NAME=direct-network
+      - INTERNAL_NETWORK_NAME=internal-network
+      # Service-specific routing
+      - DISCORD_USE_VPN=${DISCORD_USE_VPN:-true}
+      - YOUTUBE_USE_VPN=${YOUTUBE_USE_VPN:-false}
+      - RUMBLE_USE_VPN=${RUMBLE_USE_VPN:-false}
+      - ODYSEE_USE_VPN=${ODYSEE_USE_VPN:-false}
+      # Network interface info (for container routing)
+      - HOST_VPN_INTERFACE=${VPN_INTERFACE:-auto}
+      - HOST_DEFAULT_INTERFACE=${DEFAULT_INTERFACE:-eth0}
+    # Add volume for routing scripts
+    volumes:
+      - ./scripts/container-routing.sh:/app/scripts/container-routing.sh:ro
+    # Run routing setup on container start
+    entrypoint: |
+      /bin/sh -c '
+        # Set up container routing if script exists
+        if [ -f /app/scripts/container-routing.sh ]; then
+          /app/scripts/container-routing.sh || true
+        fi
+        # Run original entrypoint
+        exec python -m src.main
+      '
+
+  # Redis - internal network only for security
+  redis:
+    networks:
+      # Remove from default network
+      robustty-network: null
+      # Add to internal network only
+      internal-network:
+        aliases:
+          - redis
+          - cache
+
+# Volume definitions remain the same
+volumes:
+  robustty-redis-data:
+    external: true
+  youtube-music-data:
+    external: true
