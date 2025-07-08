@@ -30,17 +30,17 @@ detect_network_interface() {
     local subnet=$1
     local network_name=$2
     
-    # Extract network portion from subnet (e.g., 10.28 from 10.28.0.0/16)
+    # Extract network portion from subnet (e.g., 172.28 from 172.28.0.0/16)
     local network_prefix=$(echo "$subnet" | cut -d'.' -f1-2)
     
     # Find interface with IP in this network
-    local interface=$(ip addr show | grep "inet $network_prefix" | head -1 | awk '{print $NF}' || echo "")
+    local interface=$(ip addr show | grep "inet $network_prefix" | head -1 | awk '{print $NF}')
     
     if [ -n "$interface" ]; then
-        echo "✅ Detected $network_name interface: $interface"
+        echo "✅ Detected $network_name interface: $interface" >&2
         echo "$interface"
     else
-        echo "⚠️  No interface found for $network_name network ($subnet)"
+        echo "⚠️  No interface found for $network_name network ($subnet)" >&2
         echo ""
     fi
 }
