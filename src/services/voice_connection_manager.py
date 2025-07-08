@@ -23,6 +23,7 @@ from datetime import datetime, timedelta
 
 import discord
 from discord.ext import commands
+from src.utils.network_routing import discord_session
 
 logger = logging.getLogger(__name__)
 
@@ -219,7 +220,7 @@ class VoiceConnectionManager:
         self.connection_failures.pop(guild_id, None)
 
     async def _check_network_stability(self) -> bool:
-        """Check network stability before attempting voice connection"""
+        """Check network stability before attempting voice connection using VPN routing"""
         if self.environment != DeploymentEnvironment.VPS:
             return True  # Skip for non-VPS environments
         
@@ -230,8 +231,8 @@ class VoiceConnectionManager:
             import aiohttp
             import dns.resolver
             
-            # Create a single session for all checks
-            async with aiohttp.ClientSession() as session:
+            # Use VPN-aware session for all Discord connectivity checks
+            async with discord_session() as session:
                 # Check 1: Discord API endpoint
                 try:
                     async with session.get(
@@ -240,11 +241,11 @@ class VoiceConnectionManager:
                     ) as response:
                         if response.status == 200:
                             checks_passed += 1
-                            logger.debug("Network check: Discord API gateway - OK")
+                            logger.debug("Network check: Discord API gateway - OK (via VPN)")
                         else:
-                            logger.warning(f"Network check: Discord API gateway - Failed (status {response.status})")
+                            logger.warning(f"Network check: Discord API gateway - Failed (status {response.status}) (via VPN)")
                 except Exception as e:
-                    logger.warning(f"Network check: Discord API gateway - Failed ({e})")
+                    logger.warning(f"Network check: Discord API gateway - Failed ({e}) (via VPN)")
                 
                 # Check 2: Discord CDN
                 try:
@@ -254,11 +255,11 @@ class VoiceConnectionManager:
                     ) as response:
                         if response.status in [200, 403]:  # 403 is expected for CDN root
                             checks_passed += 1
-                            logger.debug("Network check: Discord CDN - OK")
+                            logger.debug("Network check: Discord CDN - OK (via VPN)")
                         else:
-                            logger.warning(f"Network check: Discord CDN - Failed (status {response.status})")
+                            logger.warning(f"Network check: Discord CDN - Failed (status {response.status}) (via VPN)")
                 except Exception as e:
-                    logger.warning(f"Network check: Discord CDN - Failed ({e})")
+                    logger.warning(f"Network check: Discord CDN - Failed ({e}) (via VPN)")
                 
                 # Check 3: Voice Gateway (if available)
                 try:
@@ -268,20 +269,20 @@ class VoiceConnectionManager:
                     ) as response:
                         if response.status in [200, 401]:  # 401 expected without auth
                             checks_passed += 1
-                            logger.debug("Network check: Voice regions - OK")
+                            logger.debug("Network check: Voice regions - OK (via VPN)")
                         else:
-                            logger.warning(f"Network check: Voice regions - Failed (status {response.status})")
+                            logger.warning(f"Network check: Voice regions - Failed (status {response.status}) (via VPN)")
                 except Exception as e:
-                    logger.warning(f"Network check: Voice regions - Failed ({e})")
+                    logger.warning(f"Network check: Voice regions - Failed ({e}) (via VPN)")
             
             # Determine if network is stable enough
             stability_ratio = checks_passed / total_checks
             is_stable = stability_ratio >= 0.66  # At least 2 out of 3 checks must pass
             
             if is_stable:
-                logger.info(f"Network stability check passed ({checks_passed}/{total_checks} checks successful)")
+                logger.info(f"Network stability check passed ({checks_passed}/{total_checks} checks successful) (via VPN)")
             else:
-                logger.warning(f"Network stability check failed ({checks_passed}/{total_checks} checks successful)")
+                logger.warning(f"Network stability check failed ({checks_passed}/{total_checks} checks successful) (via VPN)")
             
             return is_stable
             

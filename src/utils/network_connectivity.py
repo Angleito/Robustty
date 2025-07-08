@@ -21,6 +21,8 @@ import dns.asyncresolver
 import dns.exception
 import dns.resolver
 
+from .network_routing import discord_session, url_session
+
 logger = logging.getLogger(__name__)
 
 
@@ -365,7 +367,8 @@ class NetworkConnectivityChecker:
                 method = 'HEAD'
                 test_url = endpoint.url
             
-            async with aiohttp.ClientSession(timeout=timeout, headers=headers) as session:
+            # Use network routing for URL-based requests
+            async with url_session(test_url, timeout=timeout, headers=headers) as session:
                 if method == 'GET':
                     async with session.get(test_url) as response:
                         response_time = time.time() - start_time
@@ -417,7 +420,8 @@ class NetworkConnectivityChecker:
             url = f"wss://{gateway.endpoint}/?v=10&encoding=json"
             timeout = aiohttp.ClientTimeout(total=10, connect=5)
 
-            async with aiohttp.ClientSession(
+            # Use Discord session for gateway connections
+            async with discord_session(
                 timeout=timeout,
                 connector=aiohttp.TCPConnector(limit=1, ttl_dns_cache=30),
             ) as session:
@@ -633,9 +637,9 @@ class NetworkConnectivityChecker:
             )
             if success:
                 try:
-                    # Try a quick HTTP request
+                    # Try a quick HTTP request using Discord session
                     timeout = aiohttp.ClientTimeout(total=5, connect=3)
-                    async with aiohttp.ClientSession(timeout=timeout) as session:
+                    async with discord_session(timeout=timeout) as session:
                         async with session.get(
                             "https://discord.com/api/v10/gateway"
                         ) as response:
@@ -649,9 +653,9 @@ class NetworkConnectivityChecker:
             # Try to resolve Discord's domain using system DNS
             socket.gethostbyname("discord.com")
 
-            # Try a quick HTTP request
+            # Try a quick HTTP request using Discord session
             timeout = aiohttp.ClientTimeout(total=5, connect=3)
-            async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with discord_session(timeout=timeout) as session:
                 async with session.get(
                     "https://discord.com/api/v10/gateway"
                 ) as response:

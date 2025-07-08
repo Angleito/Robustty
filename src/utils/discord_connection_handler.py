@@ -11,6 +11,7 @@ import time
 from typing import Optional, Dict, Any
 import discord
 from discord.ext import commands
+from src.utils.network_routing import discord_session
 
 logger = logging.getLogger(__name__)
 

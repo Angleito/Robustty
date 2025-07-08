@@ -23,11 +23,13 @@ from src.services.stability_monitor import StabilityMonitor
 from src.utils.network_connectivity import get_connectivity_manager
 from src.services.http_session_manager import cleanup_session_manager
 from src.utils.discord_connection_handler import setup_connection_handler
+from src.utils.discord_with_routing import NetworkRoutedDiscordClient
+from src.utils.network_routing import initialize_http_client, cleanup_http_client
 
 logger = logging.getLogger(__name__)
 
 
-class RobusttyBot(commands.Bot):
+class RobusttyBot(NetworkRoutedDiscordClient):
     def __init__(self, config: ConfigType) -> None:
         intents = discord.Intents.default()
         intents.message_content = True
@@ -69,6 +71,13 @@ class RobusttyBot(commands.Bot):
 
     async def setup_hook(self) -> None:
         """Initialize bot components"""
+        # Initialize network routing first for VPN-aware Discord connections
+        await initialize_http_client()
+        logger.info("Network routing initialized for Discord VPN connections")
+        
+        # Call parent setup_hook to initialize network routing
+        await super().setup_hook()
+        
         # Initialize cache manager first
         from src.services.cache_manager import CacheManager
 
@@ -390,6 +399,13 @@ class RobusttyBot(commands.Bot):
                 logger.info("HTTP session manager cleaned up")
             except Exception as e:
                 logger.error(f"Error cleaning up HTTP session manager: {e}")
+            
+            # Clean up network routing client
+            try:
+                await cleanup_http_client()
+                logger.info("Network routing client cleaned up")
+            except Exception as e:
+                logger.error(f"Error cleaning up network routing client: {e}")
             
             # Add a small delay to ensure all connections are closed
             await asyncio.sleep(1.0)

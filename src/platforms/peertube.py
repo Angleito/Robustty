@@ -37,6 +37,7 @@ from src.utils.network_resilience import (
     CircuitBreakerConfig,
     RetryConfig,
 )
+from src.utils.network_routing import get_http_client, ServiceType
 
 logger = logging.getLogger(__name__)
 
@@ -185,13 +186,17 @@ class PeerTubePlatform(VideoPlatform):
         self.url_pattern: re.Pattern[str] = re.compile(
             r"https?://([^/]+)/videos/watch/([a-f0-9-]+)"
         )
+        
+        # Initialize network-aware HTTP client
+        self._network_client = None
+        self._service_type = ServiceType.PEERTUBE
 
         logger.info(
             f"PeerTube platform initialized with {len(self.instances)} instances"
         )
 
     async def initialize(self):
-        """Initialize platform resources with custom SSL context for PeerTube instances"""
+        """Initialize platform resources with custom SSL context and network routing for PeerTube instances"""
         # Create SSL context that accepts self-signed certificates
         # Many PeerTube instances use self-signed certificates which would otherwise cause connection failures
         ssl_context = ssl.create_default_context()
@@ -215,6 +220,10 @@ class PeerTubePlatform(VideoPlatform):
             force_close=True
         )
         
+        # Initialize network-aware HTTP client
+        self._network_client = get_http_client()
+        await self._network_client.initialize()
+        
         # Create session with custom settings
         self.session = aiohttp.ClientSession(
             timeout=timeout,
@@ -224,7 +233,7 @@ class PeerTubePlatform(VideoPlatform):
             }
         )
         self._session_closed = False
-        logger.info(f"Initialized PeerTube platform with custom SSL context for {len(self.instances)} instances")
+        logger.info(f"Initialized PeerTube platform with custom SSL context, network routing, and {len(self.instances)} instances")
 
     async def search_videos(
         self, query: SearchQuery, max_results: int = 10
@@ -240,8 +249,8 @@ class PeerTubePlatform(VideoPlatform):
             logger.warning("No PeerTube instances configured")
             return []
 
-        if not self.session:
-            logger.error("Session not initialized for PeerTube search")
+        if not self._network_client:
+            logger.error("Network client not initialized for PeerTube search")
             raise PlatformNotAvailableError(
                 "PeerTube service not initialized", platform="PeerTube"
             )
@@ -504,17 +513,18 @@ class PeerTubePlatform(VideoPlatform):
             "sort": "-views",  # Sort by views descending
         }
 
-        if self.session is None:
-            logger.error(f"Session not initialized for {instance_url}")
+        if self._network_client is None:
+            logger.error(f"Network client not initialized for {instance_url}")
             raise PlatformNotAvailableError(
-                f"Session not available for {instance_url}", platform="PeerTube"
+                f"Network client not available for {instance_url}", platform="PeerTube"
             )
 
         try:
-            # Use shorter timeout for individual instance calls
-            response = await safe_aiohttp_request(
-                self.session, "GET", url, params=params, timeout=12
-            )
+            # Use shorter timeout for individual instance calls with network routing
+            async with self._network_client.get_session(self._service_type) as session:
+                response = await safe_aiohttp_request(
+                    session, "GET", url, params=params, timeout=12
+                )
 
             # Read response data while connection is still active
             try:
@@ -660,14 +670,15 @@ class PeerTubePlatform(VideoPlatform):
         for instance in self.instances:
             try:
                 url: str = f"{instance}/api/v1/videos/{video_id}"
-                if self.session is None:
-                    logger.error("Session not initialized")
+                if self._network_client is None:
+                    logger.error("Network client not initialized")
                     continue
                     
-                # Use safe_aiohttp_request for consistent SSL handling
-                response = await safe_aiohttp_request(
-                    self.session, "GET", url, timeout=12
-                )
+                # Use safe_aiohttp_request for consistent SSL handling with network routing
+                async with self._network_client.get_session(self._service_type) as session:
+                    response = await safe_aiohttp_request(
+                        session, "GET", url, timeout=12
+                    )
                 
                 try:
                     if response.status == 200:
@@ -744,14 +755,15 @@ class PeerTubePlatform(VideoPlatform):
         try:
             # Get video files
             url: str = f"{instance}/api/v1/videos/{video_id}"
-            if self.session is None:
-                logger.error("Session not initialized")
+            if self._network_client is None:
+                logger.error("Network client not initialized")
                 return None
                 
-            # Use safe_aiohttp_request for consistent SSL handling
-            response = await safe_aiohttp_request(
-                self.session, "GET", url, timeout=12
-            )
+            # Use safe_aiohttp_request for consistent SSL handling with network routing
+            async with self._network_client.get_session(self._service_type) as session:
+                response = await safe_aiohttp_request(
+                    session, "GET", url, timeout=12
+                )
             
             try:
                 if response.status != 200:

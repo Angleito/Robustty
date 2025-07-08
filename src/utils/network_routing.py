@@ -555,6 +555,30 @@ async def platform_session(platform_name: str, **kwargs):
 
 
 @asynccontextmanager
+async def rumble_session(**kwargs):
+    """Get HTTP session for Rumble services with direct network routing"""
+    client = get_http_client()
+    async with client.get_session(ServiceType.RUMBLE, **kwargs) as session:
+        yield session
+
+
+@asynccontextmanager
+async def odysee_session(**kwargs):
+    """Get HTTP session for Odysee services with direct network routing"""
+    client = get_http_client()
+    async with client.get_session(ServiceType.ODYSEE, **kwargs) as session:
+        yield session
+
+
+@asynccontextmanager
+async def peertube_session(**kwargs):
+    """Get HTTP session for PeerTube services with direct network routing"""
+    client = get_http_client()
+    async with client.get_session(ServiceType.PEERTUBE, **kwargs) as session:
+        yield session
+
+
+@asynccontextmanager
 async def url_session(url: str, **kwargs):
     """Get HTTP session for a specific URL"""
     client = get_http_client()

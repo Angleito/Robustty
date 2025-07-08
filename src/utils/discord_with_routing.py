@@ -10,18 +10,20 @@ from typing import Any, Dict, Optional
 
 import aiohttp
 import discord
+from discord.ext import commands
 
 from .network_routing import get_http_client, ServiceType, discord_session
 
 logger = logging.getLogger(__name__)
 
 
-class NetworkRoutedDiscordClient(discord.Client):
+class NetworkRoutedDiscordClient(commands.Bot):
     """Discord client that uses network routing for connections"""
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._network_client = None
+        self._original_http_request = None
 
     async def setup_hook(self):
         """Setup hook called when client is ready"""
@@ -30,14 +32,58 @@ class NetworkRoutedDiscordClient(discord.Client):
             self._network_client = get_http_client()
             await self._network_client.initialize()
             
+            # Override Discord.py's HTTP client to use VPN routing
+            await self._patch_discord_http_client()
+            
             logger.info("Discord client initialized with network routing")
             
         except Exception as e:
             logger.error(f"Failed to initialize network routing for Discord: {e}")
             raise
 
+    async def _patch_discord_http_client(self):
+        """Patch Discord.py's HTTP client to use VPN routing"""
+        # Store original HTTP request method
+        self._original_http_request = self.http.request
+        
+        async def routed_request(method, url, **kwargs):
+            """Route Discord HTTP requests through VPN"""
+            # Use VPN routing for Discord API calls
+            if 'discord.com' in url or 'discordapp.com' in url:
+                try:
+                    async with discord_session() as session:
+                        logger.debug(f"Routing Discord API request through VPN: {method} {url}")
+                        
+                        # Ensure headers are properly set
+                        headers = kwargs.get('headers', {})
+                        if 'Authorization' not in headers and hasattr(self.http, 'token'):
+                            headers['Authorization'] = f'Bot {self.http.token}'
+                        if 'User-Agent' not in headers:
+                            headers['User-Agent'] = 'Robustty Bot (Discord Music Bot)'
+                        kwargs['headers'] = headers
+                        
+                        # Make the request through VPN
+                        async with session.request(method, url, **kwargs) as response:
+                            # Return response in format expected by Discord.py
+                            return response
+                except Exception as e:
+                    logger.warning(f"VPN routing failed for Discord request, falling back to original: {e}")
+                    # Fall back to original method if VPN routing fails
+                    return await self._original_http_request(method, url, **kwargs)
+            else:
+                # Use original method for non-Discord requests
+                return await self._original_http_request(method, url, **kwargs)
+        
+        # Replace the HTTP request method
+        self.http.request = routed_request
+        logger.info("Discord HTTP client patched for VPN routing")
+
     async def close(self):
         """Close client and cleanup network resources"""
+        # Restore original HTTP request method
+        if self._original_http_request:
+            self.http.request = self._original_http_request
+        
         await super().close()
         
         if self._network_client:

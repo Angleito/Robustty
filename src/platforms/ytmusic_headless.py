@@ -9,6 +9,7 @@ import aiohttp
 
 from .base import VideoPlatform
 from .errors import PlatformError
+from ..utils.network_routing import youtube_session
 
 logger = logging.getLogger(__name__)
 
@@ -31,10 +32,7 @@ class YouTubeMusicHeadlessPlatform(VideoPlatform):
         ]
 
     async def _make_api_request(self, endpoint: str, params: Optional[Dict] = None, retries: int = None) -> Dict[str, Any]:
-        """Make a request to the YouTube Music headless API with retries"""
-        if not self.session:
-            await self.initialize()
-        
+        """Make a request to the YouTube Music headless API with retries using network routing"""
         if retries is None:
             retries = self.retry_attempts
             
@@ -44,27 +42,29 @@ class YouTubeMusicHeadlessPlatform(VideoPlatform):
             try:
                 logger.debug(f"Making API request to {url} (attempt {attempt + 1}/{retries + 1})")
                 
-                async with self.session.get(
-                    url, 
-                    params=params,
-                    timeout=aiohttp.ClientTimeout(total=self.timeout)
-                ) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        logger.debug(f"API request successful: {url}")
-                        return data
-                    elif response.status == 404:
-                        logger.warning(f"API endpoint not found: {url}")
-                        raise PlatformError(f"YouTube Music API endpoint not available: {endpoint}")
-                    else:
-                        error_text = await response.text()
-                        logger.warning(f"API request failed with status {response.status}: {error_text}")
-                        
-                        if attempt < retries:
-                            await asyncio.sleep(self.retry_delay * (attempt + 1))
-                            continue
+                # Use network-aware session for YouTube Music API calls
+                async with youtube_session() as session:
+                    async with session.get(
+                        url, 
+                        params=params,
+                        timeout=aiohttp.ClientTimeout(total=self.timeout)
+                    ) as response:
+                        if response.status == 200:
+                            data = await response.json()
+                            logger.debug(f"API request successful: {url}")
+                            return data
+                        elif response.status == 404:
+                            logger.warning(f"API endpoint not found: {url}")
+                            raise PlatformError(f"YouTube Music API endpoint not available: {endpoint}")
                         else:
-                            raise PlatformError(f"YouTube Music API request failed: {response.status}")
+                            error_text = await response.text()
+                            logger.warning(f"API request failed with status {response.status}: {error_text}")
+                            
+                            if attempt < retries:
+                                await asyncio.sleep(self.retry_delay * (attempt + 1))
+                                continue
+                            else:
+                                raise PlatformError(f"YouTube Music API request failed: {response.status}")
                             
             except asyncio.TimeoutError:
                 logger.warning(f"API request timeout for {url} (attempt {attempt + 1})")

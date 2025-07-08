@@ -27,6 +27,7 @@ from src.utils.network_resilience import (
     CircuitBreakerConfig,
     RetryConfig,
 )
+from src.utils.network_routing import get_http_client, ServiceType
 
 logger = logging.getLogger(__name__)
 
@@ -146,6 +147,10 @@ class OdyseePlatform(VideoPlatform):
             re.compile(r"https?://odysee\.com/@[^/]+:[a-f0-9]+/[^/]+:[a-f0-9]+"),
             re.compile(r"lbry://(@[^/]+/[^/]+)"),
         ]
+        
+        # Initialize network-aware HTTP client
+        self._network_client = None
+        self._service_type = ServiceType.ODYSEE
 
     @with_retry(
         retry_config=ODYSEE_RETRY_CONFIG,
@@ -164,8 +169,8 @@ class OdyseePlatform(VideoPlatform):
             logger.info(f"Using cached Odysee search results for: {query}")
             return cached_results
 
-        if not self.session:
-            logger.error("Session not initialized for Odysee search")
+        if not self._network_client:
+            logger.error("Network client not initialized for Odysee search")
             raise PlatformNotAvailableError(
                 "Odysee service not initialized", platform="Odysee"
             )
@@ -194,9 +199,11 @@ class OdyseePlatform(VideoPlatform):
                     f"Odysee search timeout: {adaptive_timeout}s (multiplier: {self.adaptive_timeout_multiplier:.2f})"
                 )
 
-                response = await safe_aiohttp_request(
-                    self.session, "POST", url, json=params, timeout=adaptive_timeout
-                )
+                # Use network-aware session for direct routing
+                async with self._network_client.get_session(self._service_type) as session:
+                    response = await safe_aiohttp_request(
+                        session, "POST", url, json=params, timeout=adaptive_timeout
+                    )
 
                 try:
                     if response.status == 429:
@@ -364,8 +371,8 @@ class OdyseePlatform(VideoPlatform):
             logger.info(f"Using cached video metadata for Odysee video: {video_id}")
             return cached_metadata
 
-        if not self.session:
-            logger.warning("Session not initialized for Odysee video details")
+        if not self._network_client:
+            logger.warning("Network client not initialized for Odysee video details")
             # Return basic info as fallback
             basic_info = {
                 "id": video_id,
@@ -402,9 +409,11 @@ class OdyseePlatform(VideoPlatform):
                 )
                 logger.debug(f"Odysee metadata timeout: {adaptive_timeout}s")
 
-                response = await safe_aiohttp_request(
-                    self.session, "POST", url, json=params, timeout=adaptive_timeout
-                )
+                # Use network-aware session for direct routing
+                async with self._network_client.get_session(self._service_type) as session:
+                    response = await safe_aiohttp_request(
+                        session, "POST", url, json=params, timeout=adaptive_timeout
+                    )
 
                 try:
                     if response.status == 429:
@@ -566,8 +575,8 @@ class OdyseePlatform(VideoPlatform):
     )
     async def get_stream_url(self, video_id: str) -> Optional[str]:
         """Get the stream URL for a video with enhanced error handling"""
-        if not self.session:
-            logger.error("Session not initialized for Odysee stream URL")
+        if not self._network_client:
+            logger.error("Network client not initialized for Odysee stream URL")
             raise PlatformNotAvailableError(
                 "Odysee service not initialized", platform="Odysee"
             )
@@ -607,9 +616,11 @@ class OdyseePlatform(VideoPlatform):
                         f"Checking Odysee stream URL with timeout: {stream_check_timeout}s"
                     )
 
-                    response = await safe_aiohttp_request(
-                        self.session, "HEAD", stream_url, timeout=stream_check_timeout
-                    )
+                    # Use network-aware session for direct routing
+                    async with self._network_client.get_session(self._service_type) as session:
+                        response = await safe_aiohttp_request(
+                            session, "HEAD", stream_url, timeout=stream_check_timeout
+                        )
 
                     try:
                         if response.status == 200:
@@ -909,7 +920,7 @@ class OdyseePlatform(VideoPlatform):
         )
 
     async def initialize(self):
-        """Initialize platform resources with enhanced configuration"""
+        """Initialize platform resources with enhanced configuration and network routing"""
         # Store original config
         original_config = self.config.copy()
         
@@ -922,6 +933,10 @@ class OdyseePlatform(VideoPlatform):
         # Initialize parent (which will create session via manager)
         await super().initialize()
         
+        # Initialize network-aware HTTP client
+        self._network_client = get_http_client()
+        await self._network_client.initialize()
+        
         # Apply custom headers to the session
         if self.session and hasattr(self, '_odysee_headers'):
             self.session.headers.update(self._odysee_headers)
@@ -931,7 +946,8 @@ class OdyseePlatform(VideoPlatform):
         
         logger.info(
             f"Initialized Odysee platform with API URL: {self.api_url}, "
-            f"timeouts: search={self.search_timeout}s, api={self.api_timeout}s, stream={self.stream_timeout}s"
+            f"timeouts: search={self.search_timeout}s, api={self.api_timeout}s, stream={self.stream_timeout}s, "
+            f"network routing: enabled"
         )
 
     async def cleanup(self):

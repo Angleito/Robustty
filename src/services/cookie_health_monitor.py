@@ -14,7 +14,7 @@ from typing import Dict, List, Optional, Tuple, Any
 import aiofiles
 import aiohttp
 
-from .http_session_manager import get_session_manager
+from ..utils.network_routing import platform_session
 
 logger = logging.getLogger(__name__)
 
@@ -311,40 +311,35 @@ class CookieHealthMonitor:
                     )
                     continue
 
-            # Get session from manager
-            session_manager = get_session_manager()
-            timeout = aiohttp.ClientTimeout(total=self.validation_timeout)
-            
-            # Get a dedicated session for cookie validation
-            session = await session_manager.get_session(
-                name=f"cookie_validator_{platform}",
-                timeout=timeout,
-                cookie_jar=cookie_jar,
-                headers={
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-                }
-            )
-            
+            # Use network routing for platform-specific HTTP requests
             try:
-                async with session.get(validation_url) as response:
-                    if response.status == 200:
-                        status.is_healthy = True
-                        status.validation_error = None
-                    elif response.status == 403:
-                        status.is_healthy = False
-                        status.validation_error = "Cookies rejected (403 Forbidden)"
-                        status.needs_refresh = True
-                    elif response.status == 401:
-                        status.is_healthy = False
-                        status.validation_error = (
-                            "Authentication failed (401 Unauthorized)"
-                        )
-                        status.needs_refresh = True
-                    else:
-                        status.is_healthy = False
-                        status.validation_error = (
-                            f"Unexpected response: {response.status}"
-                        )
+                async with platform_session(
+                    platform,
+                    timeout=aiohttp.ClientTimeout(total=self.validation_timeout),
+                    cookie_jar=cookie_jar,
+                    headers={
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                    }
+                ) as session:
+                    async with session.get(validation_url) as response:
+                        if response.status == 200:
+                            status.is_healthy = True
+                            status.validation_error = None
+                        elif response.status == 403:
+                            status.is_healthy = False
+                            status.validation_error = "Cookies rejected (403 Forbidden)"
+                            status.needs_refresh = True
+                        elif response.status == 401:
+                            status.is_healthy = False
+                            status.validation_error = (
+                                "Authentication failed (401 Unauthorized)"
+                            )
+                            status.needs_refresh = True
+                        else:
+                            status.is_healthy = False
+                            status.validation_error = (
+                                f"Unexpected response: {response.status}"
+                            )
             except asyncio.TimeoutError:
                 status.is_healthy = False
                 status.validation_error = "Validation request timed out"

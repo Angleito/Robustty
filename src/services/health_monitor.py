@@ -26,6 +26,8 @@ import aiohttp
 import discord
 from prometheus_client import Gauge, Counter, Histogram
 
+from ..utils.network_routing import discord_session, platform_session
+
 # Try importing Redis modules
 try:
     import redis.asyncio as aioredis

@@ -10,6 +10,7 @@ from googleapiclient.discovery import build  # type: ignore
 from googleapiclient.errors import HttpError  # type: ignore
 
 from .base import VideoPlatform
+from ..utils.network_routing import youtube_session, get_http_client
 from .errors import (
     PlatformAPIError,
     PlatformRateLimitError,
@@ -93,8 +94,15 @@ class YouTubePlatform(VideoPlatform):
         ]
 
     async def initialize(self):
-        """Initialize YouTube API client with fallback awareness"""
-        await super().initialize()
+        """Initialize YouTube API client with fallback awareness and network routing"""
+        # Initialize network-aware HTTP client first
+        self._network_client = get_http_client()
+        await self._network_client.initialize()
+        
+        # Create a network-aware session using youtube_session instead of base class session
+        # This will ensure all HTTP requests go through direct network routing
+        self.session = None  # We'll use youtube_session() context manager instead
+        self._session_closed = False
         
         # Load fallback configuration
         self._setup_fallback_config()
@@ -105,7 +113,7 @@ class YouTubePlatform(VideoPlatform):
         
         if self.api_key:
             self.youtube = build("youtube", "v3", developerKey=self.api_key)
-            logger.info("YouTube API client initialized successfully")
+            logger.info("YouTube API client initialized successfully with network routing")
         else:
             logger.warning("YouTube API key not provided - will rely on fallback modes")
             if self.fallback_manager and self.enable_fallbacks:
@@ -1134,27 +1142,24 @@ class YouTubePlatform(VideoPlatform):
             return True
 
     async def _validate_stream_url_async(self, url: str) -> bool:
-        """Validate that the stream URL is accessible (async version)"""
+        """Validate that the stream URL is accessible (async version) using network routing"""
         try:
             import asyncio
             
-            # Use the platform's existing session instead of creating a new one
-            if not self.session:
-                logger.warning("No HTTP session available for URL validation")
-                return True  # Assume valid if no session
-            
+            # Use network-aware session for URL validation
             try:
                 # Use a shorter timeout for validation
                 async with asyncio.timeout(10):
-                    async with self.session.head(url, allow_redirects=True) as response:
-                        is_valid = response.status < 400
+                    async with youtube_session() as session:
+                        async with session.head(url, allow_redirects=True) as response:
+                            is_valid = response.status < 400
 
-                        if not is_valid:
-                            logger.warning(
-                                f"Stream URL validation failed with status {response.status}"
-                            )
+                            if not is_valid:
+                                logger.warning(
+                                    f"Stream URL validation failed with status {response.status}"
+                                )
 
-                        return is_valid
+                            return is_valid
             except asyncio.TimeoutError:
                 logger.warning("Stream URL validation timed out")
                 return True  # Assume valid on timeout

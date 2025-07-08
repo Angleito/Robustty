@@ -29,6 +29,7 @@ from ..utils.network_resilience import (
     NetworkTimeoutError,
     MaxRetriesExceededError,
 )
+from ..utils.network_routing import get_http_client, ServiceType
 
 logger = logging.getLogger(__name__)
 
@@ -51,16 +52,26 @@ class RumblePlatform(VideoPlatform):
 
         # Initialize metrics collector
         self.metrics = get_metrics_collector()
+        
+        # Initialize network-aware HTTP client
+        self._network_client = None
+        self._service_type = ServiceType.RUMBLE
 
     async def initialize(self):
-        """Initialize Rumble API client"""
+        """Initialize Rumble API client with network routing"""
         await super().initialize()
-
+        
+        # Initialize network-aware HTTP client
+        self._network_client = get_http_client()
+        await self._network_client.initialize()
+        
         if self.api_token:
             self.extractor = RumbleExtractor(apify_api_token=self.api_token)
-            logger.info("Rumble API token provided, extractor initialized")
+            logger.info("Rumble API token provided, extractor initialized with network routing")
         else:
             logger.warning("Rumble API token not provided, searches will fail")
+            
+        logger.info("Rumble platform initialized with direct network routing")
 
     @with_retry(
         retry_config=PLATFORM_RETRY_CONFIG,
