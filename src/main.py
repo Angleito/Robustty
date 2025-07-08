@@ -18,6 +18,7 @@ from src.bot.bot import RobusttyBot  # noqa: E402
 from src.utils.config_loader import load_config, ConfigurationError  # noqa: E402
 from src.services.metrics_server import MetricsServer  # noqa: E402
 from src.utils.network_connectivity import run_preflight_checks  # noqa: E402
+from src.utils.env_loader import load_discord_token, validate_token  # noqa: E402
 
 # Configure logging
 logging.basicConfig(
@@ -48,17 +49,33 @@ async def main() -> None:
     signal.signal(signal.SIGTERM, signal_handler)
     
     try:
-        # Load .env file
-        load_dotenv()
+        # Load .env file first (for local development)
+        load_dotenv(override=True)
+        
+        # Debug: Log environment loading
+        logger.info(f"Running in {'Docker' if os.environ.get('DOCKER_CONTAINER') else 'local'} environment")
 
         # Load configuration
         config = load_config("config/config.yaml")
 
-        # Get Discord token
-        token = os.getenv("DISCORD_TOKEN")
+        # Get Discord token with enhanced loader
+        token = load_discord_token()
+        
         if not token:
             logger.error("DISCORD_TOKEN not found in environment")
+            logger.error("Please set DISCORD_TOKEN environment variable or add it to .env file")
+            logger.error("Token should not include 'Bot ' prefix")
             sys.exit(1)
+        
+        if not validate_token(token):
+            logger.error("Discord token validation failed")
+            logger.error("Please check your token format:")
+            logger.error("- Should be 50+ characters")
+            logger.error("- No spaces or 'Bot ' prefix")
+            logger.error("- Not a placeholder value")
+            sys.exit(1)
+        
+        logger.info(f"Discord token loaded successfully (length: {len(token)})")
 
         # Run preflight network checks (non-blocking)
         try:
