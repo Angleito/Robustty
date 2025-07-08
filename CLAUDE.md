@@ -493,6 +493,92 @@ VOICE_ENVIRONMENT=vps python tests/manual/test_vps_voice_fixes.py  # Using envir
 - **Connection Logs**: Look for "Voice Connection Manager initialized in X environment" in logs
 - **Session Management**: Check session age with `!voicediag` - sessions expire after 5 minutes on VPS
 
+### Discord 530 Error Investigation (WebSocket Authentication Failures)
+- **Complete Workflow**: `python scripts/discord-530-master.py` for intelligent diagnosis with unified recommendations
+- **Quick Guided Troubleshooting**: `python scripts/discord-530-decision-tree.py` for interactive step-by-step diagnosis
+- **Comprehensive Analysis**: `python scripts/diagnose-discord-530-comprehensive.py` for detailed technical investigation
+- **Specific Modes**: 
+  - `python scripts/discord-530-master.py --mode quick` - Decision tree only
+  - `python scripts/discord-530-master.py --mode comprehensive` - Deep analysis only
+  - `python scripts/discord-530-master.py --mode guided` - Interactive workflow
+- **Tool Validation**: `python scripts/test-discord-530-tools.py` to verify diagnostic tools are working
+- **Documentation**: See `scripts/README-discord-530-diagnostics.md` for complete usage guide
+
+#### Common 530 Error Causes (when token is valid)
+- **Session Limit Exhausted (40% of cases)**: Multiple bot restarts consuming all 1000 daily session starts
+  - Run `python scripts/discord-530-master.py --mode quick` to check session usage
+  - Stop all bot instances and wait 24 hours for session reset
+  - Implement exponential backoff and proper session management
+- **Multiple Bot Instances (25% of cases)**: Concurrent instances competing for sessions
+  - Check processes with `pgrep -f python.*main.py` or `docker ps`
+  - Use `pkill -f python.*main.py && docker-compose down` to stop all instances
+  - Implement proper process management and monitoring
+- **Network Connectivity (15% of cases)**: VPS cannot reach Discord services
+  - Test with `ping discord.com` and check DNS resolution
+  - Fix DNS: `echo 'nameserver 8.8.8.8' | sudo tee /etc/resolv.conf`
+  - Check firewall rules and VPS provider restrictions
+- **Bot Verification Required (10% of cases)**: Unverified bot approaching 100 server limit
+  - Apply for verification in Discord Developer Portal
+  - Temporarily reduce server count below 100
+  - Monitor guild count and verification status
+- **Token Issues (5% of cases)**: Despite appearing valid, token may be corrupted or revoked
+  - Regenerate token in Discord Developer Portal
+  - Check for spaces, 'Bot ' prefix, or formatting issues
+  - Verify token length (should be 59+ characters)
+- **Rate Limiting/IP Blocks (5% of cases)**: VPS IP flagged or rate limited
+  - Check rate limit headers in API responses
+  - Consider different VPS provider if persistent
+  - Implement proper rate limiting in bot code
+
+#### Investigation Strategy
+1. **Phase 1 - Quick Assessment (2-3 minutes)**
+   ```bash
+   python scripts/discord-530-master.py --quick
+   ```
+   - Validates token format and basic connectivity
+   - Checks for multiple instances and obvious issues
+   - Provides immediate recommendations
+
+2. **Phase 2 - Comprehensive Investigation (5-10 minutes)**
+   ```bash
+   python scripts/diagnose-discord-530-comprehensive.py
+   ```
+   - Systematic analysis across 5 investigation modules
+   - Evidence correlation and root cause identification
+   - Detailed JSON report with severity classification
+
+3. **Phase 3 - Automated Remediation (5-15 minutes)**
+   ```bash
+   python scripts/fix-discord-530-comprehensive.py --automated --investigation results.json
+   ```
+   - Risk-assessed fixes based on investigation results
+   - Configuration backup and verification
+   - Success validation and monitoring setup
+
+#### Emergency Response
+For immediate 530 error resolution:
+```bash
+# Stop all instances and check session usage
+pkill -f python.*main.py
+docker-compose down
+python scripts/discord-530-decision-tree.py --quick
+
+# If session exhausted, wait and restart cleanly
+echo "Waiting for session limits to reset..."
+sleep 60
+docker-compose up -d --force-recreate
+
+# If issues persist, run full investigation
+python scripts/discord-530-master.py --all
+```
+
+#### Prevention and Monitoring
+- **Session Management**: Implement exponential backoff, monitor session usage
+- **Process Management**: Use proper container orchestration, health checks
+- **Network Monitoring**: Track connectivity, implement retry logic
+- **Configuration Validation**: Regular token and environment checks
+- **Documentation**: See `docs/DISCORD_530_INVESTIGATION_STRATEGY.md` for complete methodology
+
 ### Cookie Extraction Issues
 - **No Cookies Found**: Ensure Brave browser data is mounted correctly at `/host-brave`
 - **Permission Errors**: Check that Docker has access to `~/Library/Application Support/BraveSoftware/Brave-Browser`

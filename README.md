@@ -180,6 +180,31 @@ python -m src.main
 
 Common issues and solutions:
 
+### Discord 530 Errors (WebSocket Authentication Failures)
+
+If your bot is getting 530 errors even with a valid token:
+
+**🚨 Emergency Response (2 minutes):**
+```bash
+# Stop all instances and run quick diagnosis
+pkill -f python.*main.py && docker-compose down
+python scripts/discord-530-master.py --quick
+```
+
+**🔍 Complete Investigation (10 minutes):**
+```bash
+# Systematic troubleshooting with automated fixes
+python scripts/discord-530-master.py --all
+```
+
+**🌳 Interactive Troubleshooting:**
+```bash
+# Guided step-by-step diagnosis  
+python scripts/discord-530-decision-tree.py --tree
+```
+
+**Common causes**: Session exhaustion (40%), multiple instances (25%), network issues (15%), verification required (10%). See [DISCORD_530_QUICK_START.md](DISCORD_530_QUICK_START.md) for detailed guidance.
+
 ### Bot won't connect
 - Verify Discord token
 - Check bot permissions

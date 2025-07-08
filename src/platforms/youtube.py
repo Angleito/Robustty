@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 import re
@@ -62,6 +63,15 @@ class YouTubePlatform(VideoPlatform):
         self.enable_concurrent_strategies = config.get("enable_concurrent_strategies", True)  # Changed default to True
         self.search_timeout_per_strategy = config.get("search_timeout_per_strategy", 15)
         self.max_concurrent_strategies = config.get("max_concurrent_strategies", 3)
+        
+        # API timeout and resilience settings
+        self.api_timeout = config.get("api_timeout", 8)  # 8 second timeout for API calls
+        self.max_concurrent_api_calls = config.get("max_concurrent_api_calls", 3)
+        self._api_semaphore = asyncio.Semaphore(self.max_concurrent_api_calls)
+        self._circuit_breaker_failures = 0
+        self._circuit_breaker_last_failure_time = None
+        self._circuit_breaker_threshold = config.get("circuit_breaker_threshold", 5)
+        self._circuit_breaker_cooldown = config.get("circuit_breaker_cooldown", 60)  # 60 seconds
 
         # Language configuration options - defaults to English for search results
         self.default_region: str = config.get("default_region", "US")
@@ -114,6 +124,113 @@ class YouTubePlatform(VideoPlatform):
     def set_quota_monitor(self, quota_monitor):
         """Set the quota monitor for this platform"""
         self.quota_monitor = quota_monitor
+
+    async def _execute_api_call_async(self, request, operation_name: str = "API call") -> Optional[Dict[str, Any]]:
+        """
+        Execute a Google API request asynchronously with timeout, circuit breaker, and rate limiting.
+        
+        Args:
+            request: The Google API request object
+            operation_name: Name of the operation for logging
+            
+        Returns:
+            Response dictionary or None if failed
+            
+        Raises:
+            PlatformAPIError: If the API call fails
+            asyncio.TimeoutError: If the call times out
+        """
+        # Check circuit breaker
+        if await self._is_circuit_breaker_open():
+            logger.warning(f"Circuit breaker is open for YouTube API - skipping {operation_name}")
+            raise CircuitBreakerOpenError(f"YouTube API circuit breaker is open")
+        
+        # Acquire semaphore for rate limiting
+        async with self._api_semaphore:
+            try:
+                logger.debug(f"Executing YouTube API {operation_name} with {self.api_timeout}s timeout")
+                
+                # Execute the API call with timeout in a thread to avoid blocking
+                response = await asyncio.wait_for(
+                    asyncio.to_thread(request.execute),
+                    timeout=self.api_timeout
+                )
+                
+                # Reset circuit breaker on success
+                self._circuit_breaker_failures = 0
+                self._circuit_breaker_last_failure_time = None
+                
+                logger.debug(f"YouTube API {operation_name} completed successfully")
+                return response
+                
+            except asyncio.TimeoutError:
+                await self._record_circuit_breaker_failure()
+                logger.error(f"YouTube API {operation_name} timed out after {self.api_timeout}s")
+                raise PlatformAPIError(
+                    f"YouTube API timeout after {self.api_timeout}s", 
+                    platform="YouTube"
+                )
+                
+            except HttpError as e:
+                await self._record_circuit_breaker_failure()
+                status_code = e.resp.status
+                
+                if status_code == 403:
+                    error_details = str(e)
+                    if "quotaExceeded" in error_details or "dailyLimitExceeded" in error_details:
+                        logger.error(f"YouTube API quota exceeded during {operation_name}")
+                        raise PlatformRateLimitError(
+                            "YouTube API quota exceeded", platform="YouTube"
+                        )
+                    else:
+                        logger.error(f"YouTube API authentication error during {operation_name}: {e}")
+                        raise PlatformAuthenticationError(
+                            f"YouTube API authentication failed", platform="YouTube"
+                        )
+                elif status_code >= 500:
+                    logger.error(f"YouTube API server error during {operation_name}: {e}")
+                    raise PlatformAPIError(
+                        f"YouTube API server error (HTTP {status_code})", platform="YouTube"
+                    )
+                else:
+                    logger.error(f"YouTube API client error during {operation_name}: {e}")
+                    raise PlatformAPIError(
+                        f"YouTube API error (HTTP {status_code})", platform="YouTube"
+                    )
+                    
+            except Exception as e:
+                await self._record_circuit_breaker_failure()
+                logger.error(f"Unexpected error during YouTube API {operation_name}: {e}")
+                raise PlatformAPIError(
+                    f"Unexpected YouTube API error: {str(e)}", platform="YouTube"
+                )
+
+    async def _is_circuit_breaker_open(self) -> bool:
+        """Check if the circuit breaker is open (blocking API calls)"""
+        if self._circuit_breaker_failures < self._circuit_breaker_threshold:
+            return False
+            
+        if self._circuit_breaker_last_failure_time is None:
+            return False
+            
+        # Check if cooldown period has passed
+        time_since_failure = asyncio.get_event_loop().time() - self._circuit_breaker_last_failure_time
+        if time_since_failure > self._circuit_breaker_cooldown:
+            logger.info("YouTube API circuit breaker cooldown period ended - allowing test call")
+            return False
+            
+        return True
+
+    async def _record_circuit_breaker_failure(self):
+        """Record a failure for circuit breaker tracking"""
+        self._circuit_breaker_failures += 1
+        self._circuit_breaker_last_failure_time = asyncio.get_event_loop().time()
+        
+        if self._circuit_breaker_failures >= self._circuit_breaker_threshold:
+            logger.warning(
+                f"YouTube API circuit breaker opened after {self._circuit_breaker_failures} failures. "
+                f"Will retry after {self._circuit_breaker_cooldown}s cooldown."
+            )
 
     def _get_search_params(self, query: str) -> Dict[str, str]:
         """Get search parameters including language and region settings with English defaults"""
@@ -337,7 +454,10 @@ class YouTubePlatform(VideoPlatform):
             
             # First, get search results
             search_request = self.youtube.search().list(**search_params)
-            search_response = search_request.execute()
+            search_response = await self._execute_api_call_async(
+                search_request, 
+                f"search for '{query[:50]}...'"
+            )
 
             # Extract video IDs for detailed lookup
             video_ids = []
@@ -367,7 +487,10 @@ class YouTubePlatform(VideoPlatform):
             videos_request = self.youtube.videos().list(
                 part="snippet,contentDetails,statistics", id=",".join(video_ids)
             )
-            videos_response = videos_request.execute()
+            videos_response = await self._execute_api_call_async(
+                videos_request,
+                f"video details for {len(video_ids)} videos"
+            )
 
             results: List[Dict[str, Any]] = []
             for item in videos_response.get("items", []):
@@ -604,7 +727,10 @@ class YouTubePlatform(VideoPlatform):
                 request = self.youtube.videos().list(
                     part="snippet,contentDetails,statistics", id=video_id
                 )
-                response = request.execute()
+                response = await self._execute_api_call_async(
+                    request,
+                    f"video metadata for {video_id}"
+                )
 
                 if response.get("items"):
                     item = response["items"][0]
@@ -2818,7 +2944,10 @@ class YouTubePlatform(VideoPlatform):
             }
             
             search_request = self.youtube.search().list(**search_params)
-            search_response = search_request.execute()
+            search_response = await self._execute_api_call_async(
+                search_request,
+                f"limited search for '{query[:50]}...'"
+            )
             
             results = []
             for item in search_response.get("items", []):
