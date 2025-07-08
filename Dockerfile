@@ -10,6 +10,7 @@ RUN apt-get update && apt-get install -y \
     build-essential \
     cron \
     sudo \
+    iproute2 \
     && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user for security and VPS compatibility
