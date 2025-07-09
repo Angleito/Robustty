@@ -165,21 +165,24 @@ class RobusttyBot(NetworkRoutedDiscordClient):
             except Exception as e:
                 logger.warning(f"Failed to set managers on {platform_name}: {e}")
 
-        # Initialize health endpoints
-        health_config = self.config.get("health_endpoints", {})
-        self.health_endpoints = HealthEndpoints(
-            host=health_config.get("host", "0.0.0.0"),
-            port=health_config.get("port", 8081)
-        )
-        self.health_endpoints.set_services(
-            cookie_health_monitor=self.cookie_health_monitor,
-            fallback_manager=self.fallback_manager,
-            cookie_manager=self.enhanced_cookie_manager,
-            platform_registry=self.platform_registry,
-            quota_monitor=self.quota_monitor,
-            stability_monitor=self.stability_monitor,
-        )
-        await self.health_endpoints.start()
+        # Initialize health endpoints (disabled - metrics server already provides health endpoint)
+        # The metrics server on port 8080 already provides health endpoints
+        # Commenting out duplicate health endpoint server to avoid port conflicts
+        # health_config = self.config.get("health_endpoints", {})
+        # self.health_endpoints = HealthEndpoints(
+        #     host=health_config.get("host", "0.0.0.0"),
+        #     port=health_config.get("port", 8081)
+        # )
+        # self.health_endpoints.set_services(
+        #     cookie_health_monitor=self.cookie_health_monitor,
+        #     fallback_manager=self.fallback_manager,
+        #     cookie_manager=self.enhanced_cookie_manager,
+        #     platform_registry=self.platform_registry,
+        #     quota_monitor=self.quota_monitor,
+        #     stability_monitor=self.stability_monitor,
+        # )
+        # await self.health_endpoints.start()
+        self.health_endpoints = None  # Set to None to avoid attribute errors
 
         # Initialize services
         self.searcher = MultiPlatformSearcher(self.platform_registry, self.config, self.stability_monitor)
