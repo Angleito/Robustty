@@ -558,26 +558,68 @@ class MultiPlatformSearcher:
                 f"Using static platform prioritization: {[name for name, _ in sorted_platforms]}"
             )
 
-        # Execute searches with controlled concurrency
-        semaphore = asyncio.Semaphore(3)  # Limit concurrent platform searches
+        # Execute searches with sequential fallback - try YouTube API first, fallback to others only if needed
+        search_results = []
+        primary_success = False
+        
+        # Check stability mode setting for concurrent vs sequential execution
+        stability_config = self.config.get("stability_mode", {})
+        use_sequential = stability_config.get("disable_concurrent_requests", True)
+        
+        logger.info(f"Search mode config - stability_config: {stability_config}")
+        logger.info(f"Search mode: {'sequential' if use_sequential else 'concurrent'}")
+        
+        if use_sequential:
+            # Sequential execution: try platforms in priority order until we get results
+            logger.info("Using sequential platform search (YouTube API first, others as fallback)")
+            
+            for name, platform in sorted_platforms:
+                try:
+                    logger.info(f"Trying {name} platform...")
+                    platform_results = await asyncio.wait_for(
+                        self._search_single_platform(platform, query, max_results),
+                        timeout=45.0  # Per-platform timeout
+                    )
+                    
+                    search_results.append((name, platform_results))
+                    
+                    # If we got results from primary platform (YouTube), we're done
+                    if platform_results and name == "youtube":
+                        logger.info(f"YouTube API successful with {len(platform_results)} results - skipping other platforms")
+                        primary_success = True
+                        break
+                    elif platform_results:
+                        # Got results from a fallback platform
+                        logger.info(f"{name} successful with {len(platform_results)} results")
+                        break
+                        
+                except Exception as e:
+                    logger.warning(f"{name} platform failed: {e}")
+                    search_results.append((name, e))
+                    
+        else:
+            # Concurrent execution (original behavior) with controlled concurrency
+            logger.info("Using concurrent platform search")
+            semaphore = asyncio.Semaphore(3)  # Limit concurrent platform searches
 
-        async def search_with_semaphore(name: str, platform: 'VideoPlatform'):
-            async with semaphore:
-                return name, await self._search_single_platform(
-                    platform, query, max_results
-                )
+            async def search_with_semaphore(name: str, platform: 'VideoPlatform'):
+                async with semaphore:
+                    return name, await self._search_single_platform(
+                        platform, query, max_results
+                    )
 
-        tasks = [
-            search_with_semaphore(name, platform) for name, platform in sorted_platforms
-        ]
+            tasks = [
+                search_with_semaphore(name, platform) for name, platform in sorted_platforms
+            ]
 
-        # Execute all searches with timeout
-        try:
+            # Execute all searches with timeout
             search_results = await asyncio.wait_for(
                 asyncio.gather(*tasks, return_exceptions=True),
                 timeout=30.0,  # 30 second total timeout for all searches
             )
 
+        # Process search results (both sequential and concurrent modes)
+        try:
             for result in search_results:
                 if isinstance(result, Exception):
                     logger.error(f"Search task failed: {result}")

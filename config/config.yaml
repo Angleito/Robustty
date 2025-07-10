@@ -151,11 +151,11 @@ deduplication:
   # Quality scoring configuration
   quality_scoring:
     platform_weights:
-      youtube_music_headless: 1.2
-      youtube: 1.0
-      odysee: 0.8
-      peertube: 0.7
-      rumble: 0.6
+      youtube: 1.5               # Highest priority - YouTube API (most reliable)
+      youtube_music_headless: 1.0  # Secondary - YouTube Music fallback
+      peertube: 0.7             # Tertiary - PeerTube fallback
+      odysee: 0.6               # Quaternary - Odysee fallback
+      rumble: 0.5               # Last resort - Rumble fallback
     scoring_weights:
       platform: 0.25
       metadata: 0.20
@@ -167,17 +167,17 @@ deduplication:
 # Dynamic platform prioritization
 prioritization:
   enabled: ${PRIORITIZATION_ENABLED:true}
-  strategy: ${PRIORITIZATION_STRATEGY:balanced}  # balanced, speed_first, reliability_first, success_rate_first, adaptive
+  strategy: ${PRIORITIZATION_STRATEGY:reliability_first}  # Use YouTube API first, others as fallback
   update_interval: 60  # seconds
   min_samples: 5  # minimum samples needed for scoring
   failure_penalty_duration: 300  # seconds (5 minutes)
   response_time_threshold: 5.0  # seconds
   default_order: 
-    - youtube_music_headless
-    - youtube
-    - odysee
-    - peertube
-    - rumble
+    - youtube              # Primary: YouTube API (most reliable)
+    - youtube_music_headless  # Fallback 1: YouTube Music (when YouTube API fails)
+    - peertube            # Fallback 2: PeerTube (decentralized)
+    - odysee              # Fallback 3: Odysee (alternative)
+    - rumble              # Fallback 4: Rumble (last resort)
 
 health_monitor:
   enabled: ${HEALTH_MONITOR_ENABLED:true}
