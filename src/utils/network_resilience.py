@@ -468,11 +468,11 @@ async def safe_aiohttp_request(
 
 # Predefined configurations for common services
 PLATFORM_CIRCUIT_BREAKER_CONFIG = CircuitBreakerConfig(
-    failure_threshold=3, recovery_timeout=30, success_threshold=2, timeout=30
+    failure_threshold=5, recovery_timeout=45, success_threshold=2, timeout=45  # Increased thresholds for VPS
 )
 
 PLATFORM_RETRY_CONFIG = RetryConfig(
-    max_attempts=3, base_delay=1.0, max_delay=10.0, exponential_base=2.0, jitter=True
+    max_attempts=2, base_delay=2.0, max_delay=15.0, exponential_base=1.8, jitter=True  # Gentler retries for VPS
 )
 
 REDIS_CIRCUIT_BREAKER_CONFIG = CircuitBreakerConfig(

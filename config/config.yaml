@@ -24,15 +24,16 @@ platforms:
   youtube_music_headless:
     enabled: ${YOUTUBE_MUSIC_ENABLED:true}
     api_url: ${YOUTUBE_MUSIC_API_URL:http://youtube-music-headless:9863}
-    timeout: ${YOUTUBE_MUSIC_TIMEOUT:30}
-    retry_attempts: ${YOUTUBE_MUSIC_RETRY_ATTEMPTS:3}
-    retry_delay: ${YOUTUBE_MUSIC_RETRY_DELAY:1}
+    timeout: ${YOUTUBE_MUSIC_TIMEOUT:45}  # Increased from 30s for VPS stability
+    retry_attempts: ${YOUTUBE_MUSIC_RETRY_ATTEMPTS:2}  # Reduced from 3 to 2
+    retry_delay: ${YOUTUBE_MUSIC_RETRY_DELAY:2}  # Increased from 1s to 2s
     max_results: ${YOUTUBE_MUSIC_MAX_RESULTS:10}
     
   youtube:
     enabled: true
     api_key: ${YOUTUBE_API_KEY:}
     max_results: 10
+    api_timeout: 30  # Increased from 8s to 30s for better reliability
     # Language and region preferences for search results (defaults to English)
     default_region: ${YOUTUBE_DEFAULT_REGION:US}  # Region code for localized results (US, GB, CA, etc.)
     default_language: ${YOUTUBE_DEFAULT_LANGUAGE:en}  # Default language code (en, es, fr, etc.)
@@ -69,8 +70,8 @@ platforms:
 
   odysee:
     enabled: ${ODYSEE_ENABLED:true}  # Enable by default, let stability monitor handle issues
-    api_url: https://api.odysee.com/api/v1
-    stream_url: https://cdn.odysee.live
+    api_url: https://lighthouse.lbry.com
+    stream_url: https://cdn.lbry.tv
     max_results: 10
     
     # Enhanced timeout configuration for connection stability

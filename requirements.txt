@@ -47,6 +47,10 @@ aiodns==3.1.1
 charset-normalizer==3.4.2  # Alternative to cchardet
 brotli==1.1.0
 
+# String matching
+fuzzywuzzy==0.18.0
+python-levenshtein==0.21.1
+
 # DNS resolution
 dnspython==2.4.2
 

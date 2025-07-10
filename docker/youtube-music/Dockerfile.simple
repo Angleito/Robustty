@@ -1,17 +1,23 @@
 FROM python:3.11-slim
 
-# Install system dependencies
+# Install system dependencies including SSL certificates
 RUN apt-get update && apt-get install -y \
     curl \
+    ca-certificates \
+    openssl \
+    && update-ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies
-RUN pip install --no-cache-dir \
+# Install Python dependencies with SSL support
+RUN pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir \
     fastapi \
-    uvicorn \
+    uvicorn[standard] \
     httpx \
     yt-dlp \
-    python-multipart
+    python-multipart \
+    certifi \
+    urllib3[secure]
 
 # Create app directory
 WORKDIR /app
@@ -26,5 +32,5 @@ EXPOSE 9863
 HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
     CMD curl -f http://localhost:9863/api/health || exit 1
 
-# Start the API server
-CMD ["uvicorn", "youtube-music-api:app", "--host", "0.0.0.0", "--port", "9863"]
+# Start the API server with SSL-friendly settings
+CMD ["uvicorn", "youtube-music-api:app", "--host", "0.0.0.0", "--port", "9863", "--timeout-keep-alive", "300", "--timeout-graceful-shutdown", "30"]

@@ -32,8 +32,9 @@ class NetworkRoutedDiscordClient(commands.Bot):
             self._network_client = get_http_client()
             await self._network_client.initialize()
             
-            # Override Discord.py's HTTP client to use VPN routing
-            await self._patch_discord_http_client()
+            # NOTE: We don't patch the HTTP client here anymore
+            # Discord.py handles authentication properly on its own
+            # The patching was interfering with the built-in token handling
             
             logger.info("Discord client initialized with network routing")
             
@@ -51,6 +52,11 @@ class NetworkRoutedDiscordClient(commands.Bot):
             # For now, disable VPN routing to fix the immediate error
             # and let Discord.py work normally until we can implement proper routing
             logger.debug(f"Discord HTTP request: {route.method} {route.path}")
+            
+            # IMPORTANT: Ensure the Authorization header is preserved
+            # Discord.py sets this header with the "Bot " prefix automatically
+            # We must not interfere with it
+            
             return await self._original_http_request(route, **kwargs)
         
         # Replace the HTTP request method
@@ -59,8 +65,8 @@ class NetworkRoutedDiscordClient(commands.Bot):
 
     async def close(self):
         """Close client and cleanup network resources"""
-        # Restore original HTTP request method
-        if self._original_http_request:
+        # Restore original HTTP request method if it was patched
+        if self._original_http_request and hasattr(self.http, 'request'):
             self.http.request = self._original_http_request
         
         await super().close()

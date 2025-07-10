@@ -20,9 +20,9 @@ class YouTubeMusicHeadlessPlatform(VideoPlatform):
     def __init__(self, name: str, config: Dict[str, Any], cache_manager=None):
         super().__init__(name, config, cache_manager)
         self.api_url = config.get('api_url', 'http://youtube-music-headless:9863')
-        self.timeout = config.get('timeout', 30)
-        self.retry_attempts = config.get('retry_attempts', 3)
-        self.retry_delay = config.get('retry_delay', 1)
+        self.timeout = config.get('timeout', 45)  # Increased from 30
+        self.retry_attempts = config.get('retry_attempts', 2)  # Reduced from 3
+        self.retry_delay = config.get('retry_delay', 2)  # Increased from 1
         
         # YouTube Music URL patterns
         self.url_patterns = [

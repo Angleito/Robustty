@@ -178,16 +178,13 @@ class OdyseePlatform(VideoPlatform):
         try:
             logger.debug(f"Searching Odysee for: {query} (max_results: {max_results})")
 
-            # Use claim_search endpoint
-            url = f"{self.api_url}/claim_search"
+            # Use lighthouse search endpoint
+            url = f"{self.api_url}/search"
             params = {
-                "text": query,
-                "page": 1,
-                "page_size": min(max_results, 50),  # Limit to reasonable size
-                "claim_type": ["stream"],
-                "stream_types": ["video"],
-                "order_by": ["trending_group", "trending_mixed"],
-                "no_totals": True,
+                "s": query,
+                "size": min(max_results, 50),  # Limit to reasonable size
+                "mediaType": "video",
+                "claimType": "stream",
             }
 
             try:
@@ -202,7 +199,7 @@ class OdyseePlatform(VideoPlatform):
                 # Use network-aware session for direct routing
                 async with self._network_client.get_session(self._service_type) as session:
                     response = await safe_aiohttp_request(
-                        session, "POST", url, json=params, timeout=adaptive_timeout
+                        session, "GET", url, params=params, timeout=adaptive_timeout
                     )
 
                 try:
@@ -275,25 +272,24 @@ class OdyseePlatform(VideoPlatform):
                         original_error=e,
                     )
 
-            if not data or "items" not in data:
+            if not data or not isinstance(data, list):
                 logger.warning(f"Odysee returned no data for query: {query}")
                 return []
 
             results = []
-            items = data.get("items", [])
+            items = data
 
             for item in items:
                 try:
-                    if item.get("value_type") != "stream":
+                    if item.get("claimType") != "stream":
                         continue
 
-                    value = item.get("value", {})
-                    if value.get("stream_type") != "video":
+                    if item.get("mediaType") != "video":
                         continue
 
                     # Validate required fields
-                    claim_id = item.get("claim_id")
-                    title = value.get("title", item.get("name", ""))
+                    claim_id = item.get("claimId")
+                    title = item.get("title", item.get("name", ""))
 
                     if not claim_id or not title:
                         logger.debug(f"Skipping invalid Odysee result: {item}")
@@ -303,15 +299,13 @@ class OdyseePlatform(VideoPlatform):
                     video_data = {
                         "id": claim_id,
                         "title": title,
-                        "channel": item.get("signing_channel", {}).get(
-                            "name", "Unknown Channel"
-                        ),
-                        "thumbnail": value.get("thumbnail", {}).get("url", ""),
-                        "url": f"https://odysee.com/{item.get('canonical_url', '')}",
+                        "channel": item.get("channelName", "Unknown Channel"),
+                        "thumbnail": item.get("thumbnail", ""),
+                        "url": f"https://odysee.com/{item.get('name', '')}:{claim_id}",
                         "platform": "odysee",
-                        "description": value.get("description", ""),
-                        "duration": value.get("video", {}).get("duration"),
-                        "views": item.get("meta", {}).get("effective_amount", 0),
+                        "description": item.get("description", ""),
+                        "duration": item.get("duration"),
+                        "views": item.get("claimId", 0),  # Placeholder for views
                     }
                     results.append(video_data)
 
@@ -395,11 +389,10 @@ class OdyseePlatform(VideoPlatform):
                 logger.warning(f"Invalid Odysee claim ID format: {video_id}")
                 return None
 
-            url = f"{self.api_url}/claim_search"
+            url = f"{self.api_url}/search"
             params = {
-                "claim_id": video_id,
-                "page": 1,
-                "page_size": 1,
+                "claimId": video_id,
+                "size": 1,
             }
 
             try:
@@ -412,7 +405,7 @@ class OdyseePlatform(VideoPlatform):
                 # Use network-aware session for direct routing
                 async with self._network_client.get_session(self._service_type) as session:
                     response = await safe_aiohttp_request(
-                        session, "POST", url, json=params, timeout=adaptive_timeout
+                        session, "GET", url, params=params, timeout=adaptive_timeout
                     )
 
                 try:
@@ -488,32 +481,27 @@ class OdyseePlatform(VideoPlatform):
                     "description": f"Video details unavailable: {str(e)[:50]}...",
                 }
 
-            if not data or "items" not in data:
+            if not data or not isinstance(data, list):
                 logger.warning(f"No data returned for Odysee video: {video_id}")
                 return None
 
-            items = data.get("items", [])
+            items = data
             if not items:
                 logger.info(f"No video found for Odysee claim ID: {video_id}")
                 return None
 
             item = items[0]
-            value = item.get("value", {})
 
             return {
-                "id": item.get("claim_id"),
-                "title": value.get(
-                    "title", item.get("name", f"Odysee Video {video_id}")
-                ),
-                "channel": item.get("signing_channel", {}).get(
-                    "name", "Unknown Channel"
-                ),
-                "thumbnail": value.get("thumbnail", {}).get("url", ""),
-                "url": f"https://odysee.com/{item.get('canonical_url', '')}",
+                "id": item.get("claimId"),
+                "title": item.get("title", item.get("name", f"Odysee Video {video_id}")),
+                "channel": item.get("channelName", "Unknown Channel"),
+                "thumbnail": item.get("thumbnail", ""),
+                "url": f"https://odysee.com/{item.get('name', '')}:{item.get('claimId', '')}",
                 "platform": "odysee",
-                "description": value.get("description", ""),
-                "duration": value.get("video", {}).get("duration"),
-                "views": item.get("meta", {}).get("effective_amount", 0),
+                "description": item.get("description", ""),
+                "duration": item.get("duration"),
+                "views": item.get("claimId", 0),  # Placeholder for views
             }
 
         except NetworkResilienceError:

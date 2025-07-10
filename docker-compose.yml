@@ -10,30 +10,52 @@ services:
       - DISPLAY=:99
       - NODE_ENV=production
       - PULSE_SERVER=unix:/tmp/pulse-socket
+      # SSL/TLS Configuration
+      - SSL_CERT_DIR=/etc/ssl/certs
+      - SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+      - PYTHONHTTPSVERIFY=1
+      - REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
+      # Network timeout settings
+      - YOUTUBE_MUSIC_TIMEOUT=90
+      - YOUTUBE_MUSIC_RETRY_ATTEMPTS=3
+      - YOUTUBE_MUSIC_RETRY_DELAY=2
     volumes:
       - ./cookies:/app/cookies
       - youtube-music-data:/root/.config
     networks:
       - robustty-network
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9863/api/health"]
+      test: ["CMD", "curl", "-f", "--connect-timeout", "30", "--max-time", "60", "http://localhost:9863/api/health"]
       interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
+      timeout: 30s
+      retries: 5
+      start_period: 90s
     dns:
       - 8.8.8.8
       - 8.8.4.4
       - 1.1.1.1
+      - 1.0.0.1
     dns_opt:
       - ndots:0
-      - timeout:3
-      - attempts:3
+      - timeout:5
+      - attempts:5
     extra_hosts:
-      # YouTube domains for API access
+      # YouTube domains for API access - updated with current IPs
       - "youtube.googleapis.com:172.217.1.138"
       - "www.youtube.com:172.217.1.142"
       - "youtubei.googleapis.com:172.217.1.138"
+      - "i.ytimg.com:172.217.1.142"
+      - "yt3.ggpht.com:172.217.1.142"
+      - "googleusercontent.com:172.217.1.142"
+    sysctls:
+      - net.ipv4.tcp_keepalive_time=120
+      - net.ipv4.tcp_keepalive_probes=3
+      - net.ipv4.tcp_keepalive_intvl=30
+      - net.ipv4.ip_local_port_range=32768 60999
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
 
   # Discord bot - platform-agnostic configuration
   robustty:
