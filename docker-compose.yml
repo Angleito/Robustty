@@ -1,0 +1,107 @@
+version: '3.8'
+
+services:
+  bot:
+    build: ./bot
+    environment:
+      - DISCORD_TOKEN=${DISCORD_TOKEN}
+      - DISCORD_CLIENT_ID=${DISCORD_CLIENT_ID}
+      - YOUTUBE_API_KEY=${YOUTUBE_API_KEY}
+      - REDIS_URL=redis://redis:6379
+      - NEKO_INTERNAL_URL=http://neko:8080
+      - AUDIO_SERVICE_URL=http://audio:3000
+      - ADMIN_ROLE_ID=${ADMIN_ROLE_ID}
+      - ADMIN_NOTIFICATION_WEBHOOK=${ADMIN_NOTIFICATION_WEBHOOK}
+      - NODE_ENV=production
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+    depends_on:
+      - redis
+      - neko
+      - audio
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  neko:
+    image: ghcr.io/m1k1o/neko/firefox:latest
+    environment:
+      - NEKO_SCREEN=1280x720@30
+      - NEKO_PASSWORD=${NEKO_PASSWORD}
+      - NEKO_EPR=52000-52100
+      - NEKO_ICELITE=1
+      - NEKO_NAT1TO1=${NEKO_NAT1TO1:-}
+      # Configure PulseAudio
+      - PULSE_SERVER=unix:/run/pulse/native
+    ports:
+      - "8080:8080"
+      - "52000-52100:52000-52100/udp"
+    volumes:
+      - neko_data:/home/neko/.mozilla
+      # Share PulseAudio socket with audio service
+      - pulse_socket:/run/pulse
+    restart: unless-stopped
+    shm_size: "2gb"
+    cap_add:
+      - SYS_ADMIN
+
+  audio:
+    build: ./audio
+    environment:
+      - PORT=3000
+      - NODE_ENV=production
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - MAX_NEKO_INSTANCES=5
+    volumes:
+      # Share PulseAudio socket with neko containers
+      - pulse_socket:/run/pulse
+      # For audio configuration persistence
+      - audio_config:/home/audiouser/.config/pulse
+    networks:
+      - default
+    depends_on:
+      - neko
+    restart: unless-stopped
+    # Required for PulseAudio to work properly
+    cap_add:
+      - SYS_NICE
+      - SYS_RESOURCE
+      - SYS_PTRACE
+    # Set user namespace for better security
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes --appendfsync everysec
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  neko_data:
+    driver: local
+  redis_data:
+    driver: local
+  pulse_socket:
+    driver: local
+  audio_config:
+    driver: local
+
+networks:
+  default:
+    driver: bridge
