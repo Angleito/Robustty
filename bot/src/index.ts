@@ -3,8 +3,27 @@ import { MusicBot } from './bot/MusicBot';
 import { logger } from './services/logger';
 import { createHealthCheckServer } from './api/HealthCheck';
 
+function validateEnvironment() {
+  const required = [
+    'DISCORD_TOKEN',
+    'DISCORD_CLIENT_ID', 
+    'NEKO_PASSWORD'
+  ];
+  
+  const missing = required.filter(env => !process.env[env]);
+  
+  if (missing.length > 0) {
+    logger.error(`Missing required environment variables: ${missing.join(', ')}`);
+    process.exit(1);
+  }
+  
+  logger.info('Environment validation passed');
+}
+
 async function main() {
   try {
+    // Validate environment variables first
+    validateEnvironment();
     const bot = new MusicBot();
     await bot.initialize();
     await bot.start();

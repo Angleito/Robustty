@@ -125,7 +125,9 @@ export class NekoInstanceImpl extends EventEmitter implements NekoInstance {
     this.id = id;
     this.redis = redis;
     this.nekoUrl = process.env.NEKO_INTERNAL_URL || 'http://neko:8080';
-    this.nekoPassword = process.env.NEKO_PASSWORD || 'neko';
+    this.nekoPassword = process.env.NEKO_PASSWORD || (() => {
+      throw new Error('NEKO_PASSWORD environment variable is required');
+    })();
     this.nekoUsername = process.env.NEKO_USERNAME || 'admin';
   }
 
