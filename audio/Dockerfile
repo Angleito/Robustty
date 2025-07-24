@@ -26,7 +26,6 @@ RUN npm ci --only=production
 
 # Copy application code
 COPY index.js ./
-COPY src ./src/
 
 # Copy start script separately to ensure it's properly copied
 COPY start.sh ./
