@@ -9,7 +9,6 @@ services:
       - YOUTUBE_API_KEY=${YOUTUBE_API_KEY}
       - REDIS_URL=redis://redis:6379
       - NEKO_INTERNAL_URL=http://neko:8080
-      - AUDIO_SERVICE_URL=http://audio:3000
       - ADMIN_ROLE_ID=${ADMIN_ROLE_ID}
       - ADMIN_NOTIFICATION_WEBHOOK=${ADMIN_NOTIFICATION_WEBHOOK}
       - NODE_ENV=production
@@ -17,7 +16,6 @@ services:
     depends_on:
       - redis
       - neko
-      - audio
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
@@ -48,37 +46,14 @@ services:
     cap_add:
       - SYS_ADMIN
 
-  audio:
-    build: ./audio
-    environment:
-      - PORT=3000
-      - NODE_ENV=production
-      - LOG_LEVEL=${LOG_LEVEL:-info}
-      - MAX_NEKO_INSTANCES=5
-    volumes:
-      # Share PulseAudio socket with neko containers
-      - pulse_socket:/run/pulse
-      # For audio configuration persistence
-      - audio_config:/home/audiouser/.config/pulse
-    networks:
-      - default
-    depends_on:
-      - neko
-    restart: unless-stopped
-    # Required for PulseAudio to work properly
-    cap_add:
-      - SYS_NICE
-      - SYS_RESOURCE
-      - SYS_PTRACE
-    # Set user namespace for better security
-    security_opt:
-      - no-new-privileges:true
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
+# Audio service disabled due to permission issues - Neko handles audio directly
+  # audio:
+  #   build: ./audio
+  #   environment:
+  #     - PORT=3000
+  #     - NODE_ENV=production
+  #     - LOG_LEVEL=${LOG_LEVEL:-info}
+  #     - MAX_NEKO_INSTANCES=5
 
   redis:
     image: redis:7-alpine
@@ -99,8 +74,8 @@ volumes:
     driver: local
   pulse_socket:
     driver: local
-  audio_config:
-    driver: local
+# audio_config:
+  #   driver: local
 
 networks:
   default:
