@@ -30,7 +30,7 @@ services:
     image: ghcr.io/m1k1o/neko/firefox:latest
     environment:
       - NEKO_SCREEN=1280x720@30
-      - NEKO_PASSWORD=${NEKO_PASSWORD}
+      - NEKO_PASSWORD=${NEKO_PASSWORD:-neko}
       - NEKO_EPR=52000-52100
       - NEKO_ICELITE=1
       - NEKO_NAT1TO1=${NEKO_NAT1TO1:-}
