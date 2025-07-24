@@ -6,7 +6,7 @@ import { logger } from './logger';
 export class NekoPoolManager {
   private instances: Map<string, NekoInstanceImpl> = new Map();
   private redis: RedisClient;
-  private readonly MAX_INSTANCES = 3;
+  private readonly MAX_INSTANCES = 1; // Single neko instance
   private readonly HEALTH_CHECK_INTERVAL = 60000; // 1 minute
   private healthCheckTimer?: NodeJS.Timeout;
 

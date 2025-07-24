@@ -36,7 +36,8 @@ COPY daemon.conf /etc/pulse/daemon.conf
 
 # Create pulse audio directories and configure
 RUN mkdir -p /run/pulse /var/lib/pulse /home/audiouser/.config/pulse && \
-    chmod +x /app/start.sh
+    chmod +x /app/start.sh && \
+    chmod 755 /app/start.sh
 
 # Create non-root user with audio group
 RUN useradd -m -u 1001 -G audio audiouser && \

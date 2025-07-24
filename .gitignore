@@ -11,7 +11,7 @@ yarn-error.log*
 .env.development
 
 # Build outputs
-dist/
+# dist/ - Temporarily committing for deployment
 build/
 *.js.map
 
