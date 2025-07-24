@@ -14,8 +14,8 @@ RUN npm ci
 # Copy source code
 COPY . .
 
-# Build TypeScript
-RUN npm run build
+# Build TypeScript with increased memory
+RUN NODE_OPTIONS="--max-old-space-size=2048" npm run build
 
 # Create non-root user
 RUN addgroup -g 1001 -S nodejs
