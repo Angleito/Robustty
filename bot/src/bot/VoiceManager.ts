@@ -524,11 +524,11 @@ export class VoiceManager extends EventEmitter {
     // Reset the random talk trigger flag for new idle period
     this.randomTalkTriggered.set(guildId, false);
     
-    // Random delay between 60-240 seconds (1-4 minutes within the 5 minute window)
-    const randomDelay = 60000 + Math.random() * 180000; // 60-240 seconds
+    // Random delay between 30-90 minutes (within 1 hour window)
+    const randomDelay = 1800000 + Math.random() * 3600000; // 30-90 minutes
     
     logger.info(`🎭 [RANDOM_TALK] Starting random talk timer for guild ${guildId}`);
-    logger.info(`⏰ [RANDOM_TALK] Will randomly talk in ${Math.round(randomDelay / 1000)}s if still idle`);
+    logger.info(`⏰ [RANDOM_TALK] Will randomly talk in ${Math.round(randomDelay / 60000)}m if still idle`);
     
     const timer = setTimeout(() => {
       // Check if still idle (not playing music) and hasn't talked yet this idle period

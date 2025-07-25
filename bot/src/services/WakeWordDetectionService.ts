@@ -91,7 +91,7 @@ export class WakeWordDetectionService {
 
     const startTime = Date.now();
     
-    logger.debug(`[WakeWordDetectionService] 🔍 Starting wake word detection for "${keyword}"`, {
+    logger.info(`[WakeWordDetectionService] 🔍 Starting wake word detection for "${keyword}"`, {
       bufferLength: audioBuffer.length,
       bufferDurationMs: (audioBuffer.length / (this.sampleRate * 4)) * 1000, // 4 bytes per sample (stereo 16-bit)
       confidenceThreshold: this.confidenceThreshold,
@@ -101,19 +101,19 @@ export class WakeWordDetectionService {
     try {
       // COST OPTIMIZATION: Quick early exits to minimize processing
       
-      // 1. Check minimum audio length (more lenient)
-      if (audioBuffer.length < 1600) { // Less than ~33ms at 48kHz stereo (more lenient)
-        const skipReason = `Buffer too short: ${audioBuffer.length} bytes < 1600 bytes (~33ms)`;
+      // 1. Check minimum audio length (very lenient for short audio segments)
+      if (audioBuffer.length < 400) { // Less than ~8ms at 48kHz stereo (very lenient)
+        const skipReason = `Buffer too short: ${audioBuffer.length} bytes < 400 bytes (~8ms)`;
         logger.debug(`[WakeWordDetectionService] ⏭️ Early exit: ${skipReason}`);
         return this.createNegativeResult(keyword, startTime);
       }
 
       // 2. Fast energy check before any processing (more lenient)
       const rawAudioLevel = AudioProcessingService.calculateAudioLevel(audioBuffer);
-      logger.debug(`[WakeWordDetectionService] 📊 Raw audio level: ${rawAudioLevel.toFixed(4)}`);
+      logger.info(`[WakeWordDetectionService] 📊 Raw audio level: ${rawAudioLevel.toFixed(4)}`);
       
-      if (rawAudioLevel < 0.01) { // Much lower threshold for quiet voices
-        const skipReason = `Audio too quiet: level ${rawAudioLevel.toFixed(4)} < 0.01 threshold`;
+      if (rawAudioLevel < 0.005) { // Even lower threshold for very quiet voices
+        const skipReason = `Audio too quiet: level ${rawAudioLevel.toFixed(4)} < 0.005 threshold`;
         logger.debug(`[WakeWordDetectionService] ⏭️ Early exit: ${skipReason} (likely silence)`);
         return this.createNegativeResult(keyword, startTime);
       }
@@ -134,8 +134,8 @@ export class WakeWordDetectionService {
       const processedAudioLevel = AudioProcessingService.calculateAudioLevel(processedAudio);
       logger.debug(`[WakeWordDetectionService] 📊 Processed audio level: ${processedAudioLevel.toFixed(4)}`);
       
-      if (processedAudioLevel < 0.02) { // Much lower threshold
-        const skipReason = `Processed audio too quiet: level ${processedAudioLevel.toFixed(4)} < 0.02 threshold`;
+      if (processedAudioLevel < 0.01) { // Much lower threshold
+        const skipReason = `Processed audio too quiet: level ${processedAudioLevel.toFixed(4)} < 0.01 threshold`;
         logger.debug(`[WakeWordDetectionService] ⏭️ Early exit: ${skipReason}`);
         return this.createNegativeResult(keyword, startTime);
       }
@@ -235,8 +235,8 @@ export class WakeWordDetectionService {
       samplesProcessed: samples.length
     });
     
-    if (energyEnvelope.length < 10) { // Too short to contain wake word
-      logger.debug(`[WakeWordDetectionService] ⏭️ Early exit: envelope too short (${energyEnvelope.length} < 10)`);
+    if (energyEnvelope.length < 3) { // Too short to contain wake word (very lenient)
+      logger.debug(`[WakeWordDetectionService] ⏭️ Early exit: envelope too short (${energyEnvelope.length} < 3)`);
       return this.createNegativeResult(keyword, 0);
     }
 
@@ -250,9 +250,10 @@ export class WakeWordDetectionService {
     });
     
     let positionsChecked = 0;
-    for (let i = 0; i < energyEnvelope.length - 20; i += 2) { // Skip every other position
+    const maxEndPos = Math.max(1, energyEnvelope.length - 1); // Ensure we can check even tiny envelopes
+    for (let i = 0; i < maxEndPos; i += 1) { // Check every position for short audio
       positionsChecked++;
-      const windowLength = Math.min(25, energyEnvelope.length - i); // Smaller window
+      const windowLength = Math.min(Math.max(3, energyEnvelope.length - i), energyEnvelope.length - i); // Adaptive window
       const window = energyEnvelope.slice(i, i + windowLength);
       
       const confidence = this.fastMatchPattern(window, primaryPattern.pattern, primaryPattern.threshold);
