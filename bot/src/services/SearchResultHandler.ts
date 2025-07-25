@@ -47,12 +47,16 @@ export class SearchResultHandler {
 
   async getSearchSession(sessionId: string): Promise<SearchSession | null> {
     const sessionData = await this.redis.get(`search:session:${sessionId}`);
+    logger.info(`Retrieved session data for ${sessionId}: ${sessionData ? 'found' : 'not found'}`);
+    
     if (!sessionData) {
       return null;
     }
 
     try {
-      return JSON.parse(sessionData);
+      const session = JSON.parse(sessionData);
+      logger.info(`Session ${sessionId} expires at: ${new Date(session.expiresAt).toISOString()}, current time: ${new Date().toISOString()}`);
+      return session;
     } catch (error) {
       logger.error('Failed to parse search session:', error);
       return null;
@@ -118,6 +122,7 @@ export class SearchResultHandler {
 
   async handleSearchSelection(interaction: ButtonInteraction): Promise<YouTubeVideo | null> {
     const customId = interaction.customId;
+    logger.info(`Handling search button: ${customId}`);
     
     if (!customId.startsWith('search_')) {
       return null;
@@ -125,14 +130,16 @@ export class SearchResultHandler {
 
     const parts = customId.split('_');
     if (parts.length < 3) {
+      logger.warn(`Invalid search button format: ${customId}`);
       return null;
     }
 
     const action = parts[1]; // 'select' or 'cancel'
-    const sessionId = parts[2];
-
-    // Handle cancel
+    
+    // For cancel button, session ID is everything after 'search_cancel_'
     if (action === 'cancel') {
+      const sessionId = parts.slice(2).join('_');
+      logger.info(`Cancel action, sessionId: ${sessionId}`);
       await this.deleteSearchSession(sessionId);
       await interaction.update({
         content: '❌ Search cancelled.',
@@ -144,7 +151,9 @@ export class SearchResultHandler {
 
     // Handle selection
     if (action === 'select' && parts.length >= 4) {
-      const selectedIndex = parseInt(parts[3]);
+      const selectedIndex = parseInt(parts[parts.length - 1]); // Last part is the index
+      const sessionId = parts.slice(2, -1).join('_'); // Everything between 'select' and index
+      logger.info(`Select action, sessionId: ${sessionId}, index: ${selectedIndex}`);
       
       const session = await this.getSearchSession(sessionId);
       if (!session) {
