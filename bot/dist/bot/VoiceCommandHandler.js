@@ -194,6 +194,7 @@ class VoiceCommandHandler extends events_1.EventEmitter {
                     await this.playTTSResponse(segment.guildId, this.responseGenerator.generateResponse(ttsContext));
                 }
                 this.emit('voiceCommand', voiceCommand);
+                this.scheduleRandomFoodTalk(segment.guildId);
             }
             else {
                 logger_1.logger.warn(`[VoiceCommandHandler] Could not parse valid command from: "${recognitionResult.text}"`);
@@ -391,6 +392,34 @@ class VoiceCommandHandler extends events_1.EventEmitter {
         const response = this.responseGenerator.generateResponse(context);
         logger_1.logger.info(`[VoiceCommandHandler] Generated response: "${response}"`);
         await this.playTTSResponse(guildId, response);
+    }
+    scheduleRandomFoodTalk(guildId) {
+        if (!this.textToSpeech.isEnabled() || !this.voiceConnections.has(guildId)) {
+            return;
+        }
+        const foodTalkChance = Math.random();
+        if (foodTalkChance > 0.20) {
+            return;
+        }
+        logger_1.logger.info(`[VoiceCommandHandler] Scheduling random food talk for guild ${guildId} (chance: ${(foodTalkChance * 100).toFixed(1)}%)`);
+        const delay = Math.random() * 3000 + 2000;
+        setTimeout(async () => {
+            try {
+                if (!this.textToSpeech.isEnabled() || !this.voiceConnections.has(guildId)) {
+                    logger_1.logger.debug(`[VoiceCommandHandler] Skipping scheduled food talk - TTS disabled or no voice connection`);
+                    return;
+                }
+                const foodTalk = this.responseGenerator.generateRandomFoodTalk();
+                logger_1.logger.info(`[VoiceCommandHandler] Playing scheduled food talk: "${foodTalk}"`);
+                await this.playTTSResponse(guildId, foodTalk);
+            }
+            catch (error) {
+                logger_1.logger.error('[VoiceCommandHandler] Error playing scheduled food talk:', error);
+            }
+        }, delay);
+    }
+    async triggerRandomFoodTalk(guildId) {
+        this.scheduleRandomFoodTalk(guildId);
     }
 }
 exports.VoiceCommandHandler = VoiceCommandHandler;

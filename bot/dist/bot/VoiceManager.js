@@ -10,6 +10,7 @@ class VoiceManager extends events_1.EventEmitter {
     currentTracks = new Map();
     playbackStrategy;
     disconnectTimers = new Map();
+    foodTalkTimers = new Map();
     voiceChannels = new Map();
     idleTimeoutMs;
     connectionStates = new Map();
@@ -83,6 +84,7 @@ class VoiceManager extends events_1.EventEmitter {
                 this.currentTracks.delete(guildId);
                 this.connectionStates.delete(guildId);
                 this.clearDisconnectTimer(guildId);
+                this.clearFoodTalkTimer(guildId);
                 logger_1.logger.info(`🧹 [CLEANUP] Completed cleanup for guild ${guildId}`);
                 this.logConnectionStatus();
             }
@@ -95,6 +97,7 @@ class VoiceManager extends events_1.EventEmitter {
             this.currentTracks.delete(guildId);
             this.connectionStates.delete(guildId);
             this.clearDisconnectTimer(guildId);
+            this.clearFoodTalkTimer(guildId);
             this.logConnectionStatus();
         });
         connection.on('error', (error) => {
@@ -117,6 +120,7 @@ class VoiceManager extends events_1.EventEmitter {
                 logger_1.logger.info(`⏸️ [PLAYER] Guild ${guildId} state: IDLE ${track ? `(finished: ${track.title})` : ''}`);
                 this.emit('finish');
                 this.startDisconnectTimer(guildId);
+                this.startFoodTalkTimer(guildId);
             });
             player.on(voice_1.AudioPlayerStatus.Buffering, () => {
                 const track = this.currentTracks.get(guildId);
@@ -126,6 +130,7 @@ class VoiceManager extends events_1.EventEmitter {
                 const track = this.currentTracks.get(guildId);
                 logger_1.logger.info(`▶️ [PLAYER] Guild ${guildId} state: PLAYING ${track ? `(track: ${track.title})` : '(TTS/unknown)'}`);
                 this.clearDisconnectTimer(guildId);
+                this.clearFoodTalkTimer(guildId);
             });
             player.on(voice_1.AudioPlayerStatus.AutoPaused, () => {
                 logger_1.logger.warn(`⚠️ [PLAYER] Guild ${guildId} state: AUTO-PAUSED (connection issue?)`);
@@ -165,6 +170,7 @@ class VoiceManager extends events_1.EventEmitter {
             logger_1.logger.info(`♻️ [PLAYER] Reusing existing player for guild ${guildId}`);
         }
         this.clearDisconnectTimer(guildId);
+        this.clearFoodTalkTimer(guildId);
         logger_1.logger.info(`✅ [JOIN] Completed voice channel join for guild ${guildId}`);
         this.logConnectionStatus();
         return connection;
@@ -192,6 +198,7 @@ class VoiceManager extends events_1.EventEmitter {
         this.voiceChannels.delete(guildId);
         this.connectionStates.delete(guildId);
         this.clearDisconnectTimer(guildId);
+        this.clearFoodTalkTimer(guildId);
         logger_1.logger.info(`✅ [LEAVE] Completed disconnect for guild ${guildId} ${channel ? `from ${channel.name}` : ''}`);
         this.logConnectionStatus();
     }
@@ -215,6 +222,7 @@ class VoiceManager extends events_1.EventEmitter {
         }
         logger_1.logger.info(`🎵 [PLAY] Player state: ${player.state.status}`);
         this.clearDisconnectTimer(guildId);
+        this.clearFoodTalkTimer(guildId);
         const channel = this.getVoiceChannel(guildId);
         if (!channel) {
             logger_1.logger.error(`❌ [PLAY] No voice channel found for guild ${guildId}`);
@@ -323,6 +331,7 @@ class VoiceManager extends events_1.EventEmitter {
         }
         logger_1.logger.info(`🎵 [TTS] Player state before TTS: ${player.state.status}`);
         this.clearDisconnectTimer(guildId);
+        this.clearFoodTalkTimer(guildId);
         try {
             const resource = (0, voice_1.createAudioResource)(stream, {
                 inlineVolume: true,
@@ -391,6 +400,34 @@ class VoiceManager extends events_1.EventEmitter {
             this.disconnectTimers.delete(guildId);
         }
     }
+    startFoodTalkTimer(guildId) {
+        this.clearFoodTalkTimer(guildId);
+        const randomDelay = 60000 + Math.random() * 60000;
+        logger_1.logger.info(`🍗 [FOOD_TIMER] Starting food talk timer for guild ${guildId}`);
+        logger_1.logger.info(`⏰ [FOOD_TIMER] Will talk about food in ${Math.round(randomDelay / 1000)}s if still idle`);
+        const timer = setTimeout(() => {
+            const player = this.players.get(guildId);
+            const isIdle = !player || player.state.status === 'idle';
+            if (isIdle) {
+                logger_1.logger.info(`🍗 [FOOD_TIMER] Food talk timer expired for guild ${guildId} - emitting food talk event`);
+                this.emit('idleFoodTalk', { guildId });
+                this.startFoodTalkTimer(guildId);
+            }
+            else {
+                logger_1.logger.info(`🍗 [FOOD_TIMER] Guild ${guildId} no longer idle, skipping food talk`);
+            }
+        }, randomDelay);
+        this.foodTalkTimers.set(guildId, timer);
+        logger_1.logger.info(`✅ [FOOD_TIMER] Food talk timer set for guild ${guildId}`);
+    }
+    clearFoodTalkTimer(guildId) {
+        const timer = this.foodTalkTimers.get(guildId);
+        if (timer) {
+            logger_1.logger.info(`🛑 [FOOD_TIMER] Clearing food talk timer for guild ${guildId} (activity detected)`);
+            clearTimeout(timer);
+            this.foodTalkTimers.delete(guildId);
+        }
+    }
     getGuildStatus(guildId) {
         const connection = this.connections.get(guildId);
         const player = this.players.get(guildId);
@@ -398,6 +435,7 @@ class VoiceManager extends events_1.EventEmitter {
         const track = this.currentTracks.get(guildId);
         const connectionState = this.connectionStates.get(guildId);
         const hasTimer = this.disconnectTimers.has(guildId);
+        const hasFoodTimer = this.foodTalkTimers.has(guildId);
         const status = {
             guildId,
             connection: {
@@ -419,7 +457,8 @@ class VoiceManager extends events_1.EventEmitter {
                 title: track.title,
                 duration: track.duration
             } : null,
-            hasDisconnectTimer: hasTimer
+            hasDisconnectTimer: hasTimer,
+            hasFoodTalkTimer: hasFoodTimer
         };
         logger_1.logger.info(`📊 [STATUS] Guild ${guildId} full status:`, JSON.stringify(status, null, 2));
         return status;

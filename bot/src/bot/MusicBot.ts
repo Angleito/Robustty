@@ -1,4 +1,4 @@
-import { Client, GatewayIntentBits, CommandInteraction, VoiceChannel } from 'discord.js';
+import { Client, GatewayIntentBits, CommandInteraction, VoiceChannel, Message } from 'discord.js';
 import { logger } from '../services/logger';
 import { CommandHandler } from './CommandHandler';
 import { ButtonHandler } from './ButtonHandler';
@@ -11,6 +11,7 @@ import { RedisClient } from '../services/RedisClient';
 import { ErrorHandler } from '../services/ErrorHandler';
 import { MonitoringService } from '../services/MonitoringService';
 import { SearchResultHandler } from '../services/SearchResultHandler';
+import { KanyeResponseGenerator } from '../services/KanyeResponseGenerator';
 import { Track, YouTubeVideo, VoiceCommand } from '../domain/types';
 
 export class MusicBot {
@@ -26,6 +27,7 @@ export class MusicBot {
   private errorHandler: ErrorHandler;
   private monitoringService: MonitoringService;
   private searchResultHandler: SearchResultHandler;
+  private kanyeResponseGenerator: KanyeResponseGenerator;
 
   constructor() {
     this.client = new Client({
@@ -47,6 +49,10 @@ export class MusicBot {
     this.commandHandler = new CommandHandler(this);
     this.buttonHandler = new ButtonHandler(this);
     this.monitoringService = new MonitoringService(this.client, this.redis);
+    this.kanyeResponseGenerator = new KanyeResponseGenerator();
+    
+    // Setup food talk event handling
+    this.setupFoodTalkHandling();
     
     // Initialize voice commands if enabled OR if TTS is enabled (TTS requires voice commands)
     const voiceExplicitlyEnabled = process.env.ENABLE_VOICE_COMMANDS === 'true';
@@ -80,10 +86,61 @@ export class MusicBot {
         await this.buttonHandler.handleButton(interaction);
       }
     });
+
+    this.client.on('messageCreate', async (message) => {
+      await this.handleMessage(message);
+    });
   }
 
   async start() {
     await this.client.login(process.env.DISCORD_TOKEN);
+  }
+
+  private async handleMessage(message: Message): Promise<void> {
+    try {
+      // Ignore messages from bots (including our own)
+      if (message.author.bot) return;
+
+      // Only respond with a small random chance to avoid spam
+      const shouldRespond = Math.random() < 0.15; // 15% chance
+      if (!shouldRespond) return;
+
+      const content = message.content.toLowerCase();
+      
+      // Check for food-related keywords
+      const foodKeywords = {
+        watermelon: ['watermelon', 'melon'],
+        friedChicken: ['chicken', 'fried chicken', 'kfc', 'popeyes'],
+        koolAid: ['kool aid', 'koolaid', 'kool-aid']
+      };
+
+      // Check for talk/chat triggers
+      const talkTriggers = ['talk', 'chat', 'say something', 'speak'];
+      const shouldTalk = talkTriggers.some(trigger => content.includes(trigger));
+
+      let response = '';
+
+      // Check for specific food mentions
+      for (const [foodType, keywords] of Object.entries(foodKeywords)) {
+        if (keywords.some(keyword => content.includes(keyword))) {
+          response = this.kanyeResponseGenerator.generateFoodResponse(foodType as 'watermelon' | 'friedChicken' | 'koolAid');
+          break;
+        }
+      }
+
+      // If no specific food found but user wants to talk, use general food response
+      if (!response && shouldTalk) {
+        response = this.kanyeResponseGenerator.generateFoodResponse('general');
+      }
+
+      // Send response if we have one
+      if (response) {
+        logger.info(`[MusicBot] Responding to message in ${message.guild?.name || 'DM'}: "${content}"`);
+        await message.reply(response);
+      }
+    } catch (error) {
+      logger.error('[MusicBot] Error handling message:', error);
+    }
   }
 
   async play(query: string, interaction: CommandInteraction) {
@@ -280,6 +337,10 @@ export class MusicBot {
     return this.buttonHandler;
   }
 
+  getKanyeResponseGenerator() {
+    return this.kanyeResponseGenerator;
+  }
+
   getNekoPool() {
     return this.playbackStrategy.nekoPool;
   }
@@ -314,6 +375,48 @@ export class MusicBot {
     this.voiceCommandHandler.on('voiceCommand', async (voiceCommand: VoiceCommand) => {
       await this.handleVoiceCommand(voiceCommand);
     });
+  }
+
+  private setupFoodTalkHandling(): void {
+    this.voiceManager.on('idleFoodTalk', async (data: { guildId: string }) => {
+      await this.handleIdleFoodTalk(data.guildId);
+    });
+  }
+
+  private async handleIdleFoodTalk(guildId: string): Promise<void> {
+    try {
+      // Only proceed if TTS is enabled and voice commands are active
+      if (!this.voiceCommandHandler) {
+        logger.info(`🍗 [FOOD_TALK] Guild ${guildId}: No voice command handler, skipping food talk`);
+        return;
+      }
+
+      // Check if we're still connected to voice channel
+      const voiceChannel = this.voiceManager.getVoiceChannel(guildId);
+      if (!voiceChannel) {
+        logger.info(`🍗 [FOOD_TALK] Guild ${guildId}: Not in voice channel, skipping food talk`);
+        return;
+      }
+
+      // Double-check that we're actually idle (not playing music)
+      if (this.voiceManager.isPlaying(guildId)) {
+        logger.info(`🍗 [FOOD_TALK] Guild ${guildId}: Music is playing, skipping food talk`);
+        return;
+      }
+
+      // Generate random food talk
+      const foodTalk = this.kanyeResponseGenerator.generateRandomFoodTalk();
+      logger.info(`🍗 [FOOD_TALK] Guild ${guildId}: Generated food talk: "${foodTalk}"`);
+
+      // Send through TTS system
+      await this.voiceCommandHandler.speakResponse(guildId, { 
+        command: 'food'
+      });
+      
+      logger.info(`🍗 [FOOD_TALK] Guild ${guildId}: Successfully sent food talk via TTS`);
+    } catch (error) {
+      logger.error(`🍗 [FOOD_TALK] Guild ${guildId}: Error during food talk:`, error);
+    }
   }
 
   private async handleVoiceCommand(voiceCommand: VoiceCommand): Promise<void> {

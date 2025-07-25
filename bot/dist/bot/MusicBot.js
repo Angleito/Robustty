@@ -14,6 +14,7 @@ const RedisClient_1 = require("../services/RedisClient");
 const ErrorHandler_1 = require("../services/ErrorHandler");
 const MonitoringService_1 = require("../services/MonitoringService");
 const SearchResultHandler_1 = require("../services/SearchResultHandler");
+const KanyeResponseGenerator_1 = require("../services/KanyeResponseGenerator");
 class MusicBot {
     client;
     commandHandler;
@@ -27,6 +28,7 @@ class MusicBot {
     errorHandler;
     monitoringService;
     searchResultHandler;
+    kanyeResponseGenerator;
     constructor() {
         this.client = new discord_js_1.Client({
             intents: [
@@ -46,6 +48,8 @@ class MusicBot {
         this.commandHandler = new CommandHandler_1.CommandHandler(this);
         this.buttonHandler = new ButtonHandler_1.ButtonHandler(this);
         this.monitoringService = new MonitoringService_1.MonitoringService(this.client, this.redis);
+        this.kanyeResponseGenerator = new KanyeResponseGenerator_1.KanyeResponseGenerator();
+        this.setupFoodTalkHandling();
         const voiceExplicitlyEnabled = process.env.ENABLE_VOICE_COMMANDS === 'true';
         const ttsEnabled = process.env.TTS_ENABLED === 'true';
         const voiceEnabled = voiceExplicitlyEnabled || ttsEnabled;
@@ -76,9 +80,46 @@ class MusicBot {
                 await this.buttonHandler.handleButton(interaction);
             }
         });
+        this.client.on('messageCreate', async (message) => {
+            await this.handleMessage(message);
+        });
     }
     async start() {
         await this.client.login(process.env.DISCORD_TOKEN);
+    }
+    async handleMessage(message) {
+        try {
+            if (message.author.bot)
+                return;
+            const shouldRespond = Math.random() < 0.15;
+            if (!shouldRespond)
+                return;
+            const content = message.content.toLowerCase();
+            const foodKeywords = {
+                watermelon: ['watermelon', 'melon'],
+                friedChicken: ['chicken', 'fried chicken', 'kfc', 'popeyes'],
+                koolAid: ['kool aid', 'koolaid', 'kool-aid']
+            };
+            const talkTriggers = ['talk', 'chat', 'say something', 'speak'];
+            const shouldTalk = talkTriggers.some(trigger => content.includes(trigger));
+            let response = '';
+            for (const [foodType, keywords] of Object.entries(foodKeywords)) {
+                if (keywords.some(keyword => content.includes(keyword))) {
+                    response = this.kanyeResponseGenerator.generateFoodResponse(foodType);
+                    break;
+                }
+            }
+            if (!response && shouldTalk) {
+                response = this.kanyeResponseGenerator.generateFoodResponse('general');
+            }
+            if (response) {
+                logger_1.logger.info(`[MusicBot] Responding to message in ${message.guild?.name || 'DM'}: "${content}"`);
+                await message.reply(response);
+            }
+        }
+        catch (error) {
+            logger_1.logger.error('[MusicBot] Error handling message:', error);
+        }
     }
     async play(query, interaction) {
         logger_1.logger.info(`[MusicBot.play] Starting play command - guildId from interaction: ${interaction.guildId}, type: ${typeof interaction.guildId}`);
@@ -230,6 +271,9 @@ class MusicBot {
     getButtonHandler() {
         return this.buttonHandler;
     }
+    getKanyeResponseGenerator() {
+        return this.kanyeResponseGenerator;
+    }
     getNekoPool() {
         return this.playbackStrategy.nekoPool;
     }
@@ -257,6 +301,37 @@ class MusicBot {
         this.voiceCommandHandler.on('voiceCommand', async (voiceCommand) => {
             await this.handleVoiceCommand(voiceCommand);
         });
+    }
+    setupFoodTalkHandling() {
+        this.voiceManager.on('idleFoodTalk', async (data) => {
+            await this.handleIdleFoodTalk(data.guildId);
+        });
+    }
+    async handleIdleFoodTalk(guildId) {
+        try {
+            if (!this.voiceCommandHandler) {
+                logger_1.logger.info(`🍗 [FOOD_TALK] Guild ${guildId}: No voice command handler, skipping food talk`);
+                return;
+            }
+            const voiceChannel = this.voiceManager.getVoiceChannel(guildId);
+            if (!voiceChannel) {
+                logger_1.logger.info(`🍗 [FOOD_TALK] Guild ${guildId}: Not in voice channel, skipping food talk`);
+                return;
+            }
+            if (this.voiceManager.isPlaying(guildId)) {
+                logger_1.logger.info(`🍗 [FOOD_TALK] Guild ${guildId}: Music is playing, skipping food talk`);
+                return;
+            }
+            const foodTalk = this.kanyeResponseGenerator.generateRandomFoodTalk();
+            logger_1.logger.info(`🍗 [FOOD_TALK] Guild ${guildId}: Generated food talk: "${foodTalk}"`);
+            await this.voiceCommandHandler.speakResponse(guildId, {
+                command: 'food'
+            });
+            logger_1.logger.info(`🍗 [FOOD_TALK] Guild ${guildId}: Successfully sent food talk via TTS`);
+        }
+        catch (error) {
+            logger_1.logger.error(`🍗 [FOOD_TALK] Guild ${guildId}: Error during food talk:`, error);
+        }
     }
     async handleVoiceCommand(voiceCommand) {
         try {

@@ -12,6 +12,7 @@ export declare class CommandHandler {
     private showNowPlaying;
     private handleVoiceCommand;
     private handleNoVoiceCommand;
+    private handleTalkCommand;
     private formatDuration;
 }
 //# sourceMappingURL=CommandHandler.d.ts.map

@@ -102,7 +102,49 @@ class KanyeResponseGenerator {
             "Say that again nigga",
             "I ain't catch that nigga",
             "Come again nigga"
-        ]
+        ],
+        food: {
+            watermelon: [
+                "Man nigga, watermelon is straight fire",
+                "Nothing beats fresh watermelon on a hot day nigga",
+                "That watermelon juice hitting different nigga",
+                "Watermelon the most refreshing fruit no cap nigga",
+                "Summer ain't complete without watermelon nigga",
+                "Watermelon got that sweet crispy goodness nigga",
+                "Nothing like a cold slice of watermelon nigga",
+                "Watermelon is nature's candy nigga"
+            ],
+            friedChicken: [
+                "Yo nigga, fried chicken is the ultimate comfort food",
+                "Crispy fried chicken with that perfect seasoning nigga",
+                "Nothing beats that golden crispy chicken nigga",
+                "Fried chicken is pure perfection nigga",
+                "That fried chicken crunch is everything nigga",
+                "Juicy chicken with that crispy coating nigga",
+                "Fried chicken is straight soul food nigga",
+                "Can't go wrong with some good fried chicken nigga"
+            ],
+            koolAid: [
+                "Kool-Aid the drink of champions nigga",
+                "That Kool-Aid hitting different with the right amount of sugar nigga",
+                "Red Kool-Aid just hits different nigga",
+                "Kool-Aid got that nostalgic flavor nigga",
+                "Nothing like ice cold Kool-Aid on a hot day nigga",
+                "Kool-Aid is that classic refresher nigga",
+                "Mix that Kool-Aid just right and it's perfect nigga",
+                "Kool-Aid brings back them childhood memories nigga"
+            ],
+            general: [
+                "Food talk got me hungry now nigga",
+                "We talking about the good stuff now nigga",
+                "These flavors got me thinking nigga",
+                "Food conversations are the best conversations nigga",
+                "Nothing like talking about good eats nigga",
+                "You know what's good when it comes to food nigga",
+                "Food brings people together nigga",
+                "We got taste when it comes to food nigga"
+            ]
+        }
     };
     generateResponse(context) {
         const { command, songTitle, queueLength, error } = context;
@@ -142,6 +184,8 @@ class KanyeResponseGenerator {
                 return this.getRandomResponse(resumeResponses.success);
             case 'greeting':
                 return this.getRandomResponse(this.responses.greeting);
+            case 'food':
+                return this.generateRandomFoodTalk();
             default:
                 return this.getRandomResponse(this.responses.unknown);
         }
@@ -156,6 +200,10 @@ class KanyeResponseGenerator {
     generateAcknowledgment() {
         return this.getRandomResponse(this.responses.acknowledgment);
     }
+    generateFoodResponse(foodType) {
+        const foodResponses = this.responses.food;
+        return this.getRandomResponse(foodResponses[foodType]);
+    }
     getRandomResponse(responses) {
         return responses[Math.floor(Math.random() * responses.length)];
     }
@@ -168,6 +216,28 @@ class KanyeResponseGenerator {
             commandResponses[category] = [];
         }
         commandResponses[category].push(response);
+    }
+    generateRandomFoodTalk() {
+        const foodResponses = this.responses.food;
+        const foodTypes = ['watermelon', 'friedChicken', 'koolAid', 'general'];
+        const randomType = foodTypes[Math.floor(Math.random() * foodTypes.length)];
+        return this.getRandomResponse(foodResponses[randomType]);
+    }
+    generateWatermelonTalk() {
+        const foodResponses = this.responses.food;
+        return this.getRandomResponse(foodResponses.watermelon);
+    }
+    generateFriedChickenTalk() {
+        const foodResponses = this.responses.food;
+        return this.getRandomResponse(foodResponses.friedChicken);
+    }
+    generateKoolAidTalk() {
+        const foodResponses = this.responses.food;
+        return this.getRandomResponse(foodResponses.koolAid);
+    }
+    generateGeneralFoodTalk() {
+        const foodResponses = this.responses.food;
+        return this.getRandomResponse(foodResponses.general);
     }
 }
 exports.KanyeResponseGenerator = KanyeResponseGenerator;

@@ -69,5 +69,7 @@ export declare class VoiceCommandHandler extends EventEmitter {
     }>;
     private playTTSResponse;
     speakResponse(guildId: string, context: any): Promise<void>;
+    private scheduleRandomFoodTalk;
+    triggerRandomFoodTalk(guildId: string): Promise<void>;
 }
 //# sourceMappingURL=VoiceCommandHandler.d.ts.map

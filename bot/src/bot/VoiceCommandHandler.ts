@@ -272,6 +272,9 @@ export class VoiceCommandHandler extends EventEmitter {
         
         // Emit voice command for handling by MusicBot
         this.emit('voiceCommand', voiceCommand);
+        
+        // Schedule random food talk after successful command processing
+        this.scheduleRandomFoodTalk(segment.guildId);
       } else {
         logger.warn(`[VoiceCommandHandler] Could not parse valid command from: "${recognitionResult.text}"`);
         
@@ -546,5 +549,45 @@ export class VoiceCommandHandler extends EventEmitter {
     const response = this.responseGenerator.generateResponse(context);
     logger.info(`[VoiceCommandHandler] Generated response: "${response}"`);
     await this.playTTSResponse(guildId, response);
+  }
+
+  // Schedule random food talk after voice command processing
+  private scheduleRandomFoodTalk(guildId: string): void {
+    // Only trigger if TTS is enabled and we have a voice connection
+    if (!this.textToSpeech.isEnabled() || !this.voiceConnections.has(guildId)) {
+      return;
+    }
+
+    // 15-20% chance to trigger food talk
+    const foodTalkChance = Math.random();
+    if (foodTalkChance > 0.20) {
+      return;
+    }
+
+    logger.info(`[VoiceCommandHandler] Scheduling random food talk for guild ${guildId} (chance: ${(foodTalkChance * 100).toFixed(1)}%)`);
+
+    // Random delay between 2-5 seconds for natural feel
+    const delay = Math.random() * 3000 + 2000; // 2000ms + 0-3000ms = 2-5 seconds
+    
+    setTimeout(async () => {
+      try {
+        // Double-check TTS and voice connection are still active
+        if (!this.textToSpeech.isEnabled() || !this.voiceConnections.has(guildId)) {
+          logger.debug(`[VoiceCommandHandler] Skipping scheduled food talk - TTS disabled or no voice connection`);
+          return;
+        }
+
+        const foodTalk = this.responseGenerator.generateRandomFoodTalk();
+        logger.info(`[VoiceCommandHandler] Playing scheduled food talk: "${foodTalk}"`);
+        await this.playTTSResponse(guildId, foodTalk);
+      } catch (error) {
+        logger.error('[VoiceCommandHandler] Error playing scheduled food talk:', error);
+      }
+    }, delay);
+  }
+
+  // Public method to trigger random food talk (can be called after successful commands)
+  async triggerRandomFoodTalk(guildId: string): Promise<void> {
+    this.scheduleRandomFoodTalk(guildId);
   }
 }

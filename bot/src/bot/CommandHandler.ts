@@ -41,7 +41,11 @@ export class CommandHandler {
       
       new SlashCommandBuilder()
         .setName('nowplaying')
-        .setDescription('Show the currently playing song')
+        .setDescription('Show the currently playing song'),
+      
+      new SlashCommandBuilder()
+        .setName('talk')
+        .setDescription('Get random food talk about watermelon, fried chicken, and Kool-Aid')
     ];
 
     // Voice commands are now automatically enabled when TTS is on
@@ -107,6 +111,10 @@ export class CommandHandler {
           
         case 'nowplaying':
           await this.showNowPlaying(interaction);
+          break;
+          
+        case 'talk':
+          await this.handleTalkCommand(interaction);
           break;
           
         // Voice commands are automatically enabled, no manual commands needed
@@ -266,6 +274,27 @@ export class CommandHandler {
     } catch (error) {
       logger.error('Failed to disable voice commands:', error);
       await interaction.editReply('Failed to disable voice commands.');
+    }
+  }
+
+  private async handleTalkCommand(interaction: CommandInteraction): Promise<void> {
+    try {
+      const responseGenerator = this.bot.getKanyeResponseGenerator();
+      const foodTalk = responseGenerator.generateRandomFoodTalk();
+      
+      const embed = {
+        title: '🍉 Food Talk with Kanye',
+        description: foodTalk,
+        color: 0xff6b35,
+        footer: {
+          text: 'Random food wisdom'
+        }
+      };
+
+      await interaction.editReply({ embeds: [embed] });
+    } catch (error) {
+      logger.error('Error in talk command:', error);
+      await interaction.editReply('Something went wrong with the food talk, try again');
     }
   }
 

@@ -6,6 +6,7 @@ import { PlaybackStrategyManager } from '../services/PlaybackStrategyManager';
 import { ErrorHandler } from '../services/ErrorHandler';
 import { MonitoringService } from '../services/MonitoringService';
 import { SearchResultHandler } from '../services/SearchResultHandler';
+import { KanyeResponseGenerator } from '../services/KanyeResponseGenerator';
 import { Track, YouTubeVideo } from '../domain/types';
 export declare class MusicBot {
     private client;
@@ -20,9 +21,11 @@ export declare class MusicBot {
     private errorHandler;
     private monitoringService;
     private searchResultHandler;
+    private kanyeResponseGenerator;
     constructor();
     initialize(): Promise<void>;
     start(): Promise<void>;
+    private handleMessage;
     play(query: string, interaction: CommandInteraction): Promise<void>;
     playSelectedVideo(video: YouTubeVideo, interaction: CommandInteraction): Promise<void>;
     playSelectedVideoFromButton(video: YouTubeVideo, guildId: string, userId: string): Promise<{
@@ -38,6 +41,7 @@ export declare class MusicBot {
     getClient(): Client<boolean>;
     getQueueManager(): QueueManager;
     getButtonHandler(): ButtonHandler;
+    getKanyeResponseGenerator(): KanyeResponseGenerator;
     getNekoPool(): import("../services/NekoPoolManager").NekoPoolManager;
     getPlaybackStrategy(): PlaybackStrategyManager;
     getMonitoringService(): MonitoringService;
@@ -46,6 +50,8 @@ export declare class MusicBot {
     getVoiceCommandHandler(): VoiceCommandHandler | null;
     isVoiceCommandsEnabled(): boolean;
     private setupVoiceCommandHandling;
+    private setupFoodTalkHandling;
+    private handleIdleFoodTalk;
     private handleVoiceCommand;
     private handleVoicePlayCommand;
     private handleVoiceSkipCommand;

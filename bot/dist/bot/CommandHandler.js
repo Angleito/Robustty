@@ -33,7 +33,10 @@ class CommandHandler {
                 .setDescription('Show the current queue'),
             new discord_js_1.SlashCommandBuilder()
                 .setName('nowplaying')
-                .setDescription('Show the currently playing song')
+                .setDescription('Show the currently playing song'),
+            new discord_js_1.SlashCommandBuilder()
+                .setName('talk')
+                .setDescription('Get random food talk about watermelon, fried chicken, and Kool-Aid')
         ];
         this.commands = [
             ...baseCommands,
@@ -84,6 +87,9 @@ class CommandHandler {
                     break;
                 case 'nowplaying':
                     await this.showNowPlaying(interaction);
+                    break;
+                case 'talk':
+                    await this.handleTalkCommand(interaction);
                     break;
                 case 'admin':
                     await this.adminHandler.handleCommand(interaction);
@@ -215,6 +221,25 @@ class CommandHandler {
         catch (error) {
             logger_1.logger.error('Failed to disable voice commands:', error);
             await interaction.editReply('Failed to disable voice commands.');
+        }
+    }
+    async handleTalkCommand(interaction) {
+        try {
+            const responseGenerator = this.bot.getKanyeResponseGenerator();
+            const foodTalk = responseGenerator.generateRandomFoodTalk();
+            const embed = {
+                title: '🍉 Food Talk with Kanye',
+                description: foodTalk,
+                color: 0xff6b35,
+                footer: {
+                    text: 'Random food wisdom'
+                }
+            };
+            await interaction.editReply({ embeds: [embed] });
+        }
+        catch (error) {
+            logger_1.logger.error('Error in talk command:', error);
+            await interaction.editReply('Something went wrong with the food talk, try again');
         }
     }
     formatDuration(seconds) {

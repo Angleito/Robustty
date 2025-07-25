@@ -9,6 +9,7 @@ export declare class VoiceManager extends EventEmitter {
     private currentTracks;
     private playbackStrategy;
     private disconnectTimers;
+    private foodTalkTimers;
     private voiceChannels;
     private idleTimeoutMs;
     private connectionStates;
@@ -21,9 +22,11 @@ export declare class VoiceManager extends EventEmitter {
     stop(): void;
     isPlaying(guildId: string): boolean;
     playTTS(stream: any, guildId: string, text: string): Promise<void>;
-    private getVoiceChannel;
+    getVoiceChannel(guildId: string): VoiceChannel | null;
     private startDisconnectTimer;
     private clearDisconnectTimer;
+    private startFoodTalkTimer;
+    private clearFoodTalkTimer;
     getGuildStatus(guildId: string): any;
     checkConnectionHealth(guildId: string): Promise<boolean>;
 }
