@@ -27,6 +27,25 @@ class ButtonHandler {
             .setLabel('🔀')
             .setStyle(discord_js_1.ButtonStyle.Secondary));
     }
+    createSelectionButtons() {
+        return new discord_js_1.ActionRowBuilder()
+            .addComponents(new discord_js_1.ButtonBuilder()
+            .setCustomId('select_1')
+            .setLabel('1')
+            .setStyle(discord_js_1.ButtonStyle.Primary), new discord_js_1.ButtonBuilder()
+            .setCustomId('select_2')
+            .setLabel('2')
+            .setStyle(discord_js_1.ButtonStyle.Primary), new discord_js_1.ButtonBuilder()
+            .setCustomId('select_3')
+            .setLabel('3')
+            .setStyle(discord_js_1.ButtonStyle.Primary), new discord_js_1.ButtonBuilder()
+            .setCustomId('select_4')
+            .setLabel('4')
+            .setStyle(discord_js_1.ButtonStyle.Primary), new discord_js_1.ButtonBuilder()
+            .setCustomId('select_5')
+            .setLabel('5')
+            .setStyle(discord_js_1.ButtonStyle.Primary));
+    }
     createQueueControls(page, totalPages) {
         return new discord_js_1.ActionRowBuilder()
             .addComponents(new discord_js_1.ButtonBuilder()
@@ -55,8 +74,12 @@ class ButtonHandler {
         if (!interaction.isButton())
             return;
         try {
-            await interaction.deferUpdate();
             const customId = interaction.customId;
+            if (customId.startsWith('search_')) {
+                await this.handleSearchSelection(interaction);
+                return;
+            }
+            await interaction.deferUpdate();
             switch (customId) {
                 case 'pause_resume':
                     await this.handlePauseResume(interaction);
@@ -90,13 +113,29 @@ class ButtonHandler {
                     if (customId.startsWith('queue_')) {
                         await this.handleQueueNavigation(interaction, customId);
                     }
+                    else if (customId.startsWith('select_')) {
+                        await this.handleSimpleSelection(interaction, customId);
+                    }
             }
         }
         catch (error) {
             logger_1.logger.error(`Button error (${interaction.customId}):`, error);
-            await interaction.editReply({
-                content: 'An error occurred while processing the button click'
-            });
+            try {
+                if (interaction.deferred) {
+                    await interaction.editReply({
+                        content: 'An error occurred while processing the button click'
+                    });
+                }
+                else {
+                    await interaction.reply({
+                        content: 'An error occurred while processing the button click',
+                        ephemeral: true
+                    });
+                }
+            }
+            catch (responseError) {
+                logger_1.logger.error('Failed to send error response:', responseError);
+            }
         }
     }
     async handlePauseResume(interaction) {
@@ -163,6 +202,45 @@ class ButtonHandler {
             embeds: [embed],
             components: [this.createQueueControls(page, totalPages)]
         });
+    }
+    async handleSimpleSelection(interaction, customId) {
+        await interaction.editReply({
+            content: 'Simple selection functionality not implemented. Please use the search command with proper search results.',
+            components: []
+        });
+    }
+    async handleSearchSelection(interaction) {
+        try {
+            const searchHandler = this.bot.getSearchResultHandler();
+            const selectedVideo = await searchHandler.handleSearchSelection(interaction);
+            if (!selectedVideo) {
+                return;
+            }
+            if (!interaction.guildId) {
+                await interaction.followUp({
+                    content: 'This can only be used in a server!',
+                    ephemeral: true
+                });
+                return;
+            }
+            const result = await this.bot.playSelectedVideoFromButton(selectedVideo, interaction.guildId, interaction.user.id);
+            await interaction.followUp({
+                content: result.message,
+                ephemeral: !result.success
+            });
+        }
+        catch (error) {
+            logger_1.logger.error('Search selection error:', error);
+            try {
+                await interaction.followUp({
+                    content: 'An error occurred while processing your selection',
+                    ephemeral: true
+                });
+            }
+            catch (followUpError) {
+                logger_1.logger.error('Failed to send error response:', followUpError);
+            }
+        }
     }
 }
 exports.ButtonHandler = ButtonHandler;

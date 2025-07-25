@@ -34,6 +34,12 @@ class CommandHandler {
             new discord_js_1.SlashCommandBuilder()
                 .setName('nowplaying')
                 .setDescription('Show the currently playing song'),
+            new discord_js_1.SlashCommandBuilder()
+                .setName('voice')
+                .setDescription('Enable voice commands in this voice channel'),
+            new discord_js_1.SlashCommandBuilder()
+                .setName('novoice')
+                .setDescription('Disable voice commands in this server'),
             ...this.adminHandler.getCommands()
         ];
     }
@@ -81,6 +87,12 @@ class CommandHandler {
                     break;
                 case 'nowplaying':
                     await this.showNowPlaying(interaction);
+                    break;
+                case 'voice':
+                    await this.handleVoiceCommand(interaction);
+                    break;
+                case 'novoice':
+                    await this.handleNoVoiceCommand(interaction);
                     break;
                 case 'admin':
                     await this.adminHandler.handleCommand(interaction);
@@ -134,6 +146,72 @@ class CommandHandler {
             embeds: [embed],
             components: [controls]
         });
+    }
+    async handleVoiceCommand(interaction) {
+        if (!interaction.guild) {
+            await interaction.editReply('This command can only be used in a server!');
+            return;
+        }
+        const member = interaction.guild.members.cache.get(interaction.user.id);
+        if (!member?.voice.channel) {
+            await interaction.editReply('You need to be in a voice channel to enable voice commands!');
+            return;
+        }
+        try {
+            await this.bot.enableVoiceCommands(member.voice.channel);
+            const embed = {
+                title: '🎤 Voice Commands Enabled',
+                color: 0x00ff00,
+                description: `Voice commands are now active in **${member.voice.channel.name}**!\n\nSay **"Kanye"** followed by your command:`,
+                fields: [
+                    {
+                        name: 'Available Commands',
+                        value: '• **"Kanye play [song name]"** - Play a song\n• **"Kanye skip"** - Skip current song\n• **"Kanye stop"** - Stop playback\n• **"Kanye queue"** - Show queue info',
+                        inline: false
+                    },
+                    {
+                        name: 'Tips',
+                        value: '• Speak clearly and wait for the wake word detection\n• Voice commands work best in quiet environments\n• Use `/novoice` to disable voice commands',
+                        inline: false
+                    }
+                ],
+                footer: {
+                    text: 'Note: OpenAI Whisper API required for speech recognition'
+                }
+            };
+            await interaction.editReply({ embeds: [embed] });
+        }
+        catch (error) {
+            logger_1.logger.error('Failed to enable voice commands:', error);
+            await interaction.editReply('Failed to enable voice commands. Make sure the bot has proper permissions and OpenAI API key is configured.');
+        }
+    }
+    async handleNoVoiceCommand(interaction) {
+        if (!interaction.guildId) {
+            await interaction.editReply('This command can only be used in a server!');
+            return;
+        }
+        try {
+            const wasActive = this.bot.isVoiceCommandsActive(interaction.guildId);
+            if (!wasActive) {
+                await interaction.editReply('Voice commands are not currently active in this server.');
+                return;
+            }
+            await this.bot.disableVoiceCommands(interaction.guildId);
+            const embed = {
+                title: '🔇 Voice Commands Disabled',
+                color: 0xff0000,
+                description: 'Voice commands have been disabled for this server.\n\nUse `/voice` in a voice channel to re-enable them.',
+                footer: {
+                    text: 'Regular slash commands continue to work normally'
+                }
+            };
+            await interaction.editReply({ embeds: [embed] });
+        }
+        catch (error) {
+            logger_1.logger.error('Failed to disable voice commands:', error);
+            await interaction.editReply('Failed to disable voice commands.');
+        }
     }
     formatDuration(seconds) {
         const hours = Math.floor(seconds / 3600);

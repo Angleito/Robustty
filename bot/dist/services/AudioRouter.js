@@ -23,7 +23,7 @@ class AudioRouter {
                 throw new Error('No audio stream received');
             }
             const reader = response.body.getReader();
-            return new stream_1.Readable({
+            const stream = new stream_1.Readable({
                 async read() {
                     try {
                         const { done, value } = await reader.read();
@@ -40,6 +40,19 @@ class AudioRouter {
                     }
                 }
             });
+            const timeout = setTimeout(() => {
+                logger_1.logger.warn(`Audio stream timeout for instance ${instanceId}`);
+                stream.destroy(new Error('Stream timeout'));
+            }, 60000);
+            stream.on('close', () => {
+                clearTimeout(timeout);
+                reader.releaseLock();
+            });
+            stream.on('error', () => {
+                clearTimeout(timeout);
+                reader.releaseLock();
+            });
+            return stream;
         }
         catch (error) {
             logger_1.logger.error(`Failed to capture audio from instance ${instanceId}:`, error);
