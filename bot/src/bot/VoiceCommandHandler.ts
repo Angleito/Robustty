@@ -160,6 +160,26 @@ export class VoiceCommandHandler extends EventEmitter {
           nextSegment.guildId === wakeWordSegment.guildId &&
           Date.now() - commandStartTime < 12000) { // Within 12 seconds
         
+        // CHECK FOR WAKE WORD RESET: First check if this new audio contains "kanye" again
+        const wakeWordCheck = await this.detectWakeWord(nextSegment);
+        if (wakeWordCheck.detected) {
+          logger.info(`[VoiceCommandHandler] 🔄 Wake word "kanye" detected again! Resetting command capture timer`);
+          
+          // Clean up current listener
+          this.voiceListener.removeListener('audioSegment', onNextAudio);
+          if (commandCaptureTimeout) {
+            clearTimeout(commandCaptureTimeout);
+          }
+          
+          // Play new acknowledgment and restart command capture
+          const newAcknowledgment = this.responseGenerator.generateAcknowledgment();
+          await this.playTTSResponse(wakeWordSegment.guildId, newAcknowledgment);
+          
+          // Restart command capture with fresh timer
+          await this.captureCommandAudio(nextSegment);
+          return;
+        }
+        
         // Reset timeout on new audio
         if (commandCaptureTimeout) {
           clearTimeout(commandCaptureTimeout);

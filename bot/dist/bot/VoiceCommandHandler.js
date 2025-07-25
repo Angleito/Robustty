@@ -123,6 +123,18 @@ class VoiceCommandHandler extends events_1.EventEmitter {
             if (nextSegment.userId === wakeWordSegment.userId &&
                 nextSegment.guildId === wakeWordSegment.guildId &&
                 Date.now() - commandStartTime < 12000) {
+                const wakeWordCheck = await this.detectWakeWord(nextSegment);
+                if (wakeWordCheck.detected) {
+                    logger_1.logger.info(`[VoiceCommandHandler] 🔄 Wake word "kanye" detected again! Resetting command capture timer`);
+                    this.voiceListener.removeListener('audioSegment', onNextAudio);
+                    if (commandCaptureTimeout) {
+                        clearTimeout(commandCaptureTimeout);
+                    }
+                    const newAcknowledgment = this.responseGenerator.generateAcknowledgment();
+                    await this.playTTSResponse(wakeWordSegment.guildId, newAcknowledgment);
+                    await this.captureCommandAudio(nextSegment);
+                    return;
+                }
                 if (commandCaptureTimeout) {
                     clearTimeout(commandCaptureTimeout);
                 }
