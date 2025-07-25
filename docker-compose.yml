@@ -19,6 +19,7 @@ services:
       - ADMIN_NOTIFICATION_WEBHOOK=${ADMIN_NOTIFICATION_WEBHOOK:-}
       - NODE_ENV=production
       - LOG_LEVEL=${LOG_LEVEL:-info}
+      - VOICE_IDLE_TIMEOUT_MS=${VOICE_IDLE_TIMEOUT_MS:-300000}
     depends_on:
       - redis
       - neko

@@ -21,10 +21,14 @@ export class VoiceManager extends EventEmitter {
   private playbackStrategy: PlaybackStrategyManager;
   private disconnectTimers: Map<string, NodeJS.Timeout> = new Map();
   private voiceChannels: Map<string, VoiceChannel> = new Map();
+  private idleTimeoutMs: number;
 
   constructor(playbackStrategy: PlaybackStrategyManager) {
     super();
     this.playbackStrategy = playbackStrategy;
+    // Default to 5 minutes, but allow override via environment variable
+    this.idleTimeoutMs = parseInt(process.env.VOICE_IDLE_TIMEOUT_MS || '300000', 10);
+    logger.info(`VoiceManager initialized with idle timeout: ${this.idleTimeoutMs}ms (${this.idleTimeoutMs / 1000 / 60} minutes)`);
   }
 
   async join(channel: VoiceChannel): Promise<VoiceConnection> {
@@ -246,10 +250,11 @@ export class VoiceManager extends EventEmitter {
   private startDisconnectTimer(guildId: string) {
     this.clearDisconnectTimer(guildId);
     
+    logger.info(`Starting disconnect timer for guild ${guildId} - will disconnect in ${this.idleTimeoutMs / 1000} seconds`);
     const timer = setTimeout(() => {
-      logger.info(`Auto-disconnecting from guild ${guildId} due to inactivity`);
+      logger.info(`Auto-disconnecting from guild ${guildId} due to inactivity (timeout reached: ${this.idleTimeoutMs}ms)`);
       this.leave(guildId);
-    }, 5 * 60 * 1000); // 5 minutes
+    }, this.idleTimeoutMs);
     
     this.disconnectTimers.set(guildId, timer);
   }
@@ -257,6 +262,7 @@ export class VoiceManager extends EventEmitter {
   private clearDisconnectTimer(guildId: string) {
     const timer = this.disconnectTimers.get(guildId);
     if (timer) {
+      logger.info(`Clearing disconnect timer for guild ${guildId}`);
       clearTimeout(timer);
       this.disconnectTimers.delete(guildId);
     }

@@ -21,10 +21,19 @@ export class WakeWordDetectionService {
     this.sampleRate = sampleRate;
     this.wakeWordPatterns = new Map();
     
+    logger.info(`[WakeWordDetectionService] 🚀 Starting initialization...`, {
+      confidenceThreshold,
+      sampleRate,
+      costOptimizationMode: this.costOptimizationMode
+    });
+    
     // Initialize "Kanye" detection patterns
     this.initializeKanyePatterns();
     
-    logger.info('[WakeWordDetectionService] Initialized in COST OPTIMIZATION mode - only processing after wake word detection');
+    logger.info('[WakeWordDetectionService] ✅ Initialized in COST OPTIMIZATION mode - only processing after wake word detection', {
+      supportedKeywords: this.getSupportedKeywords(),
+      processingEnabled: this.processingEnabled
+    });
   }
 
   private initializeKanyePatterns(): void {
