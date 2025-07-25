@@ -46,6 +46,16 @@ export class VoiceListenerService extends EventEmitter {
 
       // Configure voice receiving
       const voiceReceiver = connection.receiver;
+      
+      if (!voiceReceiver) {
+        logger.error(`[VoiceListenerService] No voice receiver available for connection`);
+        throw new Error('Voice receiver not available');
+      }
+      
+      if (!voiceReceiver.speaking) {
+        logger.error(`[VoiceListenerService] No speaking detector available`);
+        throw new Error('Speaking detector not available');
+      }
 
       // Listen for speaking events
       voiceReceiver.speaking.on('start', (userId) => {
@@ -79,11 +89,15 @@ export class VoiceListenerService extends EventEmitter {
     const receiver = this.receivers.get(guildId);
     if (!receiver) return;
 
-    // Monitor for new users joining voice
-    voiceReceiver.connection.on('stateChange', () => {
-      // Refresh user streams when connection state changes
-      setTimeout(() => this.refreshUserStreams(guildId), 1000);
-    });
+    // Monitor for new users joining voice (if connection exists)
+    if (voiceReceiver.connection) {
+      voiceReceiver.connection.on('stateChange', () => {
+        // Refresh user streams when connection state changes
+        setTimeout(() => this.refreshUserStreams(guildId), 1000);
+      });
+    } else {
+      logger.debug(`[VoiceListenerService] No connection object on voiceReceiver for monitoring state changes`);
+    }
 
     // Initial setup of user streams
     this.refreshUserStreams(guildId);
@@ -97,6 +111,11 @@ export class VoiceListenerService extends EventEmitter {
     }
 
     const voiceReceiver = receiver.connection.receiver;
+    if (!voiceReceiver) {
+      logger.warn(`[VoiceListenerService] No voice receiver available for guild ${guildId}`);
+      return;
+    }
+    
     logger.info(`[VoiceListenerService] Refreshing user streams for guild ${guildId}`);
     logger.info(`[VoiceListenerService] Channel members: ${receiver.channel.members.size}`);
     

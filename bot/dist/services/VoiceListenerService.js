@@ -29,6 +29,14 @@ class VoiceListenerService extends events_1.EventEmitter {
             };
             this.receivers.set(guildId, receiver);
             const voiceReceiver = connection.receiver;
+            if (!voiceReceiver) {
+                logger_1.logger.error(`[VoiceListenerService] No voice receiver available for connection`);
+                throw new Error('Voice receiver not available');
+            }
+            if (!voiceReceiver.speaking) {
+                logger_1.logger.error(`[VoiceListenerService] No speaking detector available`);
+                throw new Error('Speaking detector not available');
+            }
             voiceReceiver.speaking.on('start', (userId) => {
                 logger_1.logger.debug(`[VoiceListenerService] 🎤 Speaking START event for user ${userId}`);
                 this.handleSpeakingStart(guildId, userId);
@@ -53,9 +61,14 @@ class VoiceListenerService extends events_1.EventEmitter {
         const receiver = this.receivers.get(guildId);
         if (!receiver)
             return;
-        voiceReceiver.connection.on('stateChange', () => {
-            setTimeout(() => this.refreshUserStreams(guildId), 1000);
-        });
+        if (voiceReceiver.connection) {
+            voiceReceiver.connection.on('stateChange', () => {
+                setTimeout(() => this.refreshUserStreams(guildId), 1000);
+            });
+        }
+        else {
+            logger_1.logger.debug(`[VoiceListenerService] No connection object on voiceReceiver for monitoring state changes`);
+        }
         this.refreshUserStreams(guildId);
     }
     refreshUserStreams(guildId) {
@@ -65,6 +78,10 @@ class VoiceListenerService extends events_1.EventEmitter {
             return;
         }
         const voiceReceiver = receiver.connection.receiver;
+        if (!voiceReceiver) {
+            logger_1.logger.warn(`[VoiceListenerService] No voice receiver available for guild ${guildId}`);
+            return;
+        }
         logger_1.logger.info(`[VoiceListenerService] Refreshing user streams for guild ${guildId}`);
         logger_1.logger.info(`[VoiceListenerService] Channel members: ${receiver.channel.members.size}`);
         receiver.channel.members.forEach((member) => {
