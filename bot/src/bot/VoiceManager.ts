@@ -20,7 +20,8 @@ export class VoiceManager extends EventEmitter {
   private currentTracks: Map<string, Track> = new Map();
   private playbackStrategy: PlaybackStrategyManager;
   private disconnectTimers: Map<string, NodeJS.Timeout> = new Map();
-  private foodTalkTimers: Map<string, NodeJS.Timeout> = new Map();
+  private randomTalkTimers: Map<string, NodeJS.Timeout> = new Map();
+  private randomTalkTriggered: Map<string, boolean> = new Map();
   private voiceChannels: Map<string, VoiceChannel> = new Map();
   private idleTimeoutMs: number;
   private connectionStates: Map<string, string> = new Map();
@@ -114,7 +115,7 @@ export class VoiceManager extends EventEmitter {
         this.currentTracks.delete(guildId);
         this.connectionStates.delete(guildId);
         this.clearDisconnectTimer(guildId);
-        this.clearFoodTalkTimer(guildId);
+        this.clearRandomTalkTimer(guildId);
         
         logger.info(`🧹 [CLEANUP] Completed cleanup for guild ${guildId}`);
         this.logConnectionStatus();
@@ -158,7 +159,7 @@ export class VoiceManager extends EventEmitter {
         logger.info(`⏸️ [PLAYER] Guild ${guildId} state: IDLE ${track ? `(finished: ${track.title})` : ''}`);
         this.emit('finish');
         this.startDisconnectTimer(guildId);
-        this.startFoodTalkTimer(guildId);
+        this.startRandomTalkTimer(guildId);
       });
 
       player.on(AudioPlayerStatus.Buffering, () => {
@@ -170,7 +171,7 @@ export class VoiceManager extends EventEmitter {
         const track = this.currentTracks.get(guildId);
         logger.info(`▶️ [PLAYER] Guild ${guildId} state: PLAYING ${track ? `(track: ${track.title})` : '(TTS/unknown)'}`);
         this.clearDisconnectTimer(guildId);
-        this.clearFoodTalkTimer(guildId);
+        this.clearRandomTalkTimer(guildId);
       });
 
       player.on(AudioPlayerStatus.AutoPaused, () => {
@@ -517,42 +518,46 @@ export class VoiceManager extends EventEmitter {
     }
   }
 
-  private startFoodTalkTimer(guildId: string) {
-    this.clearFoodTalkTimer(guildId);
+  private startRandomTalkTimer(guildId: string) {
+    this.clearRandomTalkTimer(guildId);
     
-    // Only start food talk if there's a chance TTS could work
-    // We'll emit an event that the MusicBot can handle to check TTS status
-    const randomDelay = 60000 + Math.random() * 60000; // 60-120 seconds
+    // Reset the random talk trigger flag for new idle period
+    this.randomTalkTriggered.set(guildId, false);
     
-    logger.info(`🍗 [FOOD_TIMER] Starting food talk timer for guild ${guildId}`);
-    logger.info(`⏰ [FOOD_TIMER] Will talk about food in ${Math.round(randomDelay / 1000)}s if still idle`);
+    // Random delay between 60-240 seconds (1-4 minutes within the 5 minute window)
+    const randomDelay = 60000 + Math.random() * 180000; // 60-240 seconds
+    
+    logger.info(`🎭 [RANDOM_TALK] Starting random talk timer for guild ${guildId}`);
+    logger.info(`⏰ [RANDOM_TALK] Will randomly talk in ${Math.round(randomDelay / 1000)}s if still idle`);
     
     const timer = setTimeout(() => {
-      // Check if still idle (not playing music)
+      // Check if still idle (not playing music) and hasn't talked yet this idle period
       const player = this.players.get(guildId);
       const isIdle = !player || player.state.status === 'idle';
+      const hasTriggered = this.randomTalkTriggered.get(guildId);
       
-      if (isIdle) {
-        logger.info(`🍗 [FOOD_TIMER] Food talk timer expired for guild ${guildId} - emitting food talk event`);
-        this.emit('idleFoodTalk', { guildId });
-        
-        // Schedule next food talk
-        this.startFoodTalkTimer(guildId);
+      if (isIdle && !hasTriggered) {
+        logger.info(`🎭 [RANDOM_TALK] Random talk timer expired for guild ${guildId} - emitting random talk event`);
+        this.randomTalkTriggered.set(guildId, true);
+        this.emit('idleRandomTalk', { guildId });
+      } else if (hasTriggered) {
+        logger.info(`🎭 [RANDOM_TALK] Guild ${guildId} already had random talk this idle period, skipping`);
       } else {
-        logger.info(`🍗 [FOOD_TIMER] Guild ${guildId} no longer idle, skipping food talk`);
+        logger.info(`🎭 [RANDOM_TALK] Guild ${guildId} no longer idle, skipping random talk`);
       }
     }, randomDelay);
     
-    this.foodTalkTimers.set(guildId, timer);
-    logger.info(`✅ [FOOD_TIMER] Food talk timer set for guild ${guildId}`);
+    this.randomTalkTimers.set(guildId, timer);
+    logger.info(`✅ [RANDOM_TALK] Random talk timer set for guild ${guildId}`);
   }
 
-  private clearFoodTalkTimer(guildId: string) {
-    const timer = this.foodTalkTimers.get(guildId);
+  private clearRandomTalkTimer(guildId: string) {
+    const timer = this.randomTalkTimers.get(guildId);
     if (timer) {
-      logger.info(`🛑 [FOOD_TIMER] Clearing food talk timer for guild ${guildId} (activity detected)`);
+      logger.info(`🛑 [RANDOM_TALK] Clearing random talk timer for guild ${guildId} (activity detected)`);
       clearTimeout(timer);
-      this.foodTalkTimers.delete(guildId);
+      this.randomTalkTimers.delete(guildId);
+      this.randomTalkTriggered.delete(guildId);
     }
   }
 
@@ -564,7 +569,8 @@ export class VoiceManager extends EventEmitter {
     const track = this.currentTracks.get(guildId);
     const connectionState = this.connectionStates.get(guildId);
     const hasTimer = this.disconnectTimers.has(guildId);
-    const hasFoodTimer = this.foodTalkTimers.has(guildId);
+    const hasRandomTalkTimer = this.randomTalkTimers.has(guildId);
+    const randomTalkTriggered = this.randomTalkTriggered.get(guildId) || false;
 
     const status = {
       guildId,

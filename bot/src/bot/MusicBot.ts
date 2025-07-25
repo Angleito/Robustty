@@ -378,8 +378,14 @@ export class MusicBot {
   }
 
   private setupFoodTalkHandling(): void {
+    // Keep food talk event for backward compatibility
     this.voiceManager.on('idleFoodTalk', async (data: { guildId: string }) => {
       await this.handleIdleFoodTalk(data.guildId);
+    });
+    
+    // New random talk event handler
+    this.voiceManager.on('idleRandomTalk', async (data: { guildId: string }) => {
+      await this.handleIdleRandomTalk(data.guildId);
     });
   }
 
@@ -416,6 +422,34 @@ export class MusicBot {
       logger.info(`🍗 [FOOD_TALK] Guild ${guildId}: Successfully sent food talk via TTS`);
     } catch (error) {
       logger.error(`🍗 [FOOD_TALK] Guild ${guildId}: Error during food talk:`, error);
+    }
+  }
+
+  private async handleIdleRandomTalk(guildId: string): Promise<void> {
+    try {
+      // Only proceed if TTS is enabled and voice commands are active
+      if (!this.voiceCommandHandler) {
+        logger.info(`🎭 [RANDOM_TALK] Guild ${guildId}: No voice command handler, skipping random talk`);
+        return;
+      }
+
+      const voiceChannel = this.voiceManager.getVoiceChannel(guildId);
+      if (!voiceChannel) {
+        logger.info(`🎭 [RANDOM_TALK] Guild ${guildId}: Not in voice channel, skipping random talk`);
+        return;
+      }
+
+      // Generate random talk (includes food, music, life, thoughts, vibes)
+      const randomTalk = this.kanyeResponseGenerator.generateRandomTalk();
+      logger.info(`🎭 [RANDOM_TALK] Guild ${guildId}: Generated random talk: "${randomTalk}"`);
+
+      // Send through TTS system by calling the private playTTSResponse method
+      // We need to access the private method, so we'll use the same approach as food talk
+      await (this.voiceCommandHandler as any).playTTSResponse(guildId, randomTalk);
+      
+      logger.info(`🎭 [RANDOM_TALK] Guild ${guildId}: Successfully sent random talk via TTS`);
+    } catch (error) {
+      logger.error(`🎭 [RANDOM_TALK] Guild ${guildId}: Error during random talk:`, error);
     }
   }
 

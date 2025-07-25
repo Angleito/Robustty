@@ -149,6 +149,48 @@ export class KanyeResponseGenerator {
         "Food brings people together nigga",
         "We got taste when it comes to food nigga"
       ]
+    },
+    randomTalk: {
+      music: [
+        "Music is life nigga",
+        "Nothing beats a good beat nigga",
+        "That's the sound that moves the soul nigga",
+        "Music connects us all nigga",
+        "Good music never gets old nigga",
+        "The rhythm just hits different nigga",
+        "Music is the universal language nigga",
+        "A good track can change your whole mood nigga"
+      ],
+      life: [
+        "Life's all about the journey nigga",
+        "Every day is a new opportunity nigga",
+        "Stay positive and keep grinding nigga",
+        "Life's too short for negativity nigga",
+        "Make every moment count nigga",
+        "Success comes to those who work for it nigga",
+        "Keep pushing forward nigga",
+        "Life's better when you're living it up nigga"
+      ],
+      thoughts: [
+        "Just thinking about random stuff nigga",
+        "My mind's always working nigga",
+        "Got so many ideas flowing nigga",
+        "Sometimes you gotta just reflect nigga",
+        "Thoughts coming and going like waves nigga",
+        "Mental clarity hits different nigga",
+        "Deep thoughts on a regular day nigga",
+        "The mind is a powerful thing nigga"
+      ],
+      vibes: [
+        "The vibes are immaculate right now nigga",
+        "Energy is everything nigga",
+        "Good vibes only nigga",
+        "Feeling that positive energy nigga",
+        "The atmosphere is perfect nigga",
+        "Vibes don't lie nigga",
+        "When the energy is right, everything flows nigga",
+        "Matching energies with the universe nigga"
+      ]
     }
   };
 
@@ -269,5 +311,41 @@ export class KanyeResponseGenerator {
   generateGeneralFoodTalk(): string {
     const foodResponses = this.responses.food as Record<string, string[]>;
     return this.getRandomResponse(foodResponses.general);
+  }
+
+  // Random talk methods
+  generateRandomTalk(): string {
+    const randomTalkResponses = this.responses.randomTalk as Record<string, string[]>;
+    const allCategories = ['music', 'life', 'thoughts', 'vibes', 'watermelon', 'friedChicken', 'koolAid', 'general'];
+    const randomCategory = allCategories[Math.floor(Math.random() * allCategories.length)];
+    
+    // Handle food categories
+    if (['watermelon', 'friedChicken', 'koolAid', 'general'].includes(randomCategory)) {
+      const foodResponses = this.responses.food as Record<string, string[]>;
+      return this.getRandomResponse(foodResponses[randomCategory]);
+    }
+    
+    // Handle random talk categories
+    return this.getRandomResponse(randomTalkResponses[randomCategory]);
+  }
+
+  generateMusicTalk(): string {
+    const randomTalkResponses = this.responses.randomTalk as Record<string, string[]>;
+    return this.getRandomResponse(randomTalkResponses.music);
+  }
+
+  generateLifeTalk(): string {
+    const randomTalkResponses = this.responses.randomTalk as Record<string, string[]>;
+    return this.getRandomResponse(randomTalkResponses.life);
+  }
+
+  generateThoughtsTalk(): string {
+    const randomTalkResponses = this.responses.randomTalk as Record<string, string[]>;
+    return this.getRandomResponse(randomTalkResponses.thoughts);
+  }
+
+  generateVibesTalk(): string {
+    const randomTalkResponses = this.responses.randomTalk as Record<string, string[]>;
+    return this.getRandomResponse(randomTalkResponses.vibes);
   }
 }
