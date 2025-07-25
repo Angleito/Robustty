@@ -6,7 +6,7 @@ const logger_1 = require("./logger");
 class NekoPoolManager {
     instances = new Map();
     redis;
-    MAX_INSTANCES = 3;
+    MAX_INSTANCES = 1;
     HEALTH_CHECK_INTERVAL = 60000;
     healthCheckTimer;
     constructor(redis) {
