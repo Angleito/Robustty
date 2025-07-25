@@ -14,6 +14,7 @@
   "dependencies": {
     "@discordjs/voice": "^0.17.0",
     "@distube/ytdl-core": "^4.15.0",
+    "@elevenlabs/elevenlabs-js": "^2.7.0",
     "@ricky0123/vad-web": "^0.0.24",
     "bullmq": "^5.13.0",
     "discord-speech-recognition": "^3.4.1",

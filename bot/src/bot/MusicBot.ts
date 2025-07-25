@@ -222,7 +222,8 @@ export class MusicBot {
     logger.info(`[MusicBot.playNext] Called with guildId: ${guildId}, type: ${typeof guildId}`);
     const track = await this.queueManager.getNext();
     if (!track) {
-      await this.voiceManager.leave(guildId);
+      // Don't leave the voice channel here - let the idle timer handle disconnection
+      logger.info(`[MusicBot.playNext] No tracks in queue for guild ${guildId}, staying connected`);
       return;
     }
 
