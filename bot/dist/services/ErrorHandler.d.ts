@@ -10,6 +10,8 @@ export declare class ErrorHandler {
     private queueForRetry;
     private notifyAdminForReauth;
     private handleNekoError;
+    private handleAudioPlayerError;
+    private handleStreamError;
     private logUnknownError;
     private updateMetrics;
     private setupRetryWorker;

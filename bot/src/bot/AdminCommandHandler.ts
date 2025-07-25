@@ -68,22 +68,28 @@ export class AdminCommandHandler {
   }
 
   async handleCommand(interaction: CommandInteraction) {
-    if (!this.isAdmin(interaction)) {
-      await interaction.reply({ 
-        content: 'You do not have permission to use admin commands.',
-        ephemeral: true 
-      });
-      return;
-    }
-
     if (!interaction.isChatInputCommand()) {
       return;
     }
 
     const subcommand = interaction.options.getSubcommand();
 
+    // Allow anyone to use the stats command, but check admin permissions for all others
+    if (subcommand !== 'stats' && !this.isAdmin(interaction)) {
+      if (!interaction.replied && !interaction.deferred) {
+        await interaction.reply({ 
+          content: 'You do not have permission to use admin commands.',
+          ephemeral: true 
+        });
+      }
+      return;
+    }
+
     try {
-      await interaction.deferReply({ ephemeral: true });
+      // Only defer if we haven't replied yet
+      if (!interaction.replied && !interaction.deferred) {
+        await interaction.deferReply({ ephemeral: true });
+      }
 
       switch (subcommand) {
         case 'auth':
@@ -112,7 +118,19 @@ export class AdminCommandHandler {
       }
     } catch (error) {
       logger.error(`Admin command error (${subcommand}):`, error);
-      await interaction.editReply('An error occurred while executing the admin command');
+      
+      try {
+        if (interaction.deferred && !interaction.replied) {
+          await interaction.editReply('An error occurred while executing the admin command');
+        } else if (!interaction.replied) {
+          await interaction.reply({ 
+            content: 'An error occurred while executing the admin command',
+            ephemeral: true 
+          });
+        }
+      } catch (responseError) {
+        logger.error('Failed to send error response:', responseError);
+      }
     }
   }
 

@@ -32,10 +32,25 @@ class VoiceManager extends events_1.EventEmitter {
                 ]);
             }
             catch (error) {
+                logger_1.logger.warn(`Connection to guild ${guildId} permanently lost, cleaning up`);
+                const player = this.players.get(guildId);
+                if (player) {
+                    player.stop(true);
+                    this.players.delete(guildId);
+                }
                 connection.destroy();
                 this.connections.delete(guildId);
                 this.voiceChannels.delete(guildId);
+                this.currentTracks.delete(guildId);
+                this.clearDisconnectTimer(guildId);
             }
+        });
+        connection.on(voice_1.VoiceConnectionStatus.Destroyed, () => {
+            logger_1.logger.info(`Voice connection destroyed for guild ${guildId}`);
+            this.connections.delete(guildId);
+            this.voiceChannels.delete(guildId);
+            this.currentTracks.delete(guildId);
+            this.clearDisconnectTimer(guildId);
         });
         logger_1.logger.info(`[VoiceManager.join] Storing connection for guildId: ${guildId}, type: ${typeof guildId}`);
         this.connections.set(guildId, connection);
@@ -44,12 +59,34 @@ class VoiceManager extends events_1.EventEmitter {
         if (!this.players.has(guildId)) {
             const player = (0, voice_1.createAudioPlayer)();
             player.on(voice_1.AudioPlayerStatus.Idle, () => {
+                logger_1.logger.info(`Player became idle for guild ${guildId}`);
                 this.emit('finish');
                 this.startDisconnectTimer(guildId);
             });
+            player.on(voice_1.AudioPlayerStatus.Buffering, () => {
+                logger_1.logger.info(`Player buffering for guild ${guildId}`);
+            });
+            player.on(voice_1.AudioPlayerStatus.Playing, () => {
+                logger_1.logger.info(`Player started playing for guild ${guildId}`);
+                this.clearDisconnectTimer(guildId);
+            });
+            player.on(voice_1.AudioPlayerStatus.AutoPaused, () => {
+                logger_1.logger.warn(`Player auto-paused for guild ${guildId}`);
+            });
             player.on('error', error => {
                 logger_1.logger.error('Audio player error:', error);
+                const currentTrack = this.currentTracks.get(guildId);
+                if (currentTrack) {
+                    logger_1.logger.warn(`Cleaning up aborted track: ${currentTrack.title}`);
+                    this.currentTracks.delete(guildId);
+                }
+                if (player.state.status !== voice_1.AudioPlayerStatus.Idle) {
+                    player.stop(true);
+                }
                 this.emit('error', error);
+                setTimeout(() => {
+                    this.emit('finish');
+                }, 1000);
             });
             logger_1.logger.info(`[VoiceManager.join] Storing player for guildId: ${guildId}, type: ${typeof guildId}`);
             this.players.set(guildId, player);
@@ -106,10 +143,29 @@ class VoiceManager extends events_1.EventEmitter {
             thumbnail: track.thumbnail,
             channel: ''
         }, channel);
-        const resource = (0, voice_1.createAudioResource)(playbackResult.stream, {
-            inlineVolume: true
+        const timeoutMs = 30000;
+        const timeoutPromise = new Promise((_, reject) => {
+            setTimeout(() => reject(new Error('Stream timeout')), timeoutMs);
         });
-        player.play(resource);
+        try {
+            const resource = (0, voice_1.createAudioResource)(playbackResult.stream, {
+                inlineVolume: true,
+                metadata: {
+                    title: track.title,
+                    guildId: guildId
+                }
+            });
+            resource.playStream.on('error', (error) => {
+                logger_1.logger.error(`Stream error for ${track.title}:`, error);
+                player.stop(true);
+            });
+            player.play(resource);
+        }
+        catch (error) {
+            logger_1.logger.error(`Failed to create audio resource for ${track.title}:`, error);
+            playbackResult.stream.destroy();
+            throw error;
+        }
         logger_1.logger.info(`[VoiceManager.play] Storing current track for guildId: ${guildId}, type: ${typeof guildId}`);
         this.currentTracks.set(guildId, track);
         logger_1.logger.info(`Started playing ${track.title} in guild ${guildId}`);

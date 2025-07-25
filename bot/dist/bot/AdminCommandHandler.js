@@ -45,19 +45,23 @@ class AdminCommandHandler {
         ];
     }
     async handleCommand(interaction) {
-        if (!this.isAdmin(interaction)) {
-            await interaction.reply({
-                content: 'You do not have permission to use admin commands.',
-                ephemeral: true
-            });
-            return;
-        }
         if (!interaction.isChatInputCommand()) {
             return;
         }
         const subcommand = interaction.options.getSubcommand();
+        if (subcommand !== 'stats' && !this.isAdmin(interaction)) {
+            if (!interaction.replied && !interaction.deferred) {
+                await interaction.reply({
+                    content: 'You do not have permission to use admin commands.',
+                    ephemeral: true
+                });
+            }
+            return;
+        }
         try {
-            await interaction.deferReply({ ephemeral: true });
+            if (!interaction.replied && !interaction.deferred) {
+                await interaction.deferReply({ ephemeral: true });
+            }
             switch (subcommand) {
                 case 'auth':
                     await this.handleAuth(interaction);
@@ -81,7 +85,20 @@ class AdminCommandHandler {
         }
         catch (error) {
             logger_1.logger.error(`Admin command error (${subcommand}):`, error);
-            await interaction.editReply('An error occurred while executing the admin command');
+            try {
+                if (interaction.deferred && !interaction.replied) {
+                    await interaction.editReply('An error occurred while executing the admin command');
+                }
+                else if (!interaction.replied) {
+                    await interaction.reply({
+                        content: 'An error occurred while executing the admin command',
+                        ephemeral: true
+                    });
+                }
+            }
+            catch (responseError) {
+                logger_1.logger.error('Failed to send error response:', responseError);
+            }
         }
     }
     isAdmin(interaction) {

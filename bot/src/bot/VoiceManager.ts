@@ -45,10 +45,30 @@ export class VoiceManager extends EventEmitter {
           entersState(connection, VoiceConnectionStatus.Connecting, 5_000)
         ]);
       } catch (error) {
+        logger.warn(`Connection to guild ${guildId} permanently lost, cleaning up`);
+        
+        // Stop and cleanup player before destroying connection
+        const player = this.players.get(guildId);
+        if (player) {
+          player.stop(true);
+          this.players.delete(guildId);
+        }
+        
         connection.destroy();
         this.connections.delete(guildId);
         this.voiceChannels.delete(guildId);
+        this.currentTracks.delete(guildId);
+        this.clearDisconnectTimer(guildId);
       }
+    });
+    
+    // Add additional connection state monitoring
+    connection.on(VoiceConnectionStatus.Destroyed, () => {
+      logger.info(`Voice connection destroyed for guild ${guildId}`);
+      this.connections.delete(guildId);
+      this.voiceChannels.delete(guildId);
+      this.currentTracks.delete(guildId);
+      this.clearDisconnectTimer(guildId);
     });
 
     logger.info(`[VoiceManager.join] Storing connection for guildId: ${guildId}, type: ${typeof guildId}`);
@@ -60,13 +80,45 @@ export class VoiceManager extends EventEmitter {
       const player = createAudioPlayer();
       
       player.on(AudioPlayerStatus.Idle, () => {
+        logger.info(`Player became idle for guild ${guildId}`);
         this.emit('finish');
         this.startDisconnectTimer(guildId);
+      });
+
+      player.on(AudioPlayerStatus.Buffering, () => {
+        logger.info(`Player buffering for guild ${guildId}`);
+      });
+
+      player.on(AudioPlayerStatus.Playing, () => {
+        logger.info(`Player started playing for guild ${guildId}`);
+        this.clearDisconnectTimer(guildId);
+      });
+
+      player.on(AudioPlayerStatus.AutoPaused, () => {
+        logger.warn(`Player auto-paused for guild ${guildId}`);
       });
       
       player.on('error', error => {
         logger.error('Audio player error:', error);
+        
+        // Clean up current track and resources
+        const currentTrack = this.currentTracks.get(guildId);
+        if (currentTrack) {
+          logger.warn(`Cleaning up aborted track: ${currentTrack.title}`);
+          this.currentTracks.delete(guildId);
+        }
+        
+        // Reset player state
+        if (player.state.status !== AudioPlayerStatus.Idle) {
+          player.stop(true); // Force stop
+        }
+        
         this.emit('error', error);
+        
+        // Attempt recovery after short delay
+        setTimeout(() => {
+          this.emit('finish'); // Trigger next track or cleanup
+        }, 1000);
       });
       
       logger.info(`[VoiceManager.join] Storing player for guildId: ${guildId}, type: ${typeof guildId}`);
@@ -140,11 +192,33 @@ export class VoiceManager extends EventEmitter {
       channel
     );
 
-    const resource = createAudioResource(playbackResult.stream, {
-      inlineVolume: true
+    // Add timeout to stream to prevent hanging
+    const timeoutMs = 30000; // 30 seconds
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('Stream timeout')), timeoutMs);
     });
 
-    player.play(resource);
+    try {
+      const resource = createAudioResource(playbackResult.stream, {
+        inlineVolume: true,
+        metadata: {
+          title: track.title,
+          guildId: guildId
+        }
+      });
+
+      // Add resource error handling
+      resource.playStream.on('error', (error) => {
+        logger.error(`Stream error for ${track.title}:`, error);
+        player.stop(true);
+      });
+
+      player.play(resource);
+    } catch (error) {
+      logger.error(`Failed to create audio resource for ${track.title}:`, error);
+      playbackResult.stream.destroy();
+      throw error;
+    }
     logger.info(`[VoiceManager.play] Storing current track for guildId: ${guildId}, type: ${typeof guildId}`);
     this.currentTracks.set(guildId, track);
     logger.info(`Started playing ${track.title} in guild ${guildId}`);

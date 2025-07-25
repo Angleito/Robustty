@@ -28,7 +28,7 @@ export class AudioRouter {
       // Convert Web Stream to Node.js Readable
       const reader = response.body.getReader();
       
-      return new Readable({
+      const stream = new Readable({
         async read() {
           try {
             const { done, value } = await reader.read();
@@ -44,6 +44,24 @@ export class AudioRouter {
           }
         }
       });
+
+      // Add timeout and cleanup handling
+      const timeout = setTimeout(() => {
+        logger.warn(`Audio stream timeout for instance ${instanceId}`);
+        stream.destroy(new Error('Stream timeout'));
+      }, 60000); // 60 second timeout
+
+      stream.on('close', () => {
+        clearTimeout(timeout);
+        reader.releaseLock();
+      });
+
+      stream.on('error', () => {
+        clearTimeout(timeout);
+        reader.releaseLock();
+      });
+
+      return stream;
     } catch (error) {
       logger.error(`Failed to capture audio from instance ${instanceId}:`, error);
       throw error;

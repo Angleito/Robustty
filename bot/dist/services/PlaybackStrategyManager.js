@@ -55,6 +55,11 @@ class PlaybackStrategyManager {
     }
     async attemptPlayback(video, voiceChannel) {
         const failureCount = await this.getFailureCount(video.id);
+        const forceNeko = await this.redis.get(`video:force_neko:${video.id}`);
+        if (forceNeko) {
+            logger_1.logger.info(`Video ${video.id} marked for neko fallback due to previous errors`);
+            return await this.nekoFallback(video);
+        }
         if (failureCount > 2) {
             logger_1.logger.info(`Video ${video.id} has failed ${failureCount} times, using neko fallback`);
             return await this.nekoFallback(video);
@@ -77,34 +82,51 @@ class PlaybackStrategyManager {
         }
     }
     async directStream(url) {
+        let stream = null;
         try {
             if (ytdl_core_1.default.validateURL(url)) {
                 const info = await ytdl_core_1.default.getInfo(url);
                 if (info.videoDetails.isLiveContent) {
-                    return (0, ytdl_core_1.default)(url, {
+                    stream = (0, ytdl_core_1.default)(url, {
                         quality: 'highestaudio',
                         highWaterMark: 1 << 25,
                         dlChunkSize: 0
                     });
                 }
-                return (0, ytdl_core_1.default)(url, {
-                    filter: 'audioonly',
-                    quality: 'highestaudio',
-                    highWaterMark: 1 << 25
+                else {
+                    stream = (0, ytdl_core_1.default)(url, {
+                        filter: 'audioonly',
+                        quality: 'highestaudio',
+                        highWaterMark: 1 << 25
+                    });
+                }
+                stream.on('error', (error) => {
+                    logger_1.logger.error('YTDL stream error:', error);
                 });
+                return stream;
             }
         }
         catch (error) {
             logger_1.logger.warn('ytdl-core failed, trying play-dl:', error);
+            if (stream) {
+                stream.destroy();
+            }
         }
         try {
-            const stream = await playDl.stream(url, {
+            const result = await playDl.stream(url, {
                 discordPlayerCompatibility: true
             });
-            return stream.stream;
+            stream = result.stream;
+            stream.on('error', (error) => {
+                logger_1.logger.error('play-dl stream error:', error);
+            });
+            return stream;
         }
         catch (error) {
             logger_1.logger.error('Both ytdl-core and play-dl failed:', error);
+            if (stream) {
+                stream.destroy();
+            }
             throw error;
         }
     }

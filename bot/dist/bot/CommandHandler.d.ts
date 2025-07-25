@@ -10,6 +10,8 @@ export declare class CommandHandler {
     handleCommand(interaction: CommandInteraction): Promise<void>;
     private showQueue;
     private showNowPlaying;
+    private handleVoiceCommand;
+    private handleNoVoiceCommand;
     private formatDuration;
 }
 //# sourceMappingURL=CommandHandler.d.ts.map
