@@ -35,13 +35,6 @@ class CommandHandler {
                 .setName('nowplaying')
                 .setDescription('Show the currently playing song')
         ];
-        if (this.bot.isVoiceCommandsEnabled()) {
-            baseCommands.push(new discord_js_1.SlashCommandBuilder()
-                .setName('voice')
-                .setDescription('Enable voice commands in this voice channel'), new discord_js_1.SlashCommandBuilder()
-                .setName('novoice')
-                .setDescription('Disable voice commands in this server'));
-        }
         this.commands = [
             ...baseCommands,
             ...this.adminHandler.getCommands()
@@ -91,12 +84,6 @@ class CommandHandler {
                     break;
                 case 'nowplaying':
                     await this.showNowPlaying(interaction);
-                    break;
-                case 'voice':
-                    await this.handleVoiceCommand(interaction);
-                    break;
-                case 'novoice':
-                    await this.handleNoVoiceCommand(interaction);
                     break;
                 case 'admin':
                     await this.adminHandler.handleCommand(interaction);

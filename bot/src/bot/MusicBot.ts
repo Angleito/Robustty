@@ -142,7 +142,14 @@ export class MusicBot {
     
     if (!this.voiceManager.isPlaying(interaction.guildId!)) {
       logger.info(`[MusicBot.playSelectedVideo] Before join - guildId: ${interaction.guildId}, type: ${typeof interaction.guildId}`);
-      await this.voiceManager.join(voiceChannel);
+      const connection = await this.voiceManager.join(voiceChannel);
+      
+      // Automatically start voice listening when we join (if voice commands are enabled)
+      if (this.voiceCommandHandler) {
+        logger.info(`[MusicBot] Starting voice listening automatically`);
+        await this.voiceCommandHandler.startListening(voiceChannel, connection);
+      }
+      
       logger.info(`[MusicBot.playSelectedVideo] Before playNext - guildId: ${interaction.guildId}, type: ${typeof interaction.guildId}`);
       await this.playNext(interaction.guildId!);
     }
@@ -185,7 +192,14 @@ export class MusicBot {
       
       if (!this.voiceManager.isPlaying(guildId)) {
         logger.info(`[MusicBot.playSelectedVideoFromButton] Before join - guildId: ${guildId}`);
-        await this.voiceManager.join(voiceChannel);
+        const connection = await this.voiceManager.join(voiceChannel);
+        
+        // Automatically start voice listening when we join (if voice commands are enabled)
+        if (this.voiceCommandHandler) {
+          logger.info(`[MusicBot] Starting voice listening automatically`);
+          await this.voiceCommandHandler.startListening(voiceChannel, connection);
+        }
+        
         logger.info(`[MusicBot.playSelectedVideoFromButton] Before playNext - guildId: ${guildId}`);
         await this.playNext(guildId);
       }

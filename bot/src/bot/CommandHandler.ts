@@ -44,18 +44,8 @@ export class CommandHandler {
         .setDescription('Show the currently playing song')
     ];
 
-    // Only add voice commands if voice feature is enabled
-    if (this.bot.isVoiceCommandsEnabled()) {
-      baseCommands.push(
-        new SlashCommandBuilder()
-          .setName('voice')
-          .setDescription('Enable voice commands in this voice channel'),
-        
-        new SlashCommandBuilder()
-          .setName('novoice')
-          .setDescription('Disable voice commands in this server')
-      );
-    }
+    // Voice commands are now automatically enabled when TTS is on
+    // No need for manual voice/novoice commands
 
     this.commands = [
       ...baseCommands,
@@ -119,13 +109,7 @@ export class CommandHandler {
           await this.showNowPlaying(interaction);
           break;
           
-        case 'voice':
-          await this.handleVoiceCommand(interaction);
-          break;
-          
-        case 'novoice':
-          await this.handleNoVoiceCommand(interaction);
-          break;
+        // Voice commands are automatically enabled, no manual commands needed
           
         case 'admin':
           await this.adminHandler.handleCommand(interaction);
