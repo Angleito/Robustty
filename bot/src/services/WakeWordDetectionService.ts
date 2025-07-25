@@ -37,22 +37,36 @@ export class WakeWordDetectionService {
   }
 
   private initializeKanyePatterns(): void {
-    // Simplified audio pattern matching for "Kanye" 
-    // These patterns represent approximate audio fingerprints
+    // Enhanced audio pattern matching for "Kanye" with multiple variations
+    // These patterns represent approximate audio fingerprints for different pronunciations
     const kanyePatterns: AudioPattern[] = [
       {
-        // Pattern for "KAN" sound (plosive K + vowel AN)
-        pattern: [0.1, 0.8, 0.9, 0.7, 0.4], 
-        threshold: 0.6,
-        minLength: 100, // ~2ms at 48kHz
-        maxLength: 400  // ~8ms at 48kHz
+        // Pattern for "KAN" sound (strong K plosive + vowel)
+        pattern: [0.2, 0.9, 0.8, 0.6, 0.3], 
+        threshold: 0.4, // Lower threshold for more sensitivity
+        minLength: 50,  // ~1ms at 48kHz
+        maxLength: 600  // ~12ms at 48kHz
       },
       {
-        // Pattern for "YE" sound (consonant Y + vowel E)
-        pattern: [0.3, 0.6, 0.8, 0.5, 0.2],
-        threshold: 0.6,
-        minLength: 150, // ~3ms at 48kHz
-        maxLength: 500  // ~10ms at 48kHz
+        // Pattern for "YE" sound (Y consonant + E vowel)
+        pattern: [0.4, 0.7, 0.9, 0.6, 0.2],
+        threshold: 0.4, // Lower threshold for more sensitivity
+        minLength: 100, // ~2ms at 48kHz
+        maxLength: 800  // ~16ms at 48kHz
+      },
+      {
+        // Alternative "KAN-YE" combined pattern for faster speech
+        pattern: [0.1, 0.6, 0.9, 0.7, 0.8, 0.5, 0.2],
+        threshold: 0.3, // Even lower for combined pattern
+        minLength: 200, // ~4ms at 48kHz
+        maxLength: 1000 // ~20ms at 48kHz
+      },
+      {
+        // Softer pronunciation pattern (less aggressive K)
+        pattern: [0.3, 0.5, 0.7, 0.8, 0.4, 0.6, 0.3],
+        threshold: 0.3,
+        minLength: 150,
+        maxLength: 900
       }
     ];
 
@@ -87,19 +101,19 @@ export class WakeWordDetectionService {
     try {
       // COST OPTIMIZATION: Quick early exits to minimize processing
       
-      // 1. Check minimum audio length (skip very short segments)
-      if (audioBuffer.length < 3200) { // Less than ~67ms at 48kHz stereo
-        const skipReason = `Buffer too short: ${audioBuffer.length} bytes < 3200 bytes (~67ms)`;
+      // 1. Check minimum audio length (more lenient)
+      if (audioBuffer.length < 1600) { // Less than ~33ms at 48kHz stereo (more lenient)
+        const skipReason = `Buffer too short: ${audioBuffer.length} bytes < 1600 bytes (~33ms)`;
         logger.debug(`[WakeWordDetectionService] ⏭️ Early exit: ${skipReason}`);
         return this.createNegativeResult(keyword, startTime);
       }
 
-      // 2. Fast energy check before any processing
+      // 2. Fast energy check before any processing (more lenient)
       const rawAudioLevel = AudioProcessingService.calculateAudioLevel(audioBuffer);
       logger.debug(`[WakeWordDetectionService] 📊 Raw audio level: ${rawAudioLevel.toFixed(4)}`);
       
-      if (rawAudioLevel < 0.03) { // Very quiet audio, likely silence
-        const skipReason = `Audio too quiet: level ${rawAudioLevel.toFixed(4)} < 0.03 threshold`;
+      if (rawAudioLevel < 0.01) { // Much lower threshold for quiet voices
+        const skipReason = `Audio too quiet: level ${rawAudioLevel.toFixed(4)} < 0.01 threshold`;
         logger.debug(`[WakeWordDetectionService] ⏭️ Early exit: ${skipReason} (likely silence)`);
         return this.createNegativeResult(keyword, startTime);
       }
@@ -116,12 +130,12 @@ export class WakeWordDetectionService {
         costOptimized: this.costOptimizationMode
       });
       
-      // 4. Secondary energy check on processed audio
+      // 4. Secondary energy check on processed audio (more lenient)
       const processedAudioLevel = AudioProcessingService.calculateAudioLevel(processedAudio);
       logger.debug(`[WakeWordDetectionService] 📊 Processed audio level: ${processedAudioLevel.toFixed(4)}`);
       
-      if (processedAudioLevel < 0.05) {
-        const skipReason = `Processed audio too quiet: level ${processedAudioLevel.toFixed(4)} < 0.05 threshold`;
+      if (processedAudioLevel < 0.02) { // Much lower threshold
+        const skipReason = `Processed audio too quiet: level ${processedAudioLevel.toFixed(4)} < 0.02 threshold`;
         logger.debug(`[WakeWordDetectionService] ⏭️ Early exit: ${skipReason}`);
         return this.createNegativeResult(keyword, startTime);
       }

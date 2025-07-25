@@ -235,6 +235,13 @@ export class VoiceCommandHandler extends EventEmitter {
     try {
       logger.info(`[VoiceCommandHandler] 💰 Processing command with OpenAI Whisper (this costs money!)`);
       
+      // Check if bot is still in voice channel before making expensive API call
+      const connection = this.voiceConnections.get(segment.guildId);
+      if (!connection) {
+        logger.warn(`[VoiceCommandHandler] ⚠️ Bot not in voice channel for guild ${segment.guildId}, skipping expensive API call`);
+        return;
+      }
+      
       // Log current cost stats before processing
       const costStatsBefore = this.speechRecognition.getCostStats();
       logger.info(`[VoiceCommandHandler] 💰 Current session cost before processing: $${costStatsBefore.estimatedCost.toFixed(4)}`);
