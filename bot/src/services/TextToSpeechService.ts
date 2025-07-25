@@ -47,17 +47,19 @@ export class TextToSpeechService {
     try {
       logger.info(`[TTS] Generating speech for text: "${text}"`);
       
-      const audioStream = await this.client.textToSpeech.stream({
-        voice_id: this.voiceId,
-        model_id: this.modelId,
-        text,
-        voice_settings: {
-          stability: 0.75,
-          similarity_boost: 0.85,
-          style: 0.5,
-          use_speaker_boost: true
+      const audioStream = await this.client.textToSpeech.stream(
+        this.voiceId,
+        {
+          modelId: this.modelId,
+          text,
+          voiceSettings: {
+            stability: 0.75,
+            similarityBoost: 0.85,
+            style: 0.5,
+            useSpeakerBoost: true
+          }
         }
-      });
+      );
 
       // Convert the async generator to a Node.js Readable stream
       const readable = Readable.from(audioStream);

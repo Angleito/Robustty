@@ -1,18 +1,24 @@
 import { VoiceChannel, User } from 'discord.js';
 import { EventEmitter } from 'events';
+import { createAudioResource, StreamType } from '@discordjs/voice';
 import { VoiceCommand, AudioSegment, WakeWordResult, SpeechRecognitionResult } from '../domain/types';
 import { VoiceListenerService } from '../services/VoiceListenerService';
 import { WakeWordDetectionService } from '../services/WakeWordDetectionService';
 import { SpeechRecognitionService } from '../services/SpeechRecognitionService';
 import { AudioProcessingService } from '../services/AudioProcessingService';
+import { TextToSpeechService } from '../services/TextToSpeechService';
+import { KanyeResponseGenerator } from '../services/KanyeResponseGenerator';
 import { logger } from '../services/logger';
 
 export class VoiceCommandHandler extends EventEmitter {
   private voiceListener: VoiceListenerService;
   private wakeWordDetector: WakeWordDetectionService;
   private speechRecognition: SpeechRecognitionService;
+  private textToSpeech: TextToSpeechService;
+  private responseGenerator: KanyeResponseGenerator;
   private processingQueues: Map<string, AudioSegment[]> = new Map();
   private activeProcessing: Map<string, boolean> = new Map();
+  private voiceConnections: Map<string, any> = new Map(); // Store voice connections for TTS
 
   constructor() {
     super();
@@ -20,6 +26,8 @@ export class VoiceCommandHandler extends EventEmitter {
     this.voiceListener = new VoiceListenerService();
     this.wakeWordDetector = new WakeWordDetectionService(0.7); // 70% confidence threshold
     this.speechRecognition = new SpeechRecognitionService();
+    this.textToSpeech = new TextToSpeechService();
+    this.responseGenerator = new KanyeResponseGenerator();
     
     this.setupEventHandlers();
   }
@@ -43,7 +51,11 @@ export class VoiceCommandHandler extends EventEmitter {
   async startListening(voiceChannel: VoiceChannel, connection: any): Promise<void> {
     try {
       await this.voiceListener.startListening(connection, voiceChannel);
+      this.voiceConnections.set(voiceChannel.guild.id, connection);
       logger.info(`[VoiceCommandHandler] Started voice command listening in ${voiceChannel.name}`);
+      
+      // Play greeting if TTS is enabled
+      await this.playTTSResponse(voiceChannel.guild.id, this.responseGenerator.generateGreeting());
     } catch (error) {
       logger.error('[VoiceCommandHandler] Failed to start listening:', error);
       throw error;
@@ -55,6 +67,7 @@ export class VoiceCommandHandler extends EventEmitter {
       await this.voiceListener.stopListening(guildId);
       this.processingQueues.delete(guildId);
       this.activeProcessing.delete(guildId);
+      this.voiceConnections.delete(guildId);
       logger.info(`[VoiceCommandHandler] Stopped voice command listening for guild ${guildId}`);
     } catch (error) {
       logger.error('[VoiceCommandHandler] Failed to stop listening:', error);
@@ -203,10 +216,30 @@ export class VoiceCommandHandler extends EventEmitter {
       if (voiceCommand) {
         logger.info(`[VoiceCommandHandler] ✅ Voice command parsed: ${voiceCommand.command} with parameters: [${voiceCommand.parameters.join(', ')}]`);
         
+        // Play TTS acknowledgment based on command
+        const ttsContext = {
+          command: voiceCommand.command,
+          songTitle: voiceCommand.parameters.join(' ') || undefined
+        };
+        
+        // For play commands, just acknowledge we're searching
+        if (voiceCommand.command === 'play') {
+          await this.playTTSResponse(segment.guildId, this.responseGenerator.generateResponse({ 
+            command: 'play', 
+            songTitle: undefined // Indicate we're searching
+          }));
+        } else {
+          // For other commands, give immediate feedback
+          await this.playTTSResponse(segment.guildId, this.responseGenerator.generateResponse(ttsContext));
+        }
+        
         // Emit voice command for handling by MusicBot
         this.emit('voiceCommand', voiceCommand);
       } else {
         logger.warn(`[VoiceCommandHandler] Could not parse valid command from: "${recognitionResult.text}"`);
+        
+        // Play "unknown command" response
+        await this.playTTSResponse(segment.guildId, this.responseGenerator.generateResponse({ command: 'unknown' }));
       }
 
     } catch (error) {
@@ -403,5 +436,61 @@ export class VoiceCommandHandler extends EventEmitter {
         wakeWordStats
       }
     };
+  }
+
+  // TTS Response Method
+  private async playTTSResponse(guildId: string, text: string): Promise<void> {
+    if (!this.textToSpeech.isEnabled()) {
+      logger.debug('[VoiceCommandHandler] TTS disabled, skipping response');
+      return;
+    }
+
+    const connection = this.voiceConnections.get(guildId);
+    if (!connection) {
+      logger.warn(`[VoiceCommandHandler] No voice connection for guild ${guildId}, cannot play TTS`);
+      return;
+    }
+
+    try {
+      const audioStream = await this.textToSpeech.generateSpeech(text);
+      if (!audioStream) {
+        logger.warn('[VoiceCommandHandler] Failed to generate TTS audio');
+        return;
+      }
+
+      const resource = createAudioResource(audioStream, {
+        inputType: StreamType.Arbitrary,
+        inlineVolume: true
+      });
+
+      // Get the audio player from the connection
+      const player = connection.state.subscription?.player;
+      if (player) {
+        // Store current state
+        const wasPlaying = player.state.status === 'playing';
+        
+        // Play TTS
+        player.play(resource);
+        
+        // Wait for TTS to finish
+        await new Promise((resolve) => {
+          const onIdle = () => {
+            player.off('idle', onIdle);
+            resolve(undefined);
+          };
+          player.on('idle', onIdle);
+        });
+
+        logger.info(`[VoiceCommandHandler] TTS response played: "${text}"`);
+      }
+    } catch (error) {
+      logger.error('[VoiceCommandHandler] Error playing TTS response:', error);
+    }
+  }
+
+  // Public method to trigger TTS responses from outside
+  async speakResponse(guildId: string, context: any): Promise<void> {
+    const response = this.responseGenerator.generateResponse(context);
+    await this.playTTSResponse(guildId, response);
   }
 }

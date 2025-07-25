@@ -186,7 +186,7 @@ class MusicBot {
         logger_1.logger.info(`[MusicBot.playNext] Called with guildId: ${guildId}, type: ${typeof guildId}`);
         const track = await this.queueManager.getNext();
         if (!track) {
-            await this.voiceManager.leave(guildId);
+            logger_1.logger.info(`[MusicBot.playNext] No tracks in queue for guild ${guildId}, staying connected`);
             return;
         }
         try {
@@ -300,6 +300,12 @@ class MusicBot {
             const videos = await this.searchYouTube(query);
             if (videos.length === 0) {
                 logger_1.logger.info(`[MusicBot] No results found for voice query: "${query}"`);
+                if (this.voiceCommandHandler) {
+                    await this.voiceCommandHandler.speakResponse(voiceCommand.guildId, {
+                        command: 'play',
+                        error: 'not found'
+                    });
+                }
                 return;
             }
             const selectedVideo = videos[0];
@@ -320,6 +326,12 @@ class MusicBot {
                 await this.playNext(voiceCommand.guildId);
             }
             logger_1.logger.info(`[MusicBot] Voice command added track: ${track.title}`);
+            if (this.voiceCommandHandler) {
+                await this.voiceCommandHandler.speakResponse(voiceCommand.guildId, {
+                    command: 'play',
+                    songTitle: track.title
+                });
+            }
         }
         catch (error) {
             logger_1.logger.error('[MusicBot] Error handling voice play command:', error);

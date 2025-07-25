@@ -4,8 +4,11 @@ export declare class VoiceCommandHandler extends EventEmitter {
     private voiceListener;
     private wakeWordDetector;
     private speechRecognition;
+    private textToSpeech;
+    private responseGenerator;
     private processingQueues;
     private activeProcessing;
+    private voiceConnections;
     constructor();
     private setupEventHandlers;
     startListening(voiceChannel: VoiceChannel, connection: any): Promise<void>;
@@ -59,5 +62,7 @@ export declare class VoiceCommandHandler extends EventEmitter {
             wakeWordStats: any;
         };
     }>;
+    private playTTSResponse;
+    speakResponse(guildId: string, context: any): Promise<void>;
 }
 //# sourceMappingURL=VoiceCommandHandler.d.ts.map

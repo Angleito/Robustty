@@ -7,7 +7,7 @@ export interface CommandContext {
 }
 
 export class KanyeResponseGenerator {
-  private responses = {
+  private responses: Record<string, Record<string, string[]> | string[]> = {
     play: {
       success: [
         "Ok nigga, playing {song}",
@@ -108,45 +108,52 @@ export class KanyeResponseGenerator {
 
     // Handle errors first
     if (error) {
+      const errorResponses = this.responses.error as Record<string, string[]>;
       if (error.includes('voice channel')) {
-        return this.getRandomResponse(this.responses.error.voiceChannel);
+        return this.getRandomResponse(errorResponses.voiceChannel);
       }
-      return this.getRandomResponse(this.responses.error.general);
+      return this.getRandomResponse(errorResponses.general);
     }
 
     // Handle specific commands
     switch (command) {
       case 'play':
+        const playResponses = this.responses.play as Record<string, string[]>;
         if (!songTitle) {
-          return this.getRandomResponse(this.responses.play.searching);
+          return this.getRandomResponse(playResponses.searching);
         }
-        return this.getRandomResponse(this.responses.play.success)
+        return this.getRandomResponse(playResponses.success)
           .replace('{song}', songTitle);
 
       case 'skip':
-        return this.getRandomResponse(this.responses.skip.success);
+        const skipResponses = this.responses.skip as Record<string, string[]>;
+        return this.getRandomResponse(skipResponses.success);
 
       case 'stop':
-        return this.getRandomResponse(this.responses.stop.success);
+        const stopResponses = this.responses.stop as Record<string, string[]>;
+        return this.getRandomResponse(stopResponses.success);
 
       case 'queue':
-        if (queueLength === 0) {
-          return this.getRandomResponse(this.responses.queue.empty);
+        const queueResponses = this.responses.queue as Record<string, string[]>;
+        if (!queueLength || queueLength === 0) {
+          return this.getRandomResponse(queueResponses.empty);
         }
-        return this.getRandomResponse(this.responses.queue.withTracks)
+        return this.getRandomResponse(queueResponses.withTracks)
           .replace('{count}', queueLength.toString());
 
       case 'pause':
-        return this.getRandomResponse(this.responses.pause.success);
+        const pauseResponses = this.responses.pause as Record<string, string[]>;
+        return this.getRandomResponse(pauseResponses.success);
 
       case 'resume':
-        return this.getRandomResponse(this.responses.resume.success);
+        const resumeResponses = this.responses.resume as Record<string, string[]>;
+        return this.getRandomResponse(resumeResponses.success);
 
       case 'greeting':
-        return this.getRandomResponse(this.responses.greeting);
+        return this.getRandomResponse(this.responses.greeting as string[]);
 
       default:
-        return this.getRandomResponse(this.responses.unknown);
+        return this.getRandomResponse(this.responses.unknown as string[]);
     }
   }
 
@@ -156,7 +163,7 @@ export class KanyeResponseGenerator {
   }
 
   generateGreeting(): string {
-    return this.getRandomResponse(this.responses.greeting);
+    return this.getRandomResponse(this.responses.greeting as string[]);
   }
 
   private getRandomResponse(responses: string[]): string {
@@ -168,9 +175,10 @@ export class KanyeResponseGenerator {
     if (!this.responses[command]) {
       this.responses[command] = {};
     }
-    if (!this.responses[command][category]) {
-      this.responses[command][category] = [];
+    const commandResponses = this.responses[command] as Record<string, string[]>;
+    if (!commandResponses[category]) {
+      commandResponses[category] = [];
     }
-    this.responses[command][category].push(response);
+    commandResponses[category].push(response);
   }
 }

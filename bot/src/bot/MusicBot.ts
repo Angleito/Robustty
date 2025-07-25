@@ -363,6 +363,14 @@ export class MusicBot {
       const videos = await this.searchYouTube(query);
       if (videos.length === 0) {
         logger.info(`[MusicBot] No results found for voice query: "${query}"`);
+        
+        // Send TTS error response
+        if (this.voiceCommandHandler) {
+          await this.voiceCommandHandler.speakResponse(voiceCommand.guildId, {
+            command: 'play',
+            error: 'not found'
+          });
+        }
         return;
       }
 
@@ -389,6 +397,14 @@ export class MusicBot {
       }
 
       logger.info(`[MusicBot] Voice command added track: ${track.title}`);
+      
+      // Send TTS confirmation with song title
+      if (this.voiceCommandHandler) {
+        await this.voiceCommandHandler.speakResponse(voiceCommand.guildId, {
+          command: 'play',
+          songTitle: track.title
+        });
+      }
     } catch (error) {
       logger.error('[MusicBot] Error handling voice play command:', error);
     }
