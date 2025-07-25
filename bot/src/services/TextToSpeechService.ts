@@ -20,32 +20,48 @@ export class TextToSpeechService {
     this.voiceId = config.voiceId ?? process.env.ELEVENLABS_VOICE_ID ?? 'ErXwobaYiN019PkySvjV'; // Default voice
     this.modelId = config.modelId ?? process.env.ELEVENLABS_MODEL_ID ?? 'eleven_monolingual_v1';
 
+    logger.info(`[TTS] Initializing TextToSpeechService - enabled from env: ${process.env.TTS_ENABLED}, enabled: ${this.enabled}`);
+    logger.info(`[TTS] Voice ID: ${this.voiceId}, Model ID: ${this.modelId}`);
+
     if (this.enabled) {
       const apiKey = config.apiKey ?? process.env.ELEVENLABS_API_KEY;
+      logger.info(`[TTS] API key provided: ${!!apiKey}`);
+      
       if (!apiKey) {
-        logger.warn('[TTS] ElevenLabs API key not provided, TTS will be disabled');
+        logger.error('[TTS] ElevenLabs API key not provided, TTS will be disabled');
         this.enabled = false;
       } else {
-        this.client = new ElevenLabsClient({ apiKey });
-        logger.info('[TTS] Text-to-Speech service initialized with ElevenLabs');
+        try {
+          this.client = new ElevenLabsClient({ apiKey });
+          logger.info('[TTS] ✅ Text-to-Speech service initialized successfully with ElevenLabs');
+        } catch (error) {
+          logger.error('[TTS] Failed to initialize ElevenLabs client:', error);
+          this.enabled = false;
+        }
       }
     } else {
-      logger.info('[TTS] Text-to-Speech service disabled');
+      logger.info('[TTS] ⚠️ Text-to-Speech service disabled by configuration');
     }
   }
 
   isEnabled(): boolean {
-    return this.enabled && this.client !== null;
+    const enabled = this.enabled && this.client !== null;
+    logger.debug(`[TTS] isEnabled check - enabled: ${this.enabled}, has client: ${!!this.client}, result: ${enabled}`);
+    return enabled;
   }
 
   async generateSpeech(text: string): Promise<Readable | null> {
+    logger.info(`[TTS] generateSpeech called with text: "${text}"`);
+    
     if (!this.isEnabled() || !this.client) {
-      logger.debug('[TTS] Service disabled or not initialized, skipping TTS generation');
+      logger.error('[TTS] Service disabled or not initialized, skipping TTS generation');
+      logger.error(`[TTS] Debug - isEnabled: ${this.isEnabled()}, client exists: ${!!this.client}`);
       return null;
     }
 
     try {
-      logger.info(`[TTS] Generating speech for text: "${text}"`);
+      logger.info(`[TTS] 🎤 Generating speech using ElevenLabs API...`);
+      logger.info(`[TTS] Request params - voiceId: ${this.voiceId}, modelId: ${this.modelId}`);
       
       const audioStream = await this.client.textToSpeech.stream(
         this.voiceId,
@@ -60,14 +76,25 @@ export class TextToSpeechService {
           }
         }
       );
+      
+      logger.info('[TTS] ElevenLabs API call successful, received audio stream');
 
       // Convert the async generator to a Node.js Readable stream
       const readable = Readable.from(audioStream);
       
-      logger.info('[TTS] Speech generation successful');
+      logger.info('[TTS] ✅ Speech generation successful, returning audio stream');
       return readable;
     } catch (error) {
-      logger.error('[TTS] Failed to generate speech:', error);
+      logger.error('[TTS] ❌ Failed to generate speech:', error);
+      logger.error('[TTS] Error details:', error instanceof Error ? error.stack : 'Unknown error');
+      
+      // Log additional debugging info
+      if (error instanceof Error && error.message.includes('401')) {
+        logger.error('[TTS] Authentication error - check your ElevenLabs API key');
+      } else if (error instanceof Error && error.message.includes('voice')) {
+        logger.error('[TTS] Voice error - check if voice ID is valid');
+      }
+      
       return null;
     }
   }

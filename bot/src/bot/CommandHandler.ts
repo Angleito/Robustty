@@ -194,10 +194,15 @@ export class CommandHandler {
   }
 
   private async handleVoiceCommand(interaction: CommandInteraction): Promise<void> {
+    logger.info(`[CommandHandler] Voice command called by user ${interaction.user.tag}`);
+    
     if (!this.bot.isVoiceCommandsEnabled()) {
+      logger.warn('[CommandHandler] Voice commands are not enabled on this bot');
       await interaction.editReply('Voice commands are not enabled on this bot. Contact the bot administrator to enable this feature.');
       return;
     }
+    
+    logger.info('[CommandHandler] Voice commands are enabled, proceeding...');
 
     if (!interaction.guild) {
       await interaction.editReply('This command can only be used in a server!');
@@ -211,7 +216,9 @@ export class CommandHandler {
     }
 
     try {
+      logger.info(`[CommandHandler] Enabling voice commands in channel: ${member.voice.channel.name}`);
       await this.bot.enableVoiceCommands(member.voice.channel as any);
+      logger.info('[CommandHandler] Voice commands enabled successfully');
       
       const embed = {
         title: '🎤 Voice Commands Enabled',

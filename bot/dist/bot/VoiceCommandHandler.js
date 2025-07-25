@@ -44,7 +44,10 @@ class VoiceCommandHandler extends events_1.EventEmitter {
             await this.voiceListener.startListening(connection, voiceChannel);
             this.voiceConnections.set(voiceChannel.guild.id, connection);
             logger_1.logger.info(`[VoiceCommandHandler] Started voice command listening in ${voiceChannel.name}`);
-            await this.playTTSResponse(voiceChannel.guild.id, this.responseGenerator.generateGreeting());
+            logger_1.logger.info(`[VoiceCommandHandler] TTS enabled: ${this.textToSpeech.isEnabled()}, attempting greeting`);
+            const greeting = this.responseGenerator.generateGreeting();
+            logger_1.logger.info(`[VoiceCommandHandler] Generated greeting: "${greeting}"`);
+            await this.playTTSResponse(voiceChannel.guild.id, greeting);
         }
         catch (error) {
             logger_1.logger.error('[VoiceCommandHandler] Failed to start listening:', error);
@@ -312,27 +315,37 @@ class VoiceCommandHandler extends events_1.EventEmitter {
         };
     }
     async playTTSResponse(guildId, text) {
+        logger_1.logger.info(`[VoiceCommandHandler] playTTSResponse called - guildId: ${guildId}, text: "${text}"`);
         if (!this.textToSpeech.isEnabled()) {
-            logger_1.logger.debug('[VoiceCommandHandler] TTS disabled, skipping response');
+            logger_1.logger.warn('[VoiceCommandHandler] TTS disabled, skipping response');
             return;
         }
+        logger_1.logger.info(`[VoiceCommandHandler] Looking for voice connection in guild ${guildId}`);
+        logger_1.logger.info(`[VoiceCommandHandler] Available connections: ${Array.from(this.voiceConnections.keys()).join(', ')}`);
         const connection = this.voiceConnections.get(guildId);
         if (!connection) {
-            logger_1.logger.warn(`[VoiceCommandHandler] No voice connection for guild ${guildId}, cannot play TTS`);
+            logger_1.logger.error(`[VoiceCommandHandler] No voice connection for guild ${guildId}, cannot play TTS`);
             return;
         }
+        logger_1.logger.info(`[VoiceCommandHandler] Voice connection found for guild ${guildId}`);
         try {
+            logger_1.logger.info('[VoiceCommandHandler] Generating TTS audio stream...');
             const audioStream = await this.textToSpeech.generateSpeech(text);
             if (!audioStream) {
-                logger_1.logger.warn('[VoiceCommandHandler] Failed to generate TTS audio');
+                logger_1.logger.error('[VoiceCommandHandler] Failed to generate TTS audio - audioStream is null');
                 return;
             }
+            logger_1.logger.info('[VoiceCommandHandler] TTS audio stream generated successfully');
             const resource = (0, voice_1.createAudioResource)(audioStream, {
                 inputType: voice_1.StreamType.Arbitrary,
                 inlineVolume: true
             });
+            logger_1.logger.info(`[VoiceCommandHandler] Getting audio player from connection...`);
+            logger_1.logger.info(`[VoiceCommandHandler] Connection state: ${connection.state.status}`);
+            logger_1.logger.info(`[VoiceCommandHandler] Connection has subscription: ${!!connection.state.subscription}`);
             const player = connection.state.subscription?.player;
             if (player) {
+                logger_1.logger.info(`[VoiceCommandHandler] Audio player found, current state: ${player.state.status}`);
                 const wasPlaying = player.state.status === 'playing';
                 player.play(resource);
                 await new Promise((resolve) => {
@@ -342,15 +355,18 @@ class VoiceCommandHandler extends events_1.EventEmitter {
                     };
                     player.on('idle', onIdle);
                 });
-                logger_1.logger.info(`[VoiceCommandHandler] TTS response played: "${text}"`);
+                logger_1.logger.info(`[VoiceCommandHandler] ✅ TTS response played successfully: "${text}"`);
             }
         }
         catch (error) {
-            logger_1.logger.error('[VoiceCommandHandler] Error playing TTS response:', error);
+            logger_1.logger.error('[VoiceCommandHandler] ❌ Error playing TTS response:', error);
+            logger_1.logger.error('[VoiceCommandHandler] Error details:', error instanceof Error ? error.stack : 'Unknown error');
         }
     }
     async speakResponse(guildId, context) {
+        logger_1.logger.info(`[VoiceCommandHandler] speakResponse called - guildId: ${guildId}, context:`, context);
         const response = this.responseGenerator.generateResponse(context);
+        logger_1.logger.info(`[VoiceCommandHandler] Generated response: "${response}"`);
         await this.playTTSResponse(guildId, response);
     }
 }

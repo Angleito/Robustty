@@ -399,11 +399,15 @@ export class MusicBot {
       logger.info(`[MusicBot] Voice command added track: ${track.title}`);
       
       // Send TTS confirmation with song title
+      logger.info(`[MusicBot] Checking if TTS response should be sent...`);
       if (this.voiceCommandHandler) {
+        logger.info(`[MusicBot] VoiceCommandHandler exists, sending TTS response for song: ${track.title}`);
         await this.voiceCommandHandler.speakResponse(voiceCommand.guildId, {
           command: 'play',
           songTitle: track.title
         });
+      } else {
+        logger.warn(`[MusicBot] No VoiceCommandHandler available for TTS response`);
       }
     } catch (error) {
       logger.error('[MusicBot] Error handling voice play command:', error);
