@@ -144,13 +144,18 @@ export class VoiceCommandHandler extends EventEmitter {
   private async captureCommandAudio(wakeWordSegment: AudioSegment): Promise<void> {
     const queueKey = `${wakeWordSegment.guildId}_${wakeWordSegment.userId}`;
     
-    // Set up a temporary listener for the command that follows "Kanye"
-    logger.info(`[VoiceCommandHandler] 👂 Listening for command after wake word...`);
+    // IMMEDIATE ACKNOWLEDGMENT: Play TTS response to acknowledge wake word detection
+    logger.info(`[VoiceCommandHandler] 🎤 Playing acknowledgment for wake word detection...`);
+    const acknowledgment = this.responseGenerator.generateAcknowledgment();
+    await this.playTTSResponse(wakeWordSegment.guildId, acknowledgment);
     
-    // Create a temporary command capture session
+    // Set up a temporary listener for the command that follows "Kanye"
+    logger.info(`[VoiceCommandHandler] 👂 Listening for command after wake word... (12 second timeout)`);
+    
+    // Create a temporary command capture session with 12 second timeout
     const commandCaptureTimeout = setTimeout(() => {
-      logger.warn(`[VoiceCommandHandler] Command capture timeout for user ${wakeWordSegment.userId}`);
-    }, 5000); // 5 second timeout for command
+      logger.warn(`[VoiceCommandHandler] Command capture timeout for user ${wakeWordSegment.userId} (12 seconds elapsed)`);
+    }, 12000); // 12 second timeout for command
 
     // Store the session for command capture
     const sessionKey = `command_capture_${wakeWordSegment.guildId}_${wakeWordSegment.userId}`;
@@ -162,7 +167,7 @@ export class VoiceCommandHandler extends EventEmitter {
     const onNextAudio = async (nextSegment: AudioSegment) => {
       if (nextSegment.userId === wakeWordSegment.userId && 
           nextSegment.guildId === wakeWordSegment.guildId &&
-          Date.now() - commandStartTime < 5000) { // Within 5 seconds
+          Date.now() - commandStartTime < 12000) { // Within 12 seconds
         
         commandAudioBuffer.push(nextSegment.audioData);
         
@@ -198,7 +203,7 @@ export class VoiceCommandHandler extends EventEmitter {
     // Cleanup after timeout
     setTimeout(() => {
       this.voiceListener.removeListener('audioSegment', onNextAudio);
-    }, 6000);
+    }, 13000); // 13 seconds to allow for the 12 second timeout + buffer
   }
 
   private async processCommandWithWhisper(segment: AudioSegment): Promise<void> {

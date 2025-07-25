@@ -113,17 +113,20 @@ class VoiceCommandHandler extends events_1.EventEmitter {
     }
     async captureCommandAudio(wakeWordSegment) {
         const queueKey = `${wakeWordSegment.guildId}_${wakeWordSegment.userId}`;
-        logger_1.logger.info(`[VoiceCommandHandler] 👂 Listening for command after wake word...`);
+        logger_1.logger.info(`[VoiceCommandHandler] 🎤 Playing acknowledgment for wake word detection...`);
+        const acknowledgment = this.responseGenerator.generateAcknowledgment();
+        await this.playTTSResponse(wakeWordSegment.guildId, acknowledgment);
+        logger_1.logger.info(`[VoiceCommandHandler] 👂 Listening for command after wake word... (12 second timeout)`);
         const commandCaptureTimeout = setTimeout(() => {
-            logger_1.logger.warn(`[VoiceCommandHandler] Command capture timeout for user ${wakeWordSegment.userId}`);
-        }, 5000);
+            logger_1.logger.warn(`[VoiceCommandHandler] Command capture timeout for user ${wakeWordSegment.userId} (12 seconds elapsed)`);
+        }, 12000);
         const sessionKey = `command_capture_${wakeWordSegment.guildId}_${wakeWordSegment.userId}`;
         const commandAudioBuffer = [];
         let commandStartTime = Date.now();
         const onNextAudio = async (nextSegment) => {
             if (nextSegment.userId === wakeWordSegment.userId &&
                 nextSegment.guildId === wakeWordSegment.guildId &&
-                Date.now() - commandStartTime < 5000) {
+                Date.now() - commandStartTime < 12000) {
                 commandAudioBuffer.push(nextSegment.audioData);
                 const totalDuration = commandAudioBuffer.reduce((sum, buffer) => sum + (buffer.length / (48000 * 2 * 2)), 0);
                 if (totalDuration >= 1.5) {
@@ -144,7 +147,7 @@ class VoiceCommandHandler extends events_1.EventEmitter {
         this.voiceListener.on('audioSegment', onNextAudio);
         setTimeout(() => {
             this.voiceListener.removeListener('audioSegment', onNextAudio);
-        }, 6000);
+        }, 13000);
     }
     async processCommandWithWhisper(segment) {
         try {

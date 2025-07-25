@@ -95,6 +95,13 @@ export class KanyeResponseGenerator {
       "Speak on it nigga",
       "I'm listening nigga"
     ],
+    acknowledgment: [
+      "Yeah nigga, I'm listening",
+      "What you need nigga",
+      "Talk to me nigga", 
+      "I hear you nigga",
+      "Go ahead nigga"
+    ],
     unknown: [
       "What you saying nigga",
       "Say that again nigga",
@@ -164,6 +171,10 @@ export class KanyeResponseGenerator {
 
   generateGreeting(): string {
     return this.getRandomResponse(this.responses.greeting as string[]);
+  }
+
+  generateAcknowledgment(): string {
+    return this.getRandomResponse(this.responses.acknowledgment as string[]);
   }
 
   private getRandomResponse(responses: string[]): string {

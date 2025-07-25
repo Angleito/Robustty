@@ -10,6 +10,7 @@ export declare class KanyeResponseGenerator {
     generateResponse(context: CommandContext): string;
     generateErrorResponse(error: string): string;
     generateGreeting(): string;
+    generateAcknowledgment(): string;
     private getRandomResponse;
     addCustomResponse(command: string, category: string, response: string): void;
 }
