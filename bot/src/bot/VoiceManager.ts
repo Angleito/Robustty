@@ -131,7 +131,7 @@ export class VoiceManager extends EventEmitter {
       this.currentTracks.delete(guildId);
       this.connectionStates.delete(guildId);
       this.clearDisconnectTimer(guildId);
-      this.clearFoodTalkTimer(guildId);
+      this.clearRandomTalkTimer(guildId);
       this.logConnectionStatus();
     });
 
@@ -222,7 +222,7 @@ export class VoiceManager extends EventEmitter {
     }
 
     this.clearDisconnectTimer(guildId);
-    this.clearFoodTalkTimer(guildId);
+    this.clearRandomTalkTimer(guildId);
     logger.info(`✅ [JOIN] Completed voice channel join for guild ${guildId}`);
     this.logConnectionStatus();
     return connection;
@@ -256,7 +256,7 @@ export class VoiceManager extends EventEmitter {
     this.voiceChannels.delete(guildId);
     this.connectionStates.delete(guildId);
     this.clearDisconnectTimer(guildId);
-    this.clearFoodTalkTimer(guildId);
+    this.clearRandomTalkTimer(guildId);
     
     logger.info(`✅ [LEAVE] Completed disconnect for guild ${guildId} ${channel ? `from ${channel.name}` : ''}`);
     this.logConnectionStatus();
@@ -289,7 +289,7 @@ export class VoiceManager extends EventEmitter {
     logger.info(`🎵 [PLAY] Player state: ${player.state.status}`);
     
     this.clearDisconnectTimer(guildId);
-    this.clearFoodTalkTimer(guildId);
+    this.clearRandomTalkTimer(guildId);
     
     const channel = this.getVoiceChannel(guildId);
     if (!channel) {
@@ -431,7 +431,7 @@ export class VoiceManager extends EventEmitter {
     logger.info(`🎵 [TTS] Player state before TTS: ${player.state.status}`);
     
     this.clearDisconnectTimer(guildId);
-    this.clearFoodTalkTimer(guildId);
+    this.clearRandomTalkTimer(guildId);
 
     try {
       const resource = createAudioResource(stream, {
@@ -594,7 +594,8 @@ export class VoiceManager extends EventEmitter {
         duration: track.duration
       } : null,
       hasDisconnectTimer: hasTimer,
-      hasFoodTalkTimer: hasFoodTimer
+      hasRandomTalkTimer: hasRandomTalkTimer,
+      randomTalkTriggered: randomTalkTriggered
     };
 
     logger.info(`📊 [STATUS] Guild ${guildId} full status:`, JSON.stringify(status, null, 2));
