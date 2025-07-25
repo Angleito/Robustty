@@ -62,4 +62,55 @@ export interface ErrorInfo {
     message: string;
     details?: any;
 }
+export interface VoiceCommand {
+    id: string;
+    userId: string;
+    guildId: string;
+    command: string;
+    parameters: string[];
+    confidence: number;
+    timestamp: number;
+    processingTimeMs: number;
+}
+export interface AudioSegment {
+    id: string;
+    guildId: string;
+    userId: string;
+    audioData: Buffer;
+    duration: number;
+    sampleRate: number;
+    channels: number;
+    timestamp: number;
+    isWakeWordDetected: boolean;
+    wakeWordConfidence?: number;
+}
+export interface VoiceSession {
+    sessionId: string;
+    guildId: string;
+    userId: string;
+    channelId: string;
+    isActive: boolean;
+    startedAt: number;
+    lastActivityAt: number;
+    commandsProcessed: number;
+    currentState: 'idle' | 'listening' | 'processing' | 'responding';
+}
+export interface SpeechRecognitionResult {
+    text: string;
+    confidence: number;
+    isPartial: boolean;
+    language: string;
+    processingTimeMs: number;
+    alternatives?: Array<{
+        text: string;
+        confidence: number;
+    }>;
+}
+export interface WakeWordResult {
+    detected: boolean;
+    confidence: number;
+    keyword: string;
+    startTime: number;
+    endTime: number;
+}
 //# sourceMappingURL=types.d.ts.map

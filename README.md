@@ -11,12 +11,12 @@ A robust Discord music bot featuring YouTube playback, voice commands, advanced 
 - Queue management with pagination and loop modes
 - Real-time playback controls (play/pause/skip/stop/shuffle)
 
-### 🎙️ Voice Commands (NEW)
-- Speech recognition using OpenAI Whisper API
-- Wake word detection ("Kanye") for hands-free control
-- Natural language command parsing
-- Voice session management with timeout protection
-- Audio processing with noise reduction and normalization
+### 🎙️ Voice Commands (COST-OPTIMIZED)
+- **Two-stage processing**: Local wake word detection → Whisper API only when "Kanye" detected
+- **Cost tracking**: Real-time monitoring of OpenAI API usage and costs
+- **Intelligent filtering**: Multiple early-exit conditions to minimize processing
+- **Wake word detection**: Lightweight local pattern matching for "Kanye"
+- **Natural language parsing**: OpenAI Whisper API used only after wake word confirmation
 
 ### 🔍 Enhanced Search & Selection
 - Multi-result search interface with thumbnail previews

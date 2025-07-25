@@ -3,6 +3,7 @@ import { logger } from '../services/logger';
 import { CommandHandler } from './CommandHandler';
 import { ButtonHandler } from './ButtonHandler';
 import { VoiceManager } from './VoiceManager';
+import { VoiceCommandHandler } from './VoiceCommandHandler';
 import { QueueManager } from '../domain/QueueManager';
 import { YouTubeService } from '../services/YouTubeService';
 import { PlaybackStrategyManager } from '../services/PlaybackStrategyManager';
@@ -10,13 +11,14 @@ import { RedisClient } from '../services/RedisClient';
 import { ErrorHandler } from '../services/ErrorHandler';
 import { MonitoringService } from '../services/MonitoringService';
 import { SearchResultHandler } from '../services/SearchResultHandler';
-import { Track, YouTubeVideo } from '../domain/types';
+import { Track, YouTubeVideo, VoiceCommand } from '../domain/types';
 
 export class MusicBot {
   private client: Client;
   private commandHandler: CommandHandler;
   private buttonHandler: ButtonHandler;
   private voiceManager: VoiceManager;
+  private voiceCommandHandler: VoiceCommandHandler;
   private queueManager: QueueManager;
   private youtubeService: YouTubeService;
   private playbackStrategy: PlaybackStrategyManager;
@@ -41,10 +43,13 @@ export class MusicBot {
     this.errorHandler = new ErrorHandler(this.redis);
     this.playbackStrategy = new PlaybackStrategyManager(this.redis);
     this.voiceManager = new VoiceManager(this.playbackStrategy);
+    this.voiceCommandHandler = new VoiceCommandHandler();
     this.searchResultHandler = new SearchResultHandler();
     this.commandHandler = new CommandHandler(this);
     this.buttonHandler = new ButtonHandler(this);
     this.monitoringService = new MonitoringService(this.client, this.redis);
+    
+    this.setupVoiceCommandHandling();
   }
 
   async initialize() {
@@ -265,5 +270,194 @@ export class MusicBot {
 
   getSearchResultHandler() {
     return this.searchResultHandler;
+  }
+
+  getVoiceCommandHandler() {
+    return this.voiceCommandHandler;
+  }
+
+  private setupVoiceCommandHandling(): void {
+    this.voiceCommandHandler.on('voiceCommand', async (voiceCommand: VoiceCommand) => {
+      await this.handleVoiceCommand(voiceCommand);
+    });
+  }
+
+  private async handleVoiceCommand(voiceCommand: VoiceCommand): Promise<void> {
+    try {
+      logger.info(`[MusicBot] Processing voice command: ${voiceCommand.command} from user ${voiceCommand.userId}`);
+
+      const guild = this.client.guilds.cache.get(voiceCommand.guildId);
+      if (!guild) {
+        logger.error(`[MusicBot] Guild ${voiceCommand.guildId} not found`);
+        return;
+      }
+
+      const member = guild.members.cache.get(voiceCommand.userId);
+      if (!member) {
+        logger.error(`[MusicBot] Member ${voiceCommand.userId} not found in guild ${voiceCommand.guildId}`);
+        return;
+      }
+
+      const voiceChannel = member.voice.channel as VoiceChannel;
+      if (!voiceChannel) {
+        logger.warn(`[MusicBot] User ${voiceCommand.userId} not in a voice channel`);
+        return;
+      }
+
+      switch (voiceCommand.command) {
+        case 'play':
+          await this.handleVoicePlayCommand(voiceCommand, voiceChannel);
+          break;
+        
+        case 'skip':
+          await this.handleVoiceSkipCommand(voiceCommand);
+          break;
+        
+        case 'stop':
+          await this.handleVoiceStopCommand(voiceCommand);
+          break;
+        
+        case 'pause':
+          await this.handleVoicePauseCommand(voiceCommand);
+          break;
+        
+        case 'resume':
+          await this.handleVoiceResumeCommand(voiceCommand);
+          break;
+        
+        case 'queue':
+          await this.handleVoiceQueueCommand(voiceCommand);
+          break;
+        
+        default:
+          logger.warn(`[MusicBot] Unknown voice command: ${voiceCommand.command}`);
+      }
+    } catch (error) {
+      logger.error('[MusicBot] Error handling voice command:', error);
+    }
+  }
+
+  private async handleVoicePlayCommand(voiceCommand: VoiceCommand, voiceChannel: VoiceChannel): Promise<void> {
+    const query = voiceCommand.parameters.join(' ');
+    if (!query) {
+      logger.warn('[MusicBot] Voice play command received without query');
+      return;
+    }
+
+    try {
+      const videos = await this.searchYouTube(query);
+      if (videos.length === 0) {
+        logger.info(`[MusicBot] No results found for voice query: "${query}"`);
+        return;
+      }
+
+      // For voice commands, automatically select the first result
+      const selectedVideo = videos[0];
+      const track: Track = {
+        id: selectedVideo.id,
+        title: selectedVideo.title,
+        url: selectedVideo.url,
+        duration: selectedVideo.duration,
+        thumbnail: selectedVideo.thumbnail,
+        requestedBy: voiceCommand.userId
+      };
+
+      await this.addToQueue(track);
+      
+      if (!this.voiceManager.isPlaying(voiceCommand.guildId)) {
+        // Start voice listening when we join the channel
+        const connection = await this.voiceManager.join(voiceChannel);
+        await this.voiceCommandHandler.startListening(voiceChannel, connection);
+        await this.playNext(voiceCommand.guildId);
+      }
+
+      logger.info(`[MusicBot] Voice command added track: ${track.title}`);
+    } catch (error) {
+      logger.error('[MusicBot] Error handling voice play command:', error);
+    }
+  }
+
+  private async handleVoiceSkipCommand(voiceCommand: VoiceCommand): Promise<void> {
+    try {
+      await this.skip(voiceCommand.guildId);
+      logger.info(`[MusicBot] Voice command skipped track in guild ${voiceCommand.guildId}`);
+    } catch (error) {
+      logger.error('[MusicBot] Error handling voice skip command:', error);
+    }
+  }
+
+  private async handleVoiceStopCommand(voiceCommand: VoiceCommand): Promise<void> {
+    try {
+      await this.voiceCommandHandler.stopListening(voiceCommand.guildId);
+      await this.stop(voiceCommand.guildId);
+      logger.info(`[MusicBot] Voice command stopped playback in guild ${voiceCommand.guildId}`);
+    } catch (error) {
+      logger.error('[MusicBot] Error handling voice stop command:', error);
+    }
+  }
+
+  private async handleVoicePauseCommand(voiceCommand: VoiceCommand): Promise<void> {
+    // Note: Current VoiceManager doesn't have pause functionality
+    // This would need to be implemented in VoiceManager
+    logger.info(`[MusicBot] Voice pause command received (not implemented)`);
+  }
+
+  private async handleVoiceResumeCommand(voiceCommand: VoiceCommand): Promise<void> {
+    // Note: Current VoiceManager doesn't have resume functionality
+    // This would need to be implemented in VoiceManager
+    logger.info(`[MusicBot] Voice resume command received (not implemented)`);
+  }
+
+  private async handleVoiceQueueCommand(voiceCommand: VoiceCommand): Promise<void> {
+    // For voice commands, we could potentially announce the queue via TTS
+    // For now, just log it
+    const queue = this.queueManager.getQueue();
+    logger.info(`[MusicBot] Voice queue command - ${queue.length} tracks in queue`);
+  }
+
+  // Method to enable voice commands in a voice channel
+  async enableVoiceCommands(voiceChannel: VoiceChannel): Promise<void> {
+    try {
+      if (!this.voiceManager.isPlaying(voiceChannel.guild.id)) {
+        const connection = await this.voiceManager.join(voiceChannel);
+        await this.voiceCommandHandler.startListening(voiceChannel, connection);
+      }
+      logger.info(`[MusicBot] Voice commands enabled in ${voiceChannel.name}`);
+    } catch (error) {
+      logger.error('[MusicBot] Failed to enable voice commands:', error);
+      throw error;
+    }
+  }
+
+  // Method to disable voice commands in a guild
+  async disableVoiceCommands(guildId: string): Promise<void> {
+    try {
+      await this.voiceCommandHandler.stopListening(guildId);
+      logger.info(`[MusicBot] Voice commands disabled for guild ${guildId}`);
+    } catch (error) {
+      logger.error('[MusicBot] Failed to disable voice commands:', error);
+    }
+  }
+
+  // Check if voice commands are active in a guild
+  isVoiceCommandsActive(guildId: string): boolean {
+    return this.voiceCommandHandler.isListening(guildId);
+  }
+
+  // Cost monitoring methods for voice commands
+  getVoiceCostStats() {
+    return this.voiceCommandHandler.getCostStats();
+  }
+
+  logVoiceCostSummary(): void {
+    this.voiceCommandHandler.logCostSummary();
+  }
+
+  resetVoiceCostTracking(): void {
+    this.voiceCommandHandler.resetCostTracking();
+  }
+
+  async getVoiceHealthCheck() {
+    return this.voiceCommandHandler.healthCheck();
   }
 }

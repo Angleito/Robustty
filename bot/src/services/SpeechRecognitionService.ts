@@ -6,8 +6,14 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 
 export class SpeechRecognitionService {
-  private openai: OpenAI;
+  private openai: OpenAI | null = null;
   private isEnabled: boolean;
+  private costTracker = {
+    totalRequests: 0,
+    totalMinutesProcessed: 0,
+    estimatedCost: 0,
+    lastRequestTime: 0
+  };
 
   constructor() {
     const apiKey = process.env.OPENAI_API_KEY;
@@ -17,19 +23,26 @@ export class SpeechRecognitionService {
       this.openai = new OpenAI({
         apiKey: apiKey
       });
+      logger.info('[SpeechRecognitionService] 💰 OpenAI Whisper API enabled - will track costs');
     } else {
       logger.warn('OpenAI API key not provided. Speech recognition will be disabled.');
     }
   }
 
   async transcribeAudio(audioBuffer: Buffer, language: string = 'en'): Promise<SpeechRecognitionResult> {
-    if (!this.isEnabled) {
+    if (!this.isEnabled || !this.openai) {
       throw new Error('Speech recognition is disabled. OpenAI API key not configured.');
     }
 
     const startTime = Date.now();
     
     try {
+      // COST TRACKING: Calculate audio duration for cost estimation
+      const audioDurationMinutes = audioBuffer.length / (48000 * 2 * 2 * 60); // 48kHz stereo 16-bit
+      const estimatedCost = audioDurationMinutes * 0.006; // $0.006 per minute
+      
+      logger.info(`[SpeechRecognitionService] 🚨 PROCESSING WITH WHISPER API - Duration: ${audioDurationMinutes.toFixed(2)}min, Est. Cost: $${estimatedCost.toFixed(4)}`);
+
       // Create temporary file for audio data
       const tempFilePath = join(tmpdir(), `voice_${Date.now()}.wav`);
       writeFileSync(tempFilePath, audioBuffer);
@@ -48,6 +61,12 @@ export class SpeechRecognitionService {
 
       const processingTime = Date.now() - startTime;
       
+      // Update cost tracking
+      this.costTracker.totalRequests++;
+      this.costTracker.totalMinutesProcessed += audioDurationMinutes;
+      this.costTracker.estimatedCost += estimatedCost;
+      this.costTracker.lastRequestTime = Date.now();
+      
       const result: SpeechRecognitionResult = {
         text: transcription.text,
         confidence: 0.95, // Whisper doesn't provide confidence scores, using high default
@@ -57,12 +76,12 @@ export class SpeechRecognitionService {
         alternatives: [] // Whisper doesn't provide alternatives in this format
       };
 
-      logger.info(`[SpeechRecognitionService] Transcribed "${result.text}" in ${processingTime}ms`);
+      logger.info(`[SpeechRecognitionService] ✅ SUCCESS: "${result.text}" in ${processingTime}ms | Total Cost So Far: $${this.costTracker.estimatedCost.toFixed(4)}`);
       return result;
 
     } catch (error) {
       const processingTime = Date.now() - startTime;
-      logger.error('[SpeechRecognitionService] Transcription failed:', error);
+      logger.error('[SpeechRecognitionService] ❌ TRANSCRIPTION FAILED (cost still incurred):', error);
       
       return {
         text: '',
@@ -137,5 +156,41 @@ export class SpeechRecognitionService {
       command: 'play',
       parameters: [cleanText]
     };
+  }
+
+  // Cost tracking and monitoring methods
+  getCostStats(): {
+    totalRequests: number;
+    totalMinutesProcessed: number;
+    estimatedCost: number;
+    averageCostPerRequest: number;
+    lastRequestTime: number;
+  } {
+    return {
+      ...this.costTracker,
+      averageCostPerRequest: this.costTracker.totalRequests > 0 
+        ? this.costTracker.estimatedCost / this.costTracker.totalRequests 
+        : 0
+    };
+  }
+
+  resetCostTracking(): void {
+    this.costTracker = {
+      totalRequests: 0,
+      totalMinutesProcessed: 0,
+      estimatedCost: 0,
+      lastRequestTime: 0
+    };
+    logger.info('[SpeechRecognitionService] Cost tracking reset');
+  }
+
+  logCostSummary(): void {
+    const stats = this.getCostStats();
+    logger.info(`[SpeechRecognitionService] 💰 COST SUMMARY:
+      - Total Requests: ${stats.totalRequests}
+      - Total Minutes: ${stats.totalMinutesProcessed.toFixed(2)}
+      - Estimated Cost: $${stats.estimatedCost.toFixed(4)}
+      - Avg Cost/Request: $${stats.averageCostPerRequest.toFixed(4)}
+      - Last Request: ${new Date(stats.lastRequestTime).toISOString()}`);
   }
 }
