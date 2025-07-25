@@ -48,14 +48,19 @@ export class MusicBot {
     this.buttonHandler = new ButtonHandler(this);
     this.monitoringService = new MonitoringService(this.client, this.redis);
     
-    // Initialize voice commands only if enabled
-    const voiceEnabled = process.env.ENABLE_VOICE_COMMANDS === 'true';
+    // Initialize voice commands if enabled OR if TTS is enabled (TTS requires voice commands)
+    const voiceExplicitlyEnabled = process.env.ENABLE_VOICE_COMMANDS === 'true';
+    const ttsEnabled = process.env.TTS_ENABLED === 'true';
+    const voiceEnabled = voiceExplicitlyEnabled || ttsEnabled;
+    
     if (voiceEnabled && process.env.OPENAI_API_KEY) {
       this.voiceCommandHandler = new VoiceCommandHandler();
       this.setupVoiceCommandHandling();
-      logger.info('[MusicBot] Voice commands enabled');
+      logger.info('[MusicBot] Voice commands enabled' + (ttsEnabled ? ' (auto-enabled due to TTS)' : ''));
+    } else if (voiceEnabled && !process.env.OPENAI_API_KEY) {
+      logger.warn('[MusicBot] Voice commands requested but OPENAI_API_KEY not provided');
     } else {
-      logger.info('[MusicBot] Voice commands disabled - Set ENABLE_VOICE_COMMANDS=true and provide OPENAI_API_KEY to enable');
+      logger.info('[MusicBot] Voice commands disabled - Set ENABLE_VOICE_COMMANDS=true or TTS_ENABLED=true and provide OPENAI_API_KEY to enable');
     }
   }
 

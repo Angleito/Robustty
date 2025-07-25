@@ -12,12 +12,19 @@ A robust Discord music bot featuring YouTube playback, voice commands, advanced 
 - Real-time playback controls (play/pause/skip/stop/shuffle)
 
 ### 🎙️ Voice Commands (Optional Feature - Disabled by Default)
-- **Opt-in feature**: Set `ENABLE_VOICE_COMMANDS=true` and provide `OPENAI_API_KEY` to enable
+- **Opt-in feature**: Set `ENABLE_VOICE_COMMANDS=true` or `TTS_ENABLED=true` and provide `OPENAI_API_KEY`
 - **Two-stage processing**: Local wake word detection → Whisper API only when "Kanye" detected
 - **Cost tracking**: Real-time monitoring of OpenAI API usage and costs
 - **Intelligent filtering**: Multiple early-exit conditions to minimize processing
 - **Wake word detection**: Lightweight local pattern matching for "Kanye"
 - **Natural language parsing**: OpenAI Whisper API used only after wake word confirmation
+
+### 🔊 Text-to-Speech (TTS) - Optional
+- **ElevenLabs Integration**: High-quality voice synthesis for bot responses
+- **Auto-enables voice commands**: Setting `TTS_ENABLED=true` automatically enables voice commands
+- **Kanye-style responses**: Custom personality responses ("Ok nigga, playing...")
+- **Ultra-low latency**: Uses ElevenLabs Flash v2.5 model for 75ms response time
+- **Context-aware responses**: Different responses for success, errors, and commands
 
 ### 🔍 Enhanced Search & Selection
 - Multi-result search interface with thumbnail previews
@@ -125,9 +132,15 @@ NEKO_PASSWORD=your_neko_password
 
 **Optional Configuration:**
 ```bash
-# Voice Commands (disabled by default)
+# Voice Commands (disabled by default, auto-enabled if TTS is enabled)
 ENABLE_VOICE_COMMANDS=false  # Set to true to enable voice commands
-OPENAI_API_KEY=your_openai_api_key  # Required only if voice commands are enabled
+OPENAI_API_KEY=your_openai_api_key  # Required if voice commands or TTS are enabled
+
+# Text-to-Speech (Optional - will auto-enable voice commands)
+TTS_ENABLED=false  # Set to true for voice responses
+ELEVENLABS_API_KEY=your_elevenlabs_api_key  # Required if TTS is enabled
+ELEVENLABS_VOICE_ID=voice_id_from_library  # Optional, defaults provided
+ELEVENLABS_MODEL_ID=eleven_flash_v2_5  # Optional, uses fastest model
 
 # Admin Configuration (optional)
 ADMIN_ROLE_ID=your_admin_role_id

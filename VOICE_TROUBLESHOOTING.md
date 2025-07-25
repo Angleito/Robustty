@@ -2,18 +2,20 @@
 
 ## Prerequisites Checklist
 
-1. **Environment Variables** - Make sure ALL of these are set in your `.env` file:
+1. **Environment Variables** - Make sure these are set:
    ```bash
-   # Required for voice commands
-   ENABLE_VOICE_COMMANDS=true
-   OPENAI_API_KEY=sk-...  # Your actual OpenAI API key
+   # Voice commands (auto-enabled if TTS is true)
+   ENABLE_VOICE_COMMANDS=true  # Optional if TTS_ENABLED=true
+   OPENAI_API_KEY=sk-...  # Required for voice recognition
    
-   # Required for TTS responses
-   TTS_ENABLED=true
-   ELEVENLABS_API_KEY=...  # Your actual ElevenLabs API key
-   ELEVENLABS_VOICE_ID=...  # Voice ID from ElevenLabs library
-   ELEVENLABS_MODEL_ID=eleven_flash_v2_5  # Or eleven_turbo_v2_5
+   # Text-to-Speech (will auto-enable voice commands)
+   TTS_ENABLED=true  # This alone will enable voice commands too!
+   ELEVENLABS_API_KEY=...  # Required for TTS
+   ELEVENLABS_VOICE_ID=...  # Optional, has defaults
+   ELEVENLABS_MODEL_ID=eleven_flash_v2_5  # Optional, defaults to fastest
    ```
+
+   **Note**: Setting `TTS_ENABLED=true` automatically enables voice commands, so you don't need to set `ENABLE_VOICE_COMMANDS=true` separately.
 
 2. **Docker Services** - All services must be running:
    ```bash
