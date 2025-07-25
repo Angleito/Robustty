@@ -190,6 +190,24 @@ export class KanyeResponseGenerator {
         "Vibes don't lie nigga",
         "When the energy is right, everything flows nigga",
         "Matching energies with the universe nigga"
+      ],
+      culture: [
+        "Black excellence is in everything we do nigga",
+        "Our culture moves the world nigga",
+        "From jazz to hip-hop, we created the soundtrack nigga",
+        "Black creativity knows no bounds nigga",
+        "We been setting trends since day one nigga",
+        "Our resilience is unmatched nigga",
+        "Black culture is global culture nigga",
+        "We turn pain into art, struggles into strength nigga",
+        "The diaspora connects us all nigga",
+        "Black joy is revolutionary nigga",
+        "Our ancestors paved the way for this moment nigga",
+        "Community over everything nigga",
+        "Black pride runs deep in the bloodline nigga",
+        "We built this foundation they standing on nigga",
+        "Cultural impact that can't be replicated nigga",
+        "From the Harlem Renaissance to now, we stay creating nigga"
       ]
     }
   };
@@ -316,7 +334,7 @@ export class KanyeResponseGenerator {
   // Random talk methods
   generateRandomTalk(): string {
     const randomTalkResponses = this.responses.randomTalk as Record<string, string[]>;
-    const allCategories = ['music', 'life', 'thoughts', 'vibes', 'watermelon', 'friedChicken', 'koolAid', 'general'];
+    const allCategories = ['music', 'life', 'thoughts', 'vibes', 'culture', 'watermelon', 'friedChicken', 'koolAid', 'general'];
     const randomCategory = allCategories[Math.floor(Math.random() * allCategories.length)];
     
     // Handle food categories
@@ -347,5 +365,10 @@ export class KanyeResponseGenerator {
   generateVibesTalk(): string {
     const randomTalkResponses = this.responses.randomTalk as Record<string, string[]>;
     return this.getRandomResponse(randomTalkResponses.vibes);
+  }
+
+  generateCultureTalk(): string {
+    const randomTalkResponses = this.responses.randomTalk as Record<string, string[]>;
+    return this.getRandomResponse(randomTalkResponses.culture);
   }
 }
