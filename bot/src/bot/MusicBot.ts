@@ -43,7 +43,7 @@ export class MusicBot {
     this.errorHandler = new ErrorHandler(this.redis);
     this.playbackStrategy = new PlaybackStrategyManager(this.redis);
     this.voiceManager = new VoiceManager(this.playbackStrategy);
-    this.searchResultHandler = new SearchResultHandler();
+    this.searchResultHandler = new SearchResultHandler(this.redis);
     this.commandHandler = new CommandHandler(this);
     this.buttonHandler = new ButtonHandler(this);
     this.monitoringService = new MonitoringService(this.client, this.redis);

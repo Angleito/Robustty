@@ -14,8 +14,8 @@ export class SearchResultHandler {
   private redis: RedisClient;
   private readonly SESSION_TTL = 30; // 30 seconds
 
-  constructor() {
-    this.redis = new RedisClient();
+  constructor(redis: RedisClient) {
+    this.redis = redis;
   }
 
   async createSearchSession(

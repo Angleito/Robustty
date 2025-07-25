@@ -1,9 +1,10 @@
 import { EmbedBuilder, ActionRowBuilder, MessageActionRowComponentBuilder, ButtonInteraction } from 'discord.js';
 import { YouTubeVideo, SearchSession } from '../domain/types';
+import { RedisClient } from './RedisClient';
 export declare class SearchResultHandler {
     private redis;
     private readonly SESSION_TTL;
-    constructor();
+    constructor(redis: RedisClient);
     createSearchSession(userId: string, guildId: string, query: string, results: YouTubeVideo[]): Promise<string>;
     getSearchSession(sessionId: string): Promise<SearchSession | null>;
     deleteSearchSession(sessionId: string): Promise<void>;

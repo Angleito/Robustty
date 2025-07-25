@@ -42,7 +42,7 @@ class MusicBot {
         this.errorHandler = new ErrorHandler_1.ErrorHandler(this.redis);
         this.playbackStrategy = new PlaybackStrategyManager_1.PlaybackStrategyManager(this.redis);
         this.voiceManager = new VoiceManager_1.VoiceManager(this.playbackStrategy);
-        this.searchResultHandler = new SearchResultHandler_1.SearchResultHandler();
+        this.searchResultHandler = new SearchResultHandler_1.SearchResultHandler(this.redis);
         this.commandHandler = new CommandHandler_1.CommandHandler(this);
         this.buttonHandler = new ButtonHandler_1.ButtonHandler(this);
         this.monitoringService = new MonitoringService_1.MonitoringService(this.client, this.redis);

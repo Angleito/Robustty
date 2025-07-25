@@ -2,13 +2,12 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.SearchResultHandler = void 0;
 const discord_js_1 = require("discord.js");
-const RedisClient_1 = require("./RedisClient");
 const logger_1 = require("./logger");
 class SearchResultHandler {
     redis;
     SESSION_TTL = 30;
-    constructor() {
-        this.redis = new RedisClient_1.RedisClient();
+    constructor(redis) {
+        this.redis = redis;
     }
     async createSearchSession(userId, guildId, query, results) {
         const sessionId = `search_${userId}_${Date.now()}`;
