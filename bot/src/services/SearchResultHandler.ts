@@ -90,8 +90,9 @@ export class SearchResultHandler {
   createSelectionButtons(sessionId: string, resultCount: number): ActionRowBuilder<MessageActionRowComponentBuilder> {
     const row = new ActionRowBuilder<MessageActionRowComponentBuilder>();
     
-    const buttonCount = Math.min(resultCount, 5);
-    const numberEmojis = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣'];
+    // Limit to 4 number buttons to leave room for cancel button (Discord max is 5 per row)
+    const buttonCount = Math.min(resultCount, 4);
+    const numberEmojis = ['1️⃣', '2️⃣', '3️⃣', '4️⃣'];
 
     for (let i = 0; i < buttonCount; i++) {
       row.addComponents(

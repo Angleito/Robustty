@@ -19,7 +19,7 @@ class MusicBot {
     commandHandler;
     buttonHandler;
     voiceManager;
-    voiceCommandHandler;
+    voiceCommandHandler = null;
     queueManager;
     youtubeService;
     playbackStrategy;
@@ -42,12 +42,19 @@ class MusicBot {
         this.errorHandler = new ErrorHandler_1.ErrorHandler(this.redis);
         this.playbackStrategy = new PlaybackStrategyManager_1.PlaybackStrategyManager(this.redis);
         this.voiceManager = new VoiceManager_1.VoiceManager(this.playbackStrategy);
-        this.voiceCommandHandler = new VoiceCommandHandler_1.VoiceCommandHandler();
         this.searchResultHandler = new SearchResultHandler_1.SearchResultHandler();
         this.commandHandler = new CommandHandler_1.CommandHandler(this);
         this.buttonHandler = new ButtonHandler_1.ButtonHandler(this);
         this.monitoringService = new MonitoringService_1.MonitoringService(this.client, this.redis);
-        this.setupVoiceCommandHandling();
+        const voiceEnabled = process.env.ENABLE_VOICE_COMMANDS === 'true';
+        if (voiceEnabled && process.env.OPENAI_API_KEY) {
+            this.voiceCommandHandler = new VoiceCommandHandler_1.VoiceCommandHandler();
+            this.setupVoiceCommandHandling();
+            logger_1.logger.info('[MusicBot] Voice commands enabled');
+        }
+        else {
+            logger_1.logger.info('[MusicBot] Voice commands disabled - Set ENABLE_VOICE_COMMANDS=true and provide OPENAI_API_KEY to enable');
+        }
     }
     async initialize() {
         await this.redis.connect();
@@ -81,9 +88,10 @@ class MusicBot {
             await interaction.editReply('No results found for your search!');
             return;
         }
-        const sessionId = await this.searchResultHandler.createSearchSession(interaction.user.id, interaction.guildId, query, videos);
-        const embed = this.searchResultHandler.createSearchEmbed(query, videos);
-        const buttons = this.searchResultHandler.createSelectionButtons(sessionId, videos.length);
+        const displayVideos = videos.slice(0, 4);
+        const sessionId = await this.searchResultHandler.createSearchSession(interaction.user.id, interaction.guildId, query, displayVideos);
+        const embed = this.searchResultHandler.createSearchEmbed(query, displayVideos);
+        const buttons = this.searchResultHandler.createSelectionButtons(sessionId, displayVideos.length);
         await interaction.editReply({
             embeds: [embed],
             components: [buttons]
@@ -227,7 +235,12 @@ class MusicBot {
     getVoiceCommandHandler() {
         return this.voiceCommandHandler;
     }
+    isVoiceCommandsEnabled() {
+        return this.voiceCommandHandler !== null;
+    }
     setupVoiceCommandHandling() {
+        if (!this.voiceCommandHandler)
+            return;
         this.voiceCommandHandler.on('voiceCommand', async (voiceCommand) => {
             await this.handleVoiceCommand(voiceCommand);
         });
@@ -301,7 +314,9 @@ class MusicBot {
             await this.addToQueue(track);
             if (!this.voiceManager.isPlaying(voiceCommand.guildId)) {
                 const connection = await this.voiceManager.join(voiceChannel);
-                await this.voiceCommandHandler.startListening(voiceChannel, connection);
+                if (this.voiceCommandHandler) {
+                    await this.voiceCommandHandler.startListening(voiceChannel, connection);
+                }
                 await this.playNext(voiceCommand.guildId);
             }
             logger_1.logger.info(`[MusicBot] Voice command added track: ${track.title}`);
@@ -321,7 +336,9 @@ class MusicBot {
     }
     async handleVoiceStopCommand(voiceCommand) {
         try {
-            await this.voiceCommandHandler.stopListening(voiceCommand.guildId);
+            if (this.voiceCommandHandler) {
+                await this.voiceCommandHandler.stopListening(voiceCommand.guildId);
+            }
             await this.stop(voiceCommand.guildId);
             logger_1.logger.info(`[MusicBot] Voice command stopped playback in guild ${voiceCommand.guildId}`);
         }
@@ -340,6 +357,9 @@ class MusicBot {
         logger_1.logger.info(`[MusicBot] Voice queue command - ${queue.length} tracks in queue`);
     }
     async enableVoiceCommands(voiceChannel) {
+        if (!this.voiceCommandHandler) {
+            throw new Error('Voice commands are not enabled. Set ENABLE_VOICE_COMMANDS=true and provide OPENAI_API_KEY.');
+        }
         try {
             if (!this.voiceManager.isPlaying(voiceChannel.guild.id)) {
                 const connection = await this.voiceManager.join(voiceChannel);
@@ -353,6 +373,10 @@ class MusicBot {
         }
     }
     async disableVoiceCommands(guildId) {
+        if (!this.voiceCommandHandler) {
+            logger_1.logger.warn('[MusicBot] Voice commands are not enabled, nothing to disable');
+            return;
+        }
         try {
             await this.voiceCommandHandler.stopListening(guildId);
             logger_1.logger.info(`[MusicBot] Voice commands disabled for guild ${guildId}`);
@@ -362,18 +386,48 @@ class MusicBot {
         }
     }
     isVoiceCommandsActive(guildId) {
+        if (!this.voiceCommandHandler)
+            return false;
         return this.voiceCommandHandler.isListening(guildId);
     }
     getVoiceCostStats() {
+        if (!this.voiceCommandHandler) {
+            return {
+                totalRequests: 0,
+                totalMinutesProcessed: 0,
+                estimatedCost: 0,
+                averageCostPerRequest: 0,
+                lastRequestTime: 0
+            };
+        }
         return this.voiceCommandHandler.getCostStats();
     }
     logVoiceCostSummary() {
+        if (!this.voiceCommandHandler) {
+            logger_1.logger.info('[MusicBot] Voice commands not enabled - no costs to report');
+            return;
+        }
         this.voiceCommandHandler.logCostSummary();
     }
     resetVoiceCostTracking() {
+        if (!this.voiceCommandHandler)
+            return;
         this.voiceCommandHandler.resetCostTracking();
     }
     async getVoiceHealthCheck() {
+        if (!this.voiceCommandHandler) {
+            return {
+                status: 'disabled',
+                message: 'Voice commands not enabled',
+                services: {
+                    voiceListener: false,
+                    wakeWordDetection: false,
+                    speechRecognition: false
+                },
+                stats: {},
+                costOptimization: {}
+            };
+        }
         return this.voiceCommandHandler.healthCheck();
     }
 }

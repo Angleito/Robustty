@@ -14,7 +14,7 @@ class CommandHandler {
         this.buildCommands();
     }
     buildCommands() {
-        this.commands = [
+        const baseCommands = [
             new discord_js_1.SlashCommandBuilder()
                 .setName('play')
                 .setDescription('Play a song')
@@ -33,13 +33,17 @@ class CommandHandler {
                 .setDescription('Show the current queue'),
             new discord_js_1.SlashCommandBuilder()
                 .setName('nowplaying')
-                .setDescription('Show the currently playing song'),
-            new discord_js_1.SlashCommandBuilder()
+                .setDescription('Show the currently playing song')
+        ];
+        if (this.bot.isVoiceCommandsEnabled()) {
+            baseCommands.push(new discord_js_1.SlashCommandBuilder()
                 .setName('voice')
-                .setDescription('Enable voice commands in this voice channel'),
-            new discord_js_1.SlashCommandBuilder()
+                .setDescription('Enable voice commands in this voice channel'), new discord_js_1.SlashCommandBuilder()
                 .setName('novoice')
-                .setDescription('Disable voice commands in this server'),
+                .setDescription('Disable voice commands in this server'));
+        }
+        this.commands = [
+            ...baseCommands,
             ...this.adminHandler.getCommands()
         ];
     }
@@ -148,6 +152,10 @@ class CommandHandler {
         });
     }
     async handleVoiceCommand(interaction) {
+        if (!this.bot.isVoiceCommandsEnabled()) {
+            await interaction.editReply('Voice commands are not enabled on this bot. Contact the bot administrator to enable this feature.');
+            return;
+        }
         if (!interaction.guild) {
             await interaction.editReply('This command can only be used in a server!');
             return;
@@ -187,6 +195,10 @@ class CommandHandler {
         }
     }
     async handleNoVoiceCommand(interaction) {
+        if (!this.bot.isVoiceCommandsEnabled()) {
+            await interaction.editReply('Voice commands are not enabled on this bot.');
+            return;
+        }
         if (!interaction.guildId) {
             await interaction.editReply('This command can only be used in a server!');
             return;

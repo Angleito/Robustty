@@ -63,8 +63,8 @@ class SearchResultHandler {
     }
     createSelectionButtons(sessionId, resultCount) {
         const row = new discord_js_1.ActionRowBuilder();
-        const buttonCount = Math.min(resultCount, 5);
-        const numberEmojis = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣'];
+        const buttonCount = Math.min(resultCount, 4);
+        const numberEmojis = ['1️⃣', '2️⃣', '3️⃣', '4️⃣'];
         for (let i = 0; i < buttonCount; i++) {
             row.addComponents(new discord_js_1.ButtonBuilder()
                 .setCustomId(`search_select_${sessionId}_${i}`)

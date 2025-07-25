@@ -97,16 +97,17 @@ export class MusicBot {
       return;
     }
 
-    // Create search session and show selection interface
+    // Create search session and show selection interface (limit to 4 results for button constraints)
+    const displayVideos = videos.slice(0, 4);
     const sessionId = await this.searchResultHandler.createSearchSession(
       interaction.user.id,
       interaction.guildId!,
       query,
-      videos
+      displayVideos
     );
 
-    const embed = this.searchResultHandler.createSearchEmbed(query, videos);
-    const buttons = this.searchResultHandler.createSelectionButtons(sessionId, videos.length);
+    const embed = this.searchResultHandler.createSearchEmbed(query, displayVideos);
+    const buttons = this.searchResultHandler.createSelectionButtons(sessionId, displayVideos.length);
 
     await interaction.editReply({
       embeds: [embed],

@@ -43,7 +43,8 @@ export declare class MusicBot {
     getMonitoringService(): MonitoringService;
     getErrorHandler(): ErrorHandler;
     getSearchResultHandler(): SearchResultHandler;
-    getVoiceCommandHandler(): VoiceCommandHandler;
+    getVoiceCommandHandler(): VoiceCommandHandler | null;
+    isVoiceCommandsEnabled(): boolean;
     private setupVoiceCommandHandling;
     private handleVoiceCommand;
     private handleVoicePlayCommand;
@@ -77,6 +78,16 @@ export declare class MusicBot {
             costTracking: any;
             wakeWordStats: any;
         };
+    } | {
+        status: string;
+        message: string;
+        services: {
+            voiceListener: boolean;
+            wakeWordDetection: boolean;
+            speechRecognition: boolean;
+        };
+        stats: {};
+        costOptimization: {};
     }>;
 }
 //# sourceMappingURL=MusicBot.d.ts.map
