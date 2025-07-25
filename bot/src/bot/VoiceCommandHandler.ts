@@ -24,7 +24,7 @@ export class VoiceCommandHandler extends EventEmitter {
     super();
     
     this.voiceListener = new VoiceListenerService();
-    this.wakeWordDetector = new WakeWordDetectionService(0.7); // 70% confidence threshold
+    this.wakeWordDetector = new WakeWordDetectionService(0.25); // 25% confidence threshold
     this.speechRecognition = new SpeechRecognitionService();
     this.textToSpeech = new TextToSpeechService();
     this.responseGenerator = new KanyeResponseGenerator();
