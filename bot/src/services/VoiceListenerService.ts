@@ -241,8 +241,8 @@ export class VoiceListenerService extends EventEmitter {
       // Clear the buffer
       receiver.audioBuffer.set(userId, []);
 
-      // Skip if audio is too short (likely noise)
-      if (combinedAudio.length < 1600) { // ~33ms at 48kHz stereo 16-bit
+      // Skip if audio is too short (likely noise) - very lenient for wake word detection
+      if (combinedAudio.length < 400) { // ~8ms at 48kHz stereo 16-bit
         logger.debug(`[VoiceListenerService] Audio too short (${combinedAudio.length} bytes), skipping`);
         return;
       }
@@ -264,6 +264,7 @@ export class VoiceListenerService extends EventEmitter {
       logger.info(`[VoiceListenerService] Segment details - Duration: ${audioSegment.duration.toFixed(2)}s, Sample rate: ${audioSegment.sampleRate}Hz, Channels: ${audioSegment.channels}`);
       
       // Emit audio segment for processing
+      logger.info(`[VoiceListenerService] 📤 About to emit audioSegment event for processing`);
       this.emit('audioSegment', audioSegment);
       logger.info(`[VoiceListenerService] ✅ Emitted audio segment for processing`);
 

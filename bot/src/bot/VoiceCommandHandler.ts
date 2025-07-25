@@ -78,6 +78,8 @@ export class VoiceCommandHandler extends EventEmitter {
   }
 
   private async handleAudioSegment(segment: AudioSegment): Promise<void> {
+    logger.info(`[VoiceCommandHandler] 📥 Received audio segment: ${segment.id}, size: ${segment.audioData.length} bytes`);
+    
     const queueKey = `${segment.guildId}_${segment.userId}`;
     
     // Add segment to processing queue
