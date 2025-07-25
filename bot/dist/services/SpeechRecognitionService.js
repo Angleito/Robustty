@@ -12,6 +12,13 @@ const os_1 = require("os");
 class SpeechRecognitionService {
     openai = null;
     isEnabled;
+    costSummaryInterval = null;
+    costAlertThresholds = {
+        daily: 10.00,
+        hourly: 1.00,
+        total: 50.00
+    };
+    lastAlertTime = 0;
     costTracker = {
         totalRequests: 0,
         totalMinutesProcessed: 0,
@@ -32,6 +39,12 @@ class SpeechRecognitionService {
             logger_1.logger.info('[SpeechRecognitionService] 💰 OpenAI Whisper API enabled - will track costs');
             logger_1.logger.info(`[SpeechRecognitionService] Session started at ${new Date().toISOString()}`);
             logger_1.logger.info(`[SpeechRecognitionService] Whisper API pricing: $0.006/minute`);
+            this.costSummaryInterval = setInterval(() => {
+                if (this.costTracker.totalRequests > 0) {
+                    logger_1.logger.info('[SpeechRecognitionService] 📊 === PERIODIC COST REPORT ===');
+                    this.logCostSummary();
+                }
+            }, 30 * 60 * 1000);
         }
         else {
             logger_1.logger.warn('[SpeechRecognitionService] ⚠️ OpenAI API key not provided. Speech recognition will be disabled.');
@@ -95,6 +108,7 @@ class SpeechRecognitionService {
             logger_1.logger.info(`[SpeechRecognitionService] ✅ Processing time: ${processingTime}ms (API: ${apiResponseTime}ms)`);
             logger_1.logger.info(`[SpeechRecognitionService] ✅ Cost: $${estimatedCost.toFixed(4)}`);
             logger_1.logger.info(`[SpeechRecognitionService] 💰 Running total: $${this.costTracker.estimatedCost.toFixed(4)} (${this.costTracker.totalRequests} requests)`);
+            this.checkCostAlerts();
             return result;
         }
         catch (error) {
@@ -243,6 +257,48 @@ class SpeechRecognitionService {
             logger_1.logger.info(`[SpeechRecognitionService] 💰 Projected Monthly Cost (30d): $${(costPerHour * 24 * 30).toFixed(2)}`);
         }
         logger_1.logger.info('[SpeechRecognitionService] 💰 ================================');
+    }
+    cleanup() {
+        if (this.costSummaryInterval) {
+            clearInterval(this.costSummaryInterval);
+            this.costSummaryInterval = null;
+            logger_1.logger.info('[SpeechRecognitionService] 🧹 Cleaned up periodic cost reporting');
+        }
+        if (this.costTracker.totalRequests > 0) {
+            logger_1.logger.info('[SpeechRecognitionService] 📊 === FINAL COST REPORT (Service Shutdown) ===');
+            this.logCostSummary();
+        }
+    }
+    checkCostAlerts() {
+        const now = Date.now();
+        const timeSinceLastAlert = now - this.lastAlertTime;
+        if (timeSinceLastAlert < 60 * 60 * 1000) {
+            return;
+        }
+        const stats = this.getCostStats();
+        if (stats.estimatedCost >= this.costAlertThresholds.total) {
+            logger_1.logger.warn(`[SpeechRecognitionService] 🚨 COST ALERT: Total cost ($${stats.estimatedCost.toFixed(2)}) exceeds threshold ($${this.costAlertThresholds.total})!`);
+            this.lastAlertTime = now;
+            return;
+        }
+        if (stats.sessionDurationMinutes > 60) {
+            const costPerHour = (stats.estimatedCost / stats.sessionDurationMinutes) * 60;
+            if (costPerHour >= this.costAlertThresholds.hourly) {
+                logger_1.logger.warn(`[SpeechRecognitionService] 🚨 COST ALERT: Hourly rate ($${costPerHour.toFixed(2)}/hour) exceeds threshold ($${this.costAlertThresholds.hourly}/hour)!`);
+                this.lastAlertTime = now;
+                return;
+            }
+        }
+        if (stats.sessionDurationMinutes > 30 && stats.totalRequests > 0) {
+            const requestsPerHour = (stats.totalRequests / stats.sessionDurationMinutes) * 60;
+            const costPerHour = (stats.estimatedCost / stats.sessionDurationMinutes) * 60;
+            const projectedDailyCost = costPerHour * 24;
+            if (projectedDailyCost >= this.costAlertThresholds.daily) {
+                logger_1.logger.warn(`[SpeechRecognitionService] 🚨 COST ALERT: Projected daily cost ($${projectedDailyCost.toFixed(2)}) exceeds threshold ($${this.costAlertThresholds.daily})!`);
+                logger_1.logger.warn(`[SpeechRecognitionService] 🚨 Current rate: ${requestsPerHour.toFixed(1)} requests/hour`);
+                this.lastAlertTime = now;
+            }
+        }
     }
 }
 exports.SpeechRecognitionService = SpeechRecognitionService;

@@ -2,6 +2,9 @@ import { SpeechRecognitionResult } from '../domain/types';
 export declare class SpeechRecognitionService {
     private openai;
     private isEnabled;
+    private costSummaryInterval;
+    private costAlertThresholds;
+    private lastAlertTime;
     private costTracker;
     constructor();
     transcribeAudio(audioBuffer: Buffer, language?: string): Promise<SpeechRecognitionResult>;
@@ -25,5 +28,7 @@ export declare class SpeechRecognitionService {
     };
     resetCostTracking(): void;
     logCostSummary(): void;
+    cleanup(): void;
+    private checkCostAlerts;
 }
 //# sourceMappingURL=SpeechRecognitionService.d.ts.map

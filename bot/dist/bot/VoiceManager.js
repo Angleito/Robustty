@@ -245,8 +245,8 @@ class VoiceManager extends events_1.EventEmitter {
                 logger_1.logger.error(`🚨 [STREAM ERROR] Track "${track.title}" in guild ${guildId}:`, error);
                 logger_1.logger.error(`Stream error details: ${JSON.stringify({
                     message: error.message,
-                    code: error.code,
-                    syscall: error.syscall
+                    code: error.code || 'unknown',
+                    syscall: error.syscall || 'unknown'
                 })}`);
                 player.stop(true);
             });
@@ -260,8 +260,8 @@ class VoiceManager extends events_1.EventEmitter {
         catch (error) {
             logger_1.logger.error(`❌ [PLAY] Failed to create audio resource for "${track.title}":`, error);
             logger_1.logger.error(`Resource creation error details: ${JSON.stringify({
-                message: error.message,
-                stack: error.stack
+                message: error instanceof Error ? error.message : String(error),
+                stack: error instanceof Error ? error.stack : undefined
             })}`);
             try {
                 playbackResult.stream.destroy();
@@ -274,42 +274,177 @@ class VoiceManager extends events_1.EventEmitter {
         }
     }
     skip(guildId) {
-        logger_1.logger.info(`[VoiceManager.skip] Called with guildId: ${guildId}, type: ${typeof guildId}`);
+        logger_1.logger.info(`⏭️ [SKIP] Skipping track for guild ${guildId}`);
         const player = this.players.get(guildId);
+        const track = this.currentTracks.get(guildId);
         if (player) {
+            logger_1.logger.info(`🛑 [SKIP] Stopping player for guild ${guildId} ${track ? `(current: ${track.title})` : ''}`);
             player.stop();
+            logger_1.logger.info(`✅ [SKIP] Player stopped successfully`);
+        }
+        else {
+            logger_1.logger.warn(`⚠️ [SKIP] No player found for guild ${guildId}`);
         }
     }
     stop() {
-        this.players.forEach(player => player.stop());
-        this.connections.forEach((connection, guildId) => this.leave(guildId));
+        logger_1.logger.info(`🛑 [STOP] Stopping all voice connections (${this.connections.size} active)`);
+        this.players.forEach((player, guildId) => {
+            logger_1.logger.info(`🛑 [STOP] Stopping player for guild ${guildId}`);
+            player.stop();
+        });
+        this.connections.forEach((connection, guildId) => {
+            logger_1.logger.info(`👋 [STOP] Leaving voice channel for guild ${guildId}`);
+            this.leave(guildId);
+        });
+        logger_1.logger.info(`✅ [STOP] All voice connections stopped`);
     }
     isPlaying(guildId) {
-        logger_1.logger.info(`[VoiceManager.isPlaying] Called with guildId: ${guildId}, type: ${typeof guildId}`);
         const player = this.players.get(guildId);
-        return player?.state.status === voice_1.AudioPlayerStatus.Playing;
+        const isPlaying = player?.state.status === voice_1.AudioPlayerStatus.Playing;
+        const track = this.currentTracks.get(guildId);
+        logger_1.logger.info(`🎵 [IS_PLAYING] Guild ${guildId}: ${isPlaying ? 'YES' : 'NO'} ${track ? `(track: ${track.title})` : ''}`);
+        return isPlaying;
+    }
+    async playTTS(stream, guildId, text) {
+        logger_1.logger.info(`🗣️ [TTS] Starting TTS playback for guild ${guildId}`);
+        logger_1.logger.info(`💬 [TTS] Text preview: "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}"`);
+        this.logConnectionStatus();
+        const connection = this.connections.get(guildId);
+        if (!connection) {
+            logger_1.logger.error(`❌ [TTS] No connection found for guild ${guildId}`);
+            throw new Error('Not connected to any voice channel');
+        }
+        const connectionState = this.connectionStates.get(guildId);
+        logger_1.logger.info(`📡 [TTS] Connection state: ${connectionState || 'unknown'}`);
+        const player = this.players.get(guildId);
+        if (!player) {
+            logger_1.logger.error(`❌ [TTS] No player found for guild ${guildId}`);
+            throw new Error('No audio player found');
+        }
+        logger_1.logger.info(`🎵 [TTS] Player state before TTS: ${player.state.status}`);
+        this.clearDisconnectTimer(guildId);
+        try {
+            const resource = (0, voice_1.createAudioResource)(stream, {
+                inlineVolume: true,
+                metadata: {
+                    title: `TTS: ${text.substring(0, 30)}...`,
+                    guildId: guildId,
+                    type: 'tts'
+                }
+            });
+            logger_1.logger.info(`📦 [TTS] Audio resource created successfully`);
+            resource.playStream.on('error', (error) => {
+                logger_1.logger.error(`🚨 [TTS STREAM ERROR] Guild ${guildId}:`, error);
+                player.stop(true);
+            });
+            logger_1.logger.info(`▶️ [TTS] Sending TTS audio to player...`);
+            player.play(resource);
+            logger_1.logger.info(`✅ [TTS] Successfully started TTS playback in guild ${guildId}`);
+            this.logConnectionStatus();
+        }
+        catch (error) {
+            logger_1.logger.error(`❌ [TTS] Failed to play TTS audio:`, error);
+            try {
+                stream.destroy();
+                logger_1.logger.info(`🧹 [TTS] Cleaned up failed TTS stream`);
+            }
+            catch (cleanupError) {
+                logger_1.logger.error(`❌ [TTS] Failed to cleanup TTS stream:`, cleanupError);
+            }
+            throw error;
+        }
     }
     getVoiceChannel(guildId) {
-        logger_1.logger.info(`[VoiceManager.getVoiceChannel] Called with guildId: ${guildId}, type: ${typeof guildId}`);
-        logger_1.logger.info(`[VoiceManager.getVoiceChannel] voiceChannels Map keys: ${Array.from(this.voiceChannels.keys()).join(', ')}`);
-        return this.voiceChannels.get(guildId) || null;
+        const channel = this.voiceChannels.get(guildId);
+        if (channel) {
+            logger_1.logger.info(`📍 [GET_CHANNEL] Found voice channel for guild ${guildId}: ${channel.name}`);
+        }
+        else {
+            logger_1.logger.warn(`⚠️ [GET_CHANNEL] No voice channel found for guild ${guildId}`);
+            logger_1.logger.warn(`Available channels: ${Array.from(this.voiceChannels.keys()).join(', ')}`);
+        }
+        return channel || null;
     }
     startDisconnectTimer(guildId) {
         this.clearDisconnectTimer(guildId);
-        logger_1.logger.info(`Starting disconnect timer for guild ${guildId} - will disconnect in ${this.idleTimeoutMs / 1000} seconds`);
+        const timeoutSeconds = this.idleTimeoutMs / 1000;
+        const timeoutMinutes = timeoutSeconds / 60;
+        logger_1.logger.info(`⏱️ [TIMER] Starting disconnect timer for guild ${guildId}`);
+        logger_1.logger.info(`⏰ [TIMER] Will auto-disconnect in ${timeoutSeconds}s (${timeoutMinutes}m) if idle`);
         const timer = setTimeout(() => {
-            logger_1.logger.info(`Auto-disconnecting from guild ${guildId} due to inactivity (timeout reached: ${this.idleTimeoutMs}ms)`);
+            const channel = this.voiceChannels.get(guildId);
+            logger_1.logger.info(`⏰ [TIMER] Disconnect timer expired for guild ${guildId}`);
+            logger_1.logger.info(`🔌 [TIMER] Auto-disconnecting due to ${timeoutMinutes} minutes of inactivity`);
+            if (channel) {
+                logger_1.logger.info(`👋 [TIMER] Leaving channel ${channel.name} in guild ${guildId}`);
+            }
             this.leave(guildId);
         }, this.idleTimeoutMs);
         this.disconnectTimers.set(guildId, timer);
+        logger_1.logger.info(`✅ [TIMER] Timer set for guild ${guildId}`);
     }
     clearDisconnectTimer(guildId) {
         const timer = this.disconnectTimers.get(guildId);
         if (timer) {
-            logger_1.logger.info(`Clearing disconnect timer for guild ${guildId}`);
+            logger_1.logger.info(`🛑 [TIMER] Clearing disconnect timer for guild ${guildId} (activity detected)`);
             clearTimeout(timer);
             this.disconnectTimers.delete(guildId);
         }
+    }
+    getGuildStatus(guildId) {
+        const connection = this.connections.get(guildId);
+        const player = this.players.get(guildId);
+        const channel = this.voiceChannels.get(guildId);
+        const track = this.currentTracks.get(guildId);
+        const connectionState = this.connectionStates.get(guildId);
+        const hasTimer = this.disconnectTimers.has(guildId);
+        const status = {
+            guildId,
+            connection: {
+                exists: !!connection,
+                state: connectionState || 'none',
+                ping: connection?.ping || null
+            },
+            player: {
+                exists: !!player,
+                state: player?.state.status || 'none',
+                canPlay: player?.state.status === voice_1.AudioPlayerStatus.Idle || player?.state.status === voice_1.AudioPlayerStatus.Playing
+            },
+            channel: {
+                exists: !!channel,
+                name: channel?.name || null,
+                members: channel?.members.size || 0
+            },
+            currentTrack: track ? {
+                title: track.title,
+                duration: track.duration
+            } : null,
+            hasDisconnectTimer: hasTimer
+        };
+        logger_1.logger.info(`📊 [STATUS] Guild ${guildId} full status:`, JSON.stringify(status, null, 2));
+        return status;
+    }
+    async checkConnectionHealth(guildId) {
+        logger_1.logger.info(`🏥 [HEALTH] Checking connection health for guild ${guildId}`);
+        const connection = this.connections.get(guildId);
+        const player = this.players.get(guildId);
+        const state = this.connectionStates.get(guildId);
+        if (!connection) {
+            logger_1.logger.warn(`❌ [HEALTH] No connection found for guild ${guildId}`);
+            return false;
+        }
+        if (!player) {
+            logger_1.logger.warn(`❌ [HEALTH] No player found for guild ${guildId}`);
+            return false;
+        }
+        const isHealthy = state === 'ready' &&
+            connection.state.status === voice_1.VoiceConnectionStatus.Ready &&
+            (player.state.status === voice_1.AudioPlayerStatus.Idle ||
+                player.state.status === voice_1.AudioPlayerStatus.Playing ||
+                player.state.status === voice_1.AudioPlayerStatus.Buffering);
+        logger_1.logger.info(`💚 [HEALTH] Guild ${guildId} health check: ${isHealthy ? 'HEALTHY' : 'UNHEALTHY'}`);
+        logger_1.logger.info(`📋 [HEALTH] Details - Connection: ${connection.state.status}, Player: ${player.state.status}, State: ${state}`);
+        return isHealthy;
     }
 }
 exports.VoiceManager = VoiceManager;

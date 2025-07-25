@@ -149,6 +149,8 @@ class VoiceCommandHandler extends events_1.EventEmitter {
     async processCommandWithWhisper(segment) {
         try {
             logger_1.logger.info(`[VoiceCommandHandler] 💰 Processing command with OpenAI Whisper (this costs money!)`);
+            const costStatsBefore = this.speechRecognition.getCostStats();
+            logger_1.logger.info(`[VoiceCommandHandler] 💰 Current session cost before processing: $${costStatsBefore.estimatedCost.toFixed(4)}`);
             const recognitionResult = await this.processSpeechRecognition(segment);
             if (!recognitionResult.text || recognitionResult.confidence < 0.5) {
                 logger_1.logger.warn(`[VoiceCommandHandler] Low confidence speech recognition: "${recognitionResult.text}" (${recognitionResult.confidence})`);

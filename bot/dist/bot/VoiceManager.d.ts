@@ -20,8 +20,11 @@ export declare class VoiceManager extends EventEmitter {
     skip(guildId: string): void;
     stop(): void;
     isPlaying(guildId: string): boolean;
+    playTTS(stream: any, guildId: string, text: string): Promise<void>;
     private getVoiceChannel;
     private startDisconnectTimer;
     private clearDisconnectTimer;
+    getGuildStatus(guildId: string): any;
+    checkConnectionHealth(guildId: string): Promise<boolean>;
 }
 //# sourceMappingURL=VoiceManager.d.ts.map

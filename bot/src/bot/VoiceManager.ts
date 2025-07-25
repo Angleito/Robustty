@@ -341,8 +341,8 @@ export class VoiceManager extends EventEmitter {
     } catch (error) {
       logger.error(`❌ [PLAY] Failed to create audio resource for "${track.title}":`, error);
       logger.error(`Resource creation error details: ${JSON.stringify({
-        message: error.message,
-        stack: error.stack
+        message: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined
       })}`);
       
       try {
@@ -471,7 +471,7 @@ export class VoiceManager extends EventEmitter {
       logger.warn(`Available channels: ${Array.from(this.voiceChannels.keys()).join(', ')}`);
     }
     
-    return channel;
+    return channel || null;
   }
 
   private startDisconnectTimer(guildId: string) {
