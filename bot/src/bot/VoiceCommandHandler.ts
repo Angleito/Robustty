@@ -205,6 +205,10 @@ export class VoiceCommandHandler extends EventEmitter {
     try {
       logger.info(`[VoiceCommandHandler] 💰 Processing command with OpenAI Whisper (this costs money!)`);
       
+      // Log current cost stats before processing
+      const costStatsBefore = this.speechRecognition.getCostStats();
+      logger.info(`[VoiceCommandHandler] 💰 Current session cost before processing: $${costStatsBefore.estimatedCost.toFixed(4)}`);
+      
       // Step 2: Process speech recognition with Whisper API
       const recognitionResult = await this.processSpeechRecognition(segment);
       

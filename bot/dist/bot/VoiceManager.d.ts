@@ -10,7 +10,10 @@ export declare class VoiceManager extends EventEmitter {
     private playbackStrategy;
     private disconnectTimers;
     private voiceChannels;
+    private idleTimeoutMs;
+    private connectionStates;
     constructor(playbackStrategy: PlaybackStrategyManager);
+    private logConnectionStatus;
     join(channel: VoiceChannel): Promise<VoiceConnection>;
     leave(guildId: string): Promise<void>;
     play(track: Track, guildId: string): Promise<void>;

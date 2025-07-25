@@ -39,6 +39,11 @@ export declare class VoiceCommandHandler extends EventEmitter {
         estimatedCost: number;
         averageCostPerRequest: number;
         lastRequestTime: number;
+        successfulTranscriptions: number;
+        failedTranscriptions: number;
+        successRate: number;
+        averageResponseTimeMs: number;
+        sessionDurationMinutes: number;
     };
     logCostSummary(): void;
     resetCostTracking(): void;

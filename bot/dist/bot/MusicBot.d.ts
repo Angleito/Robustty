@@ -62,6 +62,17 @@ export declare class MusicBot {
         estimatedCost: number;
         averageCostPerRequest: number;
         lastRequestTime: number;
+        successfulTranscriptions: number;
+        failedTranscriptions: number;
+        successRate: number;
+        averageResponseTimeMs: number;
+        sessionDurationMinutes: number;
+    } | {
+        totalRequests: number;
+        totalMinutesProcessed: number;
+        estimatedCost: number;
+        averageCostPerRequest: number;
+        lastRequestTime: number;
     };
     logVoiceCostSummary(): void;
     resetVoiceCostTracking(): void;

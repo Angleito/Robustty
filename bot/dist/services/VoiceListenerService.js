@@ -17,7 +17,9 @@ class VoiceListenerService extends events_1.EventEmitter {
     async startListening(connection, channel) {
         const guildId = channel.guild.id;
         try {
-            logger_1.logger.info(`[VoiceListenerService] Starting voice listening for guild ${guildId}`);
+            logger_1.logger.info(`[VoiceListenerService] 🎯 Starting voice listening for guild ${guildId} in channel ${channel.name}`);
+            logger_1.logger.info(`[VoiceListenerService] Connection state: ${connection.state.status}`);
+            logger_1.logger.info(`[VoiceListenerService] Members in channel: ${channel.members.size}`);
             const receiver = {
                 connection,
                 channel,
@@ -28,18 +30,22 @@ class VoiceListenerService extends events_1.EventEmitter {
             this.receivers.set(guildId, receiver);
             const voiceReceiver = connection.receiver;
             voiceReceiver.speaking.on('start', (userId) => {
+                logger_1.logger.debug(`[VoiceListenerService] 🎤 Speaking START event for user ${userId}`);
                 this.handleSpeakingStart(guildId, userId);
             });
             voiceReceiver.speaking.on('end', (userId) => {
+                logger_1.logger.debug(`[VoiceListenerService] 🔇 Speaking END event for user ${userId}`);
                 this.handleSpeakingEnd(guildId, userId);
             });
             this.setupUserAudioStreams(guildId, voiceReceiver);
             this.startCleanupRoutine(guildId);
-            logger_1.logger.info(`[VoiceListenerService] Voice listening active for guild ${guildId}`);
+            logger_1.logger.info(`[VoiceListenerService] ✅ Voice listening ACTIVE for guild ${guildId}`);
+            logger_1.logger.info(`[VoiceListenerService] Registered receivers: ${this.receivers.size}`);
             this.emit('listeningStarted', { guildId, channelId: channel.id });
         }
         catch (error) {
-            logger_1.logger.error(`[VoiceListenerService] Failed to start listening in guild ${guildId}:`, error);
+            logger_1.logger.error(`[VoiceListenerService] ❌ Failed to start listening in guild ${guildId}:`, error);
+            logger_1.logger.error(`[VoiceListenerService] Stack trace:`, error instanceof Error ? error.stack : 'No stack');
             throw error;
         }
     }
@@ -54,14 +60,21 @@ class VoiceListenerService extends events_1.EventEmitter {
     }
     refreshUserStreams(guildId) {
         const receiver = this.receivers.get(guildId);
-        if (!receiver)
+        if (!receiver) {
+            logger_1.logger.warn(`[VoiceListenerService] No receiver found for guild ${guildId}`);
             return;
+        }
         const voiceReceiver = receiver.connection.receiver;
+        logger_1.logger.info(`[VoiceListenerService] Refreshing user streams for guild ${guildId}`);
+        logger_1.logger.info(`[VoiceListenerService] Channel members: ${receiver.channel.members.size}`);
         receiver.channel.members.forEach((member) => {
-            if (member.user.bot)
+            if (member.user.bot) {
+                logger_1.logger.debug(`[VoiceListenerService] Skipping bot user: ${member.user.tag}`);
                 return;
+            }
             const userId = member.user.id;
             if (!receiver.activeUsers.has(userId)) {
+                logger_1.logger.info(`[VoiceListenerService] 👤 Setting up audio stream for user: ${member.user.tag} (${userId})`);
                 receiver.activeUsers.set(userId, member.user);
                 receiver.audioBuffer.set(userId, []);
                 receiver.lastActivity.set(userId, Date.now());
@@ -72,22 +85,33 @@ class VoiceListenerService extends events_1.EventEmitter {
                     }
                 });
                 this.setupAudioStreamHandlers(guildId, userId, audioStream);
-                logger_1.logger.debug(`[VoiceListenerService] Started listening to user ${member.user.tag} in guild ${guildId}`);
+                logger_1.logger.info(`[VoiceListenerService] ✅ Started listening to user ${member.user.tag} in guild ${guildId}`);
+            }
+            else {
+                logger_1.logger.debug(`[VoiceListenerService] User ${member.user.tag} already has active stream`);
             }
         });
+        logger_1.logger.info(`[VoiceListenerService] Active users being monitored: ${receiver.activeUsers.size}`);
     }
     setupAudioStreamHandlers(guildId, userId, audioStream) {
         const receiver = this.receivers.get(guildId);
         if (!receiver)
             return;
+        let packetCount = 0;
         audioStream.on('data', (chunk) => {
+            packetCount++;
+            if (packetCount % 100 === 0) {
+                logger_1.logger.debug(`[VoiceListenerService] 📊 Received ${packetCount} audio packets from user ${userId}`);
+            }
             this.handleAudioData(guildId, userId, chunk);
         });
         audioStream.on('end', () => {
+            logger_1.logger.info(`[VoiceListenerService] 🎬 Audio stream ended for user ${userId} - Total packets: ${packetCount}`);
             this.processAudioBuffer(guildId, userId);
         });
         audioStream.on('error', (error) => {
-            logger_1.logger.error(`[VoiceListenerService] Audio stream error for user ${userId} in guild ${guildId}:`, error);
+            logger_1.logger.error(`[VoiceListenerService] ❌ Audio stream error for user ${userId} in guild ${guildId}:`, error);
+            logger_1.logger.error(`[VoiceListenerService] Error details:`, error.message);
         });
     }
     handleSpeakingStart(guildId, userId) {
@@ -114,13 +138,15 @@ class VoiceListenerService extends events_1.EventEmitter {
         if (!receiver)
             return;
         const userBuffer = receiver.audioBuffer.get(userId);
-        if (!userBuffer)
+        if (!userBuffer) {
+            logger_1.logger.warn(`[VoiceListenerService] No buffer found for user ${userId}`);
             return;
+        }
         userBuffer.push(chunk);
         receiver.lastActivity.set(userId, Date.now());
         const totalSize = userBuffer.reduce((sum, buf) => sum + buf.length, 0);
         if (totalSize > this.maxBufferSize) {
-            logger_1.logger.warn(`[VoiceListenerService] Buffer overflow for user ${userId}, processing early`);
+            logger_1.logger.warn(`[VoiceListenerService] ⚠️ Buffer overflow for user ${userId} (${totalSize} bytes), processing early`);
             this.processAudioBuffer(guildId, userId);
         }
     }
@@ -129,12 +155,17 @@ class VoiceListenerService extends events_1.EventEmitter {
         if (!receiver)
             return;
         const userBuffer = receiver.audioBuffer.get(userId);
-        if (!userBuffer || userBuffer.length === 0)
+        if (!userBuffer || userBuffer.length === 0) {
+            logger_1.logger.debug(`[VoiceListenerService] No audio buffer to process for user ${userId}`);
             return;
+        }
         try {
+            logger_1.logger.info(`[VoiceListenerService] 🎙️ Processing audio buffer for user ${userId} - Chunks: ${userBuffer.length}`);
             const combinedAudio = Buffer.concat(userBuffer);
+            logger_1.logger.info(`[VoiceListenerService] Combined audio size: ${combinedAudio.length} bytes`);
             receiver.audioBuffer.set(userId, []);
             if (combinedAudio.length < 1600) {
+                logger_1.logger.debug(`[VoiceListenerService] Audio too short (${combinedAudio.length} bytes), skipping`);
                 return;
             }
             const audioSegment = {
@@ -148,11 +179,14 @@ class VoiceListenerService extends events_1.EventEmitter {
                 timestamp: Date.now(),
                 isWakeWordDetected: false
             };
-            logger_1.logger.debug(`[VoiceListenerService] Processed audio segment: ${audioSegment.duration.toFixed(2)}s from user ${userId}`);
+            logger_1.logger.info(`[VoiceListenerService] 🎯 Created audio segment: ${audioSegment.id}`);
+            logger_1.logger.info(`[VoiceListenerService] Segment details - Duration: ${audioSegment.duration.toFixed(2)}s, Sample rate: ${audioSegment.sampleRate}Hz, Channels: ${audioSegment.channels}`);
             this.emit('audioSegment', audioSegment);
+            logger_1.logger.info(`[VoiceListenerService] ✅ Emitted audio segment for processing`);
         }
         catch (error) {
-            logger_1.logger.error(`[VoiceListenerService] Error processing audio buffer for user ${userId}:`, error);
+            logger_1.logger.error(`[VoiceListenerService] ❌ Error processing audio buffer for user ${userId}:`, error);
+            logger_1.logger.error(`[VoiceListenerService] Stack trace:`, error instanceof Error ? error.stack : 'No stack');
         }
     }
     async stopListening(guildId) {
@@ -174,7 +208,8 @@ class VoiceListenerService extends events_1.EventEmitter {
             sessionsToRemove.forEach(sessionId => {
                 this.sessions.delete(sessionId);
             });
-            logger_1.logger.info(`[VoiceListenerService] Voice listening stopped for guild ${guildId}`);
+            logger_1.logger.info(`[VoiceListenerService] ✅ Voice listening stopped for guild ${guildId}`);
+            logger_1.logger.info(`[VoiceListenerService] Cleaned up ${sessionsToRemove.length} sessions`);
             this.emit('listeningStopped', { guildId });
         }
         catch (error) {
@@ -256,7 +291,10 @@ class VoiceListenerService extends events_1.EventEmitter {
         });
     }
     isListening(guildId) {
-        return this.receivers.has(guildId);
+        const listening = this.receivers.has(guildId);
+        logger_1.logger.debug(`[VoiceListenerService] isListening check for guild ${guildId}: ${listening}`);
+        logger_1.logger.debug(`[VoiceListenerService] Active receivers: ${Array.from(this.receivers.keys()).join(', ')}`);
+        return listening;
     }
     getActiveGuilds() {
         return Array.from(this.receivers.keys());

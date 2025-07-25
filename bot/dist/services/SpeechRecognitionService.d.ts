@@ -17,6 +17,11 @@ export declare class SpeechRecognitionService {
         estimatedCost: number;
         averageCostPerRequest: number;
         lastRequestTime: number;
+        successfulTranscriptions: number;
+        failedTranscriptions: number;
+        successRate: number;
+        averageResponseTimeMs: number;
+        sessionDurationMinutes: number;
     };
     resetCostTracking(): void;
     logCostSummary(): void;
