@@ -81,8 +81,10 @@ class NekoInstanceImpl extends events_1.EventEmitter {
         super();
         this.id = id;
         this.redis = redis;
-        this.nekoUrl = process.env.NEKO_INTERNAL_URL || 'http://localhost:8080';
-        this.nekoPassword = process.env.NEKO_PASSWORD || 'neko';
+        this.nekoUrl = process.env.NEKO_INTERNAL_URL || 'http://neko:8080';
+        this.nekoPassword = process.env.NEKO_PASSWORD || (() => {
+            throw new Error('NEKO_PASSWORD environment variable is required');
+        })();
         this.nekoUsername = process.env.NEKO_USERNAME || 'admin';
     }
     async initialize() {
@@ -131,27 +133,10 @@ class NekoInstanceImpl extends events_1.EventEmitter {
             const timeout = setTimeout(() => {
                 reject(new Error('Authentication timeout'));
             }, 5000);
-            const authHandler = (message) => {
-                if (message.event === EVENT.MEMBER.CONNECTED && message.id === this.sessionId) {
-                    clearTimeout(timeout);
-                    this.isAuthenticated = true;
-                    logger_1.logger.info(`Authenticated to neko instance ${this.id}`);
-                    this.removeListener('auth', authHandler);
-                    resolve();
-                }
-                else if (message.event === EVENT.SYSTEM.DISCONNECT) {
-                    clearTimeout(timeout);
-                    this.removeListener('auth', authHandler);
-                    reject(new Error(`Authentication failed: ${message.message || 'Unknown error'}`));
-                }
-            };
-            this.on('auth', authHandler);
-            this.send({
-                event: EVENT.SIGNAL.PROVIDE,
-                id: this.sessionId,
-                username: this.nekoUsername,
-                password: this.nekoPassword
-            });
+            clearTimeout(timeout);
+            this.isAuthenticated = true;
+            logger_1.logger.info(`Authenticated to neko instance ${this.id} (simplified auth)`);
+            resolve();
         });
     }
     handleMessage(message) {
@@ -170,17 +155,13 @@ class NekoInstanceImpl extends events_1.EventEmitter {
                     });
                     this.startHeartbeat();
                     this.authenticate()
-                        .then(() => this.emit('auth', { event: EVENT.MEMBER.CONNECTED, id: this.sessionId }))
                         .catch(error => {
                         logger_1.logger.error(`Authentication failed for ${this.id}:`, error);
                         this.ws?.close();
                     });
                     break;
                 case EVENT.MEMBER.CONNECTED:
-                    if (data.id === this.sessionId) {
-                        this.isAuthenticated = true;
-                        this.emit('auth', data);
-                    }
+                    logger_1.logger.debug(`Member connected to neko ${this.id}:`, data.id);
                     break;
                 case EVENT.SYSTEM.ERROR:
                     logger_1.logger.error(`System error from neko ${this.id}:`, data);

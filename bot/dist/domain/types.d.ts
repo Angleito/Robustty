@@ -15,6 +15,15 @@ export interface YouTubeVideo {
     channel: string;
     description?: string;
 }
+export interface SearchSession {
+    sessionId: string;
+    userId: string;
+    guildId: string;
+    query: string;
+    results: YouTubeVideo[];
+    createdAt: number;
+    expiresAt: number;
+}
 export interface Queue {
     guildId: string;
     tracks: Track[];

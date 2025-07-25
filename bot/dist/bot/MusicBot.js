@@ -12,6 +12,7 @@ const PlaybackStrategyManager_1 = require("../services/PlaybackStrategyManager")
 const RedisClient_1 = require("../services/RedisClient");
 const ErrorHandler_1 = require("../services/ErrorHandler");
 const MonitoringService_1 = require("../services/MonitoringService");
+const SearchResultHandler_1 = require("../services/SearchResultHandler");
 class MusicBot {
     client;
     commandHandler;
@@ -23,6 +24,7 @@ class MusicBot {
     redis;
     errorHandler;
     monitoringService;
+    searchResultHandler;
     constructor() {
         this.client = new discord_js_1.Client({
             intents: [
@@ -37,6 +39,7 @@ class MusicBot {
         this.errorHandler = new ErrorHandler_1.ErrorHandler(this.redis);
         this.playbackStrategy = new PlaybackStrategyManager_1.PlaybackStrategyManager(this.redis);
         this.voiceManager = new VoiceManager_1.VoiceManager(this.playbackStrategy);
+        this.searchResultHandler = new SearchResultHandler_1.SearchResultHandler();
         this.commandHandler = new CommandHandler_1.CommandHandler(this);
         this.buttonHandler = new ButtonHandler_1.ButtonHandler(this);
         this.monitoringService = new MonitoringService_1.MonitoringService(this.client, this.redis);
@@ -70,25 +73,80 @@ class MusicBot {
         }
         const videos = await this.searchYouTube(query);
         if (videos.length === 0) {
-            await interaction.editReply('No results found!');
+            await interaction.editReply('No results found for your search!');
+            return;
+        }
+        const sessionId = await this.searchResultHandler.createSearchSession(interaction.user.id, interaction.guildId, query, videos);
+        const embed = this.searchResultHandler.createSearchEmbed(query, videos);
+        const buttons = this.searchResultHandler.createSelectionButtons(sessionId, videos.length);
+        await interaction.editReply({
+            embeds: [embed],
+            components: [buttons]
+        });
+    }
+    async playSelectedVideo(video, interaction) {
+        const member = interaction.guild?.members.cache.get(interaction.user.id);
+        const voiceChannel = member?.voice.channel;
+        if (!voiceChannel) {
+            await interaction.editReply('You need to be in a voice channel!');
             return;
         }
         const track = {
-            id: videos[0].id,
-            title: videos[0].title,
-            url: videos[0].url,
-            duration: videos[0].duration,
-            thumbnail: videos[0].thumbnail,
+            id: video.id,
+            title: video.title,
+            url: video.url,
+            duration: video.duration,
+            thumbnail: video.thumbnail,
             requestedBy: interaction.user.id
         };
         await this.addToQueue(track);
         if (!this.voiceManager.isPlaying(interaction.guildId)) {
-            logger_1.logger.info(`[MusicBot.play] Before join - guildId: ${interaction.guildId}, type: ${typeof interaction.guildId}`);
+            logger_1.logger.info(`[MusicBot.playSelectedVideo] Before join - guildId: ${interaction.guildId}, type: ${typeof interaction.guildId}`);
             await this.voiceManager.join(voiceChannel);
-            logger_1.logger.info(`[MusicBot.play] Before playNext - guildId: ${interaction.guildId}, type: ${typeof interaction.guildId}`);
+            logger_1.logger.info(`[MusicBot.playSelectedVideo] Before playNext - guildId: ${interaction.guildId}, type: ${typeof interaction.guildId}`);
             await this.playNext(interaction.guildId);
         }
-        await interaction.editReply(`Added to queue: **${track.title}**`);
+        await interaction.editReply({
+            content: `Added to queue: **${track.title}**`,
+            embeds: [],
+            components: []
+        });
+    }
+    async playSelectedVideoFromButton(video, guildId, userId) {
+        try {
+            const guild = this.client.guilds.cache.get(guildId);
+            if (!guild) {
+                return { success: false, message: 'Guild not found!' };
+            }
+            const member = guild.members.cache.get(userId);
+            if (!member) {
+                return { success: false, message: 'Member not found!' };
+            }
+            const voiceChannel = member.voice.channel;
+            if (!voiceChannel) {
+                return { success: false, message: 'You need to be in a voice channel!' };
+            }
+            const track = {
+                id: video.id,
+                title: video.title,
+                url: video.url,
+                duration: video.duration,
+                thumbnail: video.thumbnail,
+                requestedBy: userId
+            };
+            await this.addToQueue(track);
+            if (!this.voiceManager.isPlaying(guildId)) {
+                logger_1.logger.info(`[MusicBot.playSelectedVideoFromButton] Before join - guildId: ${guildId}`);
+                await this.voiceManager.join(voiceChannel);
+                logger_1.logger.info(`[MusicBot.playSelectedVideoFromButton] Before playNext - guildId: ${guildId}`);
+                await this.playNext(guildId);
+            }
+            return { success: true, message: `🎵 Added to queue: **${track.title}**` };
+        }
+        catch (error) {
+            logger_1.logger.error('Error playing selected video from button:', error);
+            return { success: false, message: 'An error occurred while adding the song to queue' };
+        }
     }
     async addToQueue(track) {
         await this.queueManager.add(track);
@@ -157,6 +215,9 @@ class MusicBot {
     }
     getErrorHandler() {
         return this.errorHandler;
+    }
+    getSearchResultHandler() {
+        return this.searchResultHandler;
     }
 }
 exports.MusicBot = MusicBot;

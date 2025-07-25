@@ -36,6 +36,12 @@ class ErrorHandler {
             case 'network':
                 await this.queueForRetry(video, 5000);
                 break;
+            case 'audio_player':
+                await this.handleAudioPlayerError(error, video);
+                break;
+            case 'stream':
+                await this.handleStreamError(error, video);
+                break;
             default:
                 await this.logUnknownError(error, video);
         }
@@ -43,6 +49,7 @@ class ErrorHandler {
     }
     classifyError(error) {
         const message = error?.message?.toLowerCase() || '';
+        const errorName = error?.name?.toLowerCase() || '';
         if (message.includes('429') || message.includes('rate limit')) {
             return 'rate_limit';
         }
@@ -52,8 +59,14 @@ class ErrorHandler {
         if (message.includes('neko') || message.includes('browser')) {
             return 'neko';
         }
-        if (message.includes('econnrefused') || message.includes('timeout')) {
+        if (message.includes('econnrefused') || message.includes('timeout') || message.includes('stream timeout')) {
             return 'network';
+        }
+        if (message.includes('aborted') || message.includes('audio player') || errorName.includes('error')) {
+            return 'audio_player';
+        }
+        if (message.includes('stream') || message.includes('resource')) {
+            return 'stream';
         }
         return 'unknown';
     }
@@ -104,6 +117,23 @@ class ErrorHandler {
         const instanceId = error.instanceId;
         if (instanceId) {
             await this.redis.set(`neko:restart:${instanceId}`, '1', 60);
+        }
+    }
+    async handleAudioPlayerError(error, video) {
+        logger_1.logger.error('Audio player error detected:', error);
+        if (error.message?.includes('aborted')) {
+            await this.redis.set(`video:force_neko:${video.id}`, '1', 300);
+            logger_1.logger.info(`Marked video ${video.id} for neko fallback due to player abort`);
+        }
+        await this.updateMetrics('audio_player_abort');
+    }
+    async handleStreamError(error, video) {
+        logger_1.logger.error('Stream error detected:', error);
+        if (error.message?.includes('timeout')) {
+            await this.queueForRetry(video, 10000);
+        }
+        else {
+            await this.redis.set(`video:force_neko:${video.id}`, '1', 300);
         }
     }
     async logUnknownError(error, video) {
