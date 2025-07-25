@@ -142,32 +142,28 @@ export class VoiceCommandHandler extends EventEmitter {
   }
 
   private async captureCommandAudio(wakeWordSegment: AudioSegment): Promise<void> {
-    const queueKey = `${wakeWordSegment.guildId}_${wakeWordSegment.userId}`;
-    
     // IMMEDIATE ACKNOWLEDGMENT: Play TTS response to acknowledge wake word detection
     logger.info(`[VoiceCommandHandler] 🎤 Playing acknowledgment for wake word detection...`);
     const acknowledgment = this.responseGenerator.generateAcknowledgment();
     await this.playTTSResponse(wakeWordSegment.guildId, acknowledgment);
     
-    // Set up a temporary listener for the command that follows "Kanye"
+    // Set up a listener for the command that follows "Kanye"
     logger.info(`[VoiceCommandHandler] 👂 Listening for command after wake word... (12 second timeout)`);
     
-    // Create a temporary command capture session with 12 second timeout
-    const commandCaptureTimeout = setTimeout(() => {
-      logger.warn(`[VoiceCommandHandler] Command capture timeout for user ${wakeWordSegment.userId} (12 seconds elapsed)`);
-    }, 12000); // 12 second timeout for command
-
-    // Store the session for command capture
-    const sessionKey = `command_capture_${wakeWordSegment.guildId}_${wakeWordSegment.userId}`;
-    
-    // Set up temporary event listener for the next audio segments
+    // Set up event listener for the next audio segments
     const commandAudioBuffer: Buffer[] = [];
     let commandStartTime = Date.now();
+    let commandCaptureTimeout: NodeJS.Timeout | null = null;
     
     const onNextAudio = async (nextSegment: AudioSegment) => {
       if (nextSegment.userId === wakeWordSegment.userId && 
           nextSegment.guildId === wakeWordSegment.guildId &&
           Date.now() - commandStartTime < 12000) { // Within 12 seconds
+        
+        // Reset timeout on new audio
+        if (commandCaptureTimeout) {
+          clearTimeout(commandCaptureTimeout);
+        }
         
         commandAudioBuffer.push(nextSegment.audioData);
         
@@ -176,7 +172,6 @@ export class VoiceCommandHandler extends EventEmitter {
           sum + (buffer.length / (48000 * 2 * 2)), 0);
         
         if (totalDuration >= 1.5) { // At least 1.5 seconds of command audio
-          clearTimeout(commandCaptureTimeout);
           this.voiceListener.removeListener('audioSegment', onNextAudio);
           
           // Combine all command audio
@@ -191,19 +186,29 @@ export class VoiceCommandHandler extends EventEmitter {
             timestamp: Date.now()
           };
           
-          // NOW process with expensive OpenAI API
+          // Process with OpenAI API and continue listening for more wake words
           await this.processCommandWithWhisper(commandSegment);
+          return;
         }
+        
+        // Set new timeout for command completion
+        commandCaptureTimeout = setTimeout(() => {
+          logger.warn(`[VoiceCommandHandler] Command capture timeout for user ${wakeWordSegment.userId} (12 seconds elapsed)`);
+          this.voiceListener.removeListener('audioSegment', onNextAudio);
+        }, 3000); // 3 second timeout after last audio segment
       }
     };
 
     // Listen for the next audio segments
     this.voiceListener.on('audioSegment', onNextAudio);
     
-    // Cleanup after timeout
+    // Initial timeout for command start
     setTimeout(() => {
-      this.voiceListener.removeListener('audioSegment', onNextAudio);
-    }, 13000); // 13 seconds to allow for the 12 second timeout + buffer
+      if (commandAudioBuffer.length === 0) {
+        logger.warn(`[VoiceCommandHandler] No command audio received within 12 seconds for user ${wakeWordSegment.userId}`);
+        this.voiceListener.removeListener('audioSegment', onNextAudio);
+      }
+    }, 12000);
   }
 
   private async processCommandWithWhisper(segment: AudioSegment): Promise<void> {
