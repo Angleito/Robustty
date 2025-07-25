@@ -143,10 +143,6 @@ class VoiceManager extends events_1.EventEmitter {
             thumbnail: track.thumbnail,
             channel: ''
         }, channel);
-        const timeoutMs = 30000;
-        const timeoutPromise = new Promise((_, reject) => {
-            setTimeout(() => reject(new Error('Stream timeout')), timeoutMs);
-        });
         try {
             const resource = (0, voice_1.createAudioResource)(playbackResult.stream, {
                 inlineVolume: true,

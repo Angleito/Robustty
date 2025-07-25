@@ -192,12 +192,6 @@ export class VoiceManager extends EventEmitter {
       channel
     );
 
-    // Add timeout to stream to prevent hanging
-    const timeoutMs = 30000; // 30 seconds
-    const timeoutPromise = new Promise((_, reject) => {
-      setTimeout(() => reject(new Error('Stream timeout')), timeoutMs);
-    });
-
     try {
       const resource = createAudioResource(playbackResult.stream, {
         inlineVolume: true,
