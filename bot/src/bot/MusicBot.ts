@@ -18,7 +18,7 @@ export class MusicBot {
   private commandHandler: CommandHandler;
   private buttonHandler: ButtonHandler;
   private voiceManager: VoiceManager;
-  private voiceCommandHandler: VoiceCommandHandler;
+  private voiceCommandHandler: VoiceCommandHandler | null = null;
   private queueManager: QueueManager;
   private youtubeService: YouTubeService;
   private playbackStrategy: PlaybackStrategyManager;
@@ -43,13 +43,20 @@ export class MusicBot {
     this.errorHandler = new ErrorHandler(this.redis);
     this.playbackStrategy = new PlaybackStrategyManager(this.redis);
     this.voiceManager = new VoiceManager(this.playbackStrategy);
-    this.voiceCommandHandler = new VoiceCommandHandler();
     this.searchResultHandler = new SearchResultHandler();
     this.commandHandler = new CommandHandler(this);
     this.buttonHandler = new ButtonHandler(this);
     this.monitoringService = new MonitoringService(this.client, this.redis);
     
-    this.setupVoiceCommandHandling();
+    // Initialize voice commands only if enabled
+    const voiceEnabled = process.env.ENABLE_VOICE_COMMANDS === 'true';
+    if (voiceEnabled && process.env.OPENAI_API_KEY) {
+      this.voiceCommandHandler = new VoiceCommandHandler();
+      this.setupVoiceCommandHandling();
+      logger.info('[MusicBot] Voice commands enabled');
+    } else {
+      logger.info('[MusicBot] Voice commands disabled - Set ENABLE_VOICE_COMMANDS=true and provide OPENAI_API_KEY to enable');
+    }
   }
 
   async initialize() {
@@ -276,7 +283,13 @@ export class MusicBot {
     return this.voiceCommandHandler;
   }
 
+  isVoiceCommandsEnabled(): boolean {
+    return this.voiceCommandHandler !== null;
+  }
+
   private setupVoiceCommandHandling(): void {
+    if (!this.voiceCommandHandler) return;
+    
     this.voiceCommandHandler.on('voiceCommand', async (voiceCommand: VoiceCommand) => {
       await this.handleVoiceCommand(voiceCommand);
     });
@@ -367,7 +380,9 @@ export class MusicBot {
       if (!this.voiceManager.isPlaying(voiceCommand.guildId)) {
         // Start voice listening when we join the channel
         const connection = await this.voiceManager.join(voiceChannel);
-        await this.voiceCommandHandler.startListening(voiceChannel, connection);
+        if (this.voiceCommandHandler) {
+          await this.voiceCommandHandler.startListening(voiceChannel, connection);
+        }
         await this.playNext(voiceCommand.guildId);
       }
 
@@ -388,7 +403,9 @@ export class MusicBot {
 
   private async handleVoiceStopCommand(voiceCommand: VoiceCommand): Promise<void> {
     try {
-      await this.voiceCommandHandler.stopListening(voiceCommand.guildId);
+      if (this.voiceCommandHandler) {
+        await this.voiceCommandHandler.stopListening(voiceCommand.guildId);
+      }
       await this.stop(voiceCommand.guildId);
       logger.info(`[MusicBot] Voice command stopped playback in guild ${voiceCommand.guildId}`);
     } catch (error) {
@@ -417,6 +434,10 @@ export class MusicBot {
 
   // Method to enable voice commands in a voice channel
   async enableVoiceCommands(voiceChannel: VoiceChannel): Promise<void> {
+    if (!this.voiceCommandHandler) {
+      throw new Error('Voice commands are not enabled. Set ENABLE_VOICE_COMMANDS=true and provide OPENAI_API_KEY.');
+    }
+    
     try {
       if (!this.voiceManager.isPlaying(voiceChannel.guild.id)) {
         const connection = await this.voiceManager.join(voiceChannel);
@@ -431,6 +452,11 @@ export class MusicBot {
 
   // Method to disable voice commands in a guild
   async disableVoiceCommands(guildId: string): Promise<void> {
+    if (!this.voiceCommandHandler) {
+      logger.warn('[MusicBot] Voice commands are not enabled, nothing to disable');
+      return;
+    }
+    
     try {
       await this.voiceCommandHandler.stopListening(guildId);
       logger.info(`[MusicBot] Voice commands disabled for guild ${guildId}`);
@@ -441,23 +467,51 @@ export class MusicBot {
 
   // Check if voice commands are active in a guild
   isVoiceCommandsActive(guildId: string): boolean {
+    if (!this.voiceCommandHandler) return false;
     return this.voiceCommandHandler.isListening(guildId);
   }
 
   // Cost monitoring methods for voice commands
   getVoiceCostStats() {
+    if (!this.voiceCommandHandler) {
+      return {
+        totalRequests: 0,
+        totalMinutesProcessed: 0,
+        estimatedCost: 0,
+        averageCostPerRequest: 0,
+        lastRequestTime: 0
+      };
+    }
     return this.voiceCommandHandler.getCostStats();
   }
 
   logVoiceCostSummary(): void {
+    if (!this.voiceCommandHandler) {
+      logger.info('[MusicBot] Voice commands not enabled - no costs to report');
+      return;
+    }
     this.voiceCommandHandler.logCostSummary();
   }
 
   resetVoiceCostTracking(): void {
+    if (!this.voiceCommandHandler) return;
     this.voiceCommandHandler.resetCostTracking();
   }
 
   async getVoiceHealthCheck() {
+    if (!this.voiceCommandHandler) {
+      return {
+        status: 'disabled',
+        message: 'Voice commands not enabled',
+        services: {
+          voiceListener: false,
+          wakeWordDetection: false,
+          speechRecognition: false
+        },
+        stats: {},
+        costOptimization: {}
+      };
+    }
     return this.voiceCommandHandler.healthCheck();
   }
 }

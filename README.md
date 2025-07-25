@@ -11,7 +11,8 @@ A robust Discord music bot featuring YouTube playback, voice commands, advanced 
 - Queue management with pagination and loop modes
 - Real-time playback controls (play/pause/skip/stop/shuffle)
 
-### 🎙️ Voice Commands (COST-OPTIMIZED)
+### 🎙️ Voice Commands (Optional Feature - Disabled by Default)
+- **Opt-in feature**: Set `ENABLE_VOICE_COMMANDS=true` and provide `OPENAI_API_KEY` to enable
 - **Two-stage processing**: Local wake word detection → Whisper API only when "Kanye" detected
 - **Cost tracking**: Real-time monitoring of OpenAI API usage and costs
 - **Intelligent filtering**: Multiple early-exit conditions to minimize processing
@@ -124,8 +125,9 @@ NEKO_PASSWORD=your_neko_password
 
 **Optional Configuration:**
 ```bash
-# Voice Commands (requires OpenAI API)
-OPENAI_API_KEY=your_openai_api_key
+# Voice Commands (disabled by default)
+ENABLE_VOICE_COMMANDS=false  # Set to true to enable voice commands
+OPENAI_API_KEY=your_openai_api_key  # Required only if voice commands are enabled
 
 # Admin Configuration (optional)
 ADMIN_ROLE_ID=your_admin_role_id
@@ -264,10 +266,15 @@ The bot includes enterprise-grade monitoring and analytics:
 
 **Voice commands not working:**
 ```bash
-# Ensure OPENAI_API_KEY is configured
-# Check microphone permissions in Discord
-# Verify the wake word "Kanye" is being detected
-# Monitor voice processing logs
+# First, ensure voice commands are enabled:
+# - Set ENABLE_VOICE_COMMANDS=true in your .env file
+# - Provide a valid OPENAI_API_KEY in your .env file
+# - Restart the bot after configuration changes
+
+# If enabled but still not working:
+# - Check microphone permissions in Discord
+# - Verify the wake word "Kanye" is being detected
+# - Monitor voice processing logs
 ```
 
 **Redis connection issues:**

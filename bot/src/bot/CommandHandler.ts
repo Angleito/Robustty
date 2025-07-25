@@ -16,7 +16,7 @@ export class CommandHandler {
   }
 
   private buildCommands() {
-    this.commands = [
+    const baseCommands = [
       new SlashCommandBuilder()
         .setName('play')
         .setDescription('Play a song')
@@ -41,16 +41,24 @@ export class CommandHandler {
       
       new SlashCommandBuilder()
         .setName('nowplaying')
-        .setDescription('Show the currently playing song'),
-      
-      new SlashCommandBuilder()
-        .setName('voice')
-        .setDescription('Enable voice commands in this voice channel'),
-      
-      new SlashCommandBuilder()
-        .setName('novoice')
-        .setDescription('Disable voice commands in this server'),
-      
+        .setDescription('Show the currently playing song')
+    ];
+
+    // Only add voice commands if voice feature is enabled
+    if (this.bot.isVoiceCommandsEnabled()) {
+      baseCommands.push(
+        new SlashCommandBuilder()
+          .setName('voice')
+          .setDescription('Enable voice commands in this voice channel'),
+        
+        new SlashCommandBuilder()
+          .setName('novoice')
+          .setDescription('Disable voice commands in this server')
+      );
+    }
+
+    this.commands = [
+      ...baseCommands,
       ...this.adminHandler.getCommands()
     ];
   }
@@ -186,6 +194,11 @@ export class CommandHandler {
   }
 
   private async handleVoiceCommand(interaction: CommandInteraction): Promise<void> {
+    if (!this.bot.isVoiceCommandsEnabled()) {
+      await interaction.editReply('Voice commands are not enabled on this bot. Contact the bot administrator to enable this feature.');
+      return;
+    }
+
     if (!interaction.guild) {
       await interaction.editReply('This command can only be used in a server!');
       return;
@@ -229,6 +242,11 @@ export class CommandHandler {
   }
 
   private async handleNoVoiceCommand(interaction: CommandInteraction): Promise<void> {
+    if (!this.bot.isVoiceCommandsEnabled()) {
+      await interaction.editReply('Voice commands are not enabled on this bot.');
+      return;
+    }
+
     if (!interaction.guildId) {
       await interaction.editReply('This command can only be used in a server!');
       return;
